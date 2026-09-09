@@ -61,13 +61,15 @@ there along a path around obstacles, left-click on a Storm Geyser sets it
 harvesting crystals to the Temple, left-click on a stunned enemy priest sends
 the selected golem to capture him, and left-click on your altar while he is
 carried sacrifices him for Knowledge. The window title shows the Storm Power
-reserve; drops cost their type's price. Right-click acts with the current tool:
+reserve; drops cost their type's price and stand as translucent shells
+until a stream of Storm Power from your Temple, Workshop or Outpost has
+built them, which needs connected ground. Right-click acts with the current tool:
 `Q`, `W`, `A`, `S` pick one of the four bridge pieces on offer (`R` rotates
 it), `1` to `6` drop a sun cannon, archer, battery, factory, tree or wind
 generator (the last needs Knowledge from a sacrifice) and `7` an Outpost
 for claiming the neutral island, `U`
 places a golem and `I` a balloon, which flies anywhere. `Delete` destroys the bridge cell under the cursor, `C`
-cracks it, `H` hardens it, `V` salvages your structure under the cursor; unsupported bridges crack and crumble, taking
+cracks it, `H` hardens it, `V` salvages your structure under the cursor, `G` upgrades the Workshop under it; unsupported bridges crack and crumble, taking
 whatever stands on them. Drops follow the rules in `docs/RULES.md`, including Energy: the rings
 around the Temple and Generators show where units can be placed. Arrow
 keys or WASD pan the camera and `-` / `=` zoom.

@@ -17,9 +17,10 @@ pub struct TerrainTile {
     pub platform: bool,
 }
 
-/// Marks a structure sprite so the layer can be rebuilt.
+/// Marks a structure sprite so the layer can be rebuilt; carries the
+/// structure's index so its look can follow the build.
 #[derive(Component)]
-pub struct StructureSprite;
+pub struct StructureSprite(pub usize);
 
 use crate::sprites::{self, FrameInfo};
 
@@ -200,13 +201,13 @@ pub fn spawn_structures(
     layouts: &mut Assets<TextureAtlasLayout>,
     world: &World,
 ) {
-    for st in &world.structures {
+    for (i, st) in world.structures.iter().enumerate() {
         let Some(def) = install.type_def(&st.kind) else { continue };
         let frame = def.frames.iter().position(|f| f.has_flag("default")).unwrap_or(0);
         let Some(shape) = lib.get_or_load(install, palette, &st.kind, images, layouts) else { continue };
         let z = Z_STRUCTURE + st.cell.y as f32 * 0.01;
         let e = spawn_frame(commands, shape, frame, cell_to_world(st.cell, &world.cfg.grid), z);
-        commands.entity(e).insert(StructureSprite);
+        commands.entity(e).insert(StructureSprite(i));
     }
 }
 

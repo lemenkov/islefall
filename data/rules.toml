@@ -43,8 +43,11 @@ workshop = ["factory"]
 energy_source_classes = ["Source of Energy"]
 
 [production]
-# Production slots per Workshop (the manual: two for a Level One Workshop).
-workshop_slots = 2
+# Production slots per Workshop level (the manual: two, three and four for
+# Levels One to Three); a Workshop may be upgraded once per further entry.
+workshop_slots = [2, 3, 4]
+# An upgrade costs this share of the Workshop's own price (guess).
+upgrade_cost_percent = 100
 # Types any Temple provides without a Workshop (the manual: bridges and Golems).
 temple_types = ["sunwalker"]
 # Outposts: claim a neutral island, ward it, and take in Storm Crystals.
@@ -95,8 +98,19 @@ nugget_power = 200
 work_seconds = 1.0
 # Share of the cost refunded when a healthy structure is salvaged (manual: 25%).
 salvage_refund_percent = 25
+# Share of an enemy's cost awarded to whoever destroys it (manual: 25%).
+kill_reward_percent = 25
 # Type whose `cost` is a geyser's crystal stock; geysers themselves are free.
 geyser_stock_from_cost = true
+
+# Once placed in play, a structure is built by a stream of Storm Power from
+# an own Temple, Workshop or Outpost reached over connected ground; until
+# the stream arrives it stands as a shell and does nothing. Build time is
+# `construction_seconds` in scripts/rules.rhai from the type's cost and
+# `constructionRate`, scaled by this many Power per second per rate unit
+# (guess: a 400-cost Sun Cannon at rate 10 stands in 8 seconds).
+[construction]
+power_per_rate = 5.0
 
 [combat]
 # Cells around an exploding structure that take damage and bridge shock (guess).
@@ -177,6 +191,7 @@ max_per_frame = 4
 [sounds.events]
 fired = { property = "fireSound", file = "fireCrossbow.wav" }
 hit = { property = "impactSound", file = "impact.wav" }
+placed = { file = "apStart.wav" }
 built = { property = "buildDoneSound", file = "buildDone.wav" }
 destroyed = { file = "explosion.wav" }
 salvaged = { file = "dissolve.wav" }
@@ -205,8 +220,10 @@ db_per_halving = 6.0
 edge_db = -9.0
 # Most object loops playing at once, nearest the centre first.
 max_loops = 8
-# Type property naming the loop an object plays while it stands or flies.
+# Type property naming the loop an object plays while it stands or flies,
+# and the loop a structure plays while its stream builds it.
 loop_property = "activeSound"
+building_loop = "apBuilding.wav"
 
 # A bed that never stops, and sky noises at random intervals (seconds,
 # least and most); both play at their base gain wherever the camera is.

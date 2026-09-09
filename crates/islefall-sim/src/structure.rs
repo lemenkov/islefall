@@ -49,6 +49,12 @@ pub struct Structure {
     pub flyer: Option<usize>,
     /// Ticks until the base launches again.
     pub respawn: u32,
+    /// Ticks of stream still needed before the structure stands; 0 when built.
+    pub building: u32,
+    /// Ticks the whole build takes, for progress.
+    pub build_ticks: u32,
+    /// Workshop level, from one.
+    pub level: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +72,16 @@ pub struct Weapon {
 }
 
 impl Structure {
+    /// Whether the stream has finished building the structure.
+    pub fn complete(&self) -> bool {
+        self.building == 0
+    }
+
+    /// Build progress from 0 to 1.
+    pub fn progress(&self) -> f32 {
+        if self.build_ticks == 0 { 1.0 } else { 1.0 - self.building as f32 / self.build_ticks as f32 }
+    }
+
     pub fn new(kind: impl Into<String>, cell: Cell, foot_x: i32, foot_y: i32, walk: Walk) -> Structure {
         Structure {
             kind: kind.into(),
@@ -92,6 +108,9 @@ impl Structure {
             launches: None,
             flyer: None,
             respawn: 0,
+            building: 0,
+            build_ticks: 0,
+            level: 1,
         }
     }
 

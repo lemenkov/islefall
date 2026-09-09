@@ -23,6 +23,7 @@ pub struct Config {
     pub energy: Energy,
     pub air: Air,
     pub production: Production,
+    pub construction: Construction,
     pub ai: AiConfig,
     pub controls: Controls,
     pub sounds: Sounds,
@@ -81,6 +82,8 @@ pub struct Attenuation {
     pub edge_db: f32,
     pub max_loops: usize,
     pub loop_property: String,
+    #[serde(default)]
+    pub building_loop: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -108,6 +111,7 @@ pub struct SoundCue {
 pub struct SoundEvents {
     pub fired: SoundCue,
     pub hit: SoundCue,
+    pub placed: SoundCue,
     pub built: SoundCue,
     pub destroyed: SoundCue,
     pub salvaged: SoundCue,
@@ -129,6 +133,7 @@ impl SoundEvents {
         match what {
             EventKind::Fired => &self.fired,
             EventKind::Hit => &self.hit,
+            EventKind::Placed => &self.placed,
             EventKind::Built => &self.built,
             EventKind::Destroyed => &self.destroyed,
             EventKind::Salvaged => &self.salvaged,
@@ -170,9 +175,17 @@ pub struct Attacker {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Production {
-    pub workshop_slots: usize,
+    /// Slots per Workshop level, Level One first.
+    pub workshop_slots: Vec<usize>,
+    pub upgrade_cost_percent: i32,
     pub temple_types: Vec<String>,
     pub outpost_types: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Construction {
+    pub power_per_rate: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -237,6 +250,7 @@ pub struct Economy {
     pub nugget_power: i32,
     pub work_seconds: f64,
     pub salvage_refund_percent: i32,
+    pub kill_reward_percent: i32,
     pub geyser_stock_from_cost: bool,
 }
 
@@ -356,6 +370,9 @@ impl Config {
         }
         if !(0.0..=1.0).contains(&self.sounds.volume) {
             return bad("sounds.volume must be 0.0..1.0");
+        }
+        if self.production.workshop_slots.is_empty() || self.construction.power_per_rate <= 0.0 {
+            return bad("production.workshop_slots needs a level and construction.power_per_rate must be positive");
         }
         if self.sky.extent_tiles == 0 || self.sky.layers.iter().any(|l| !(0.0..=1.0).contains(&l.opacity)) {
             return bad("sky.extent_tiles must be positive and layer opacity 0.0..1.0");

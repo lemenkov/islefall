@@ -177,7 +177,7 @@ fn drift_sky(time: Res<Time>, cameras: Query<&Transform, (With<Camera2d>, Withou
 
 /// A looping object sound tied to a structure or unit.
 #[derive(Component)]
-struct ObjectLoop(LoopKey);
+struct ObjectLoop(LoopKey, String);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum LoopKey {
@@ -479,6 +479,7 @@ fn main() {
         (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
+    .add_systems(Update, tint_shells.after(sync_structures).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, (play_sounds.after(mouse_actions).after(bridge_keys), sync_loops, ambient, drift_sky.after(camera_keys)).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
@@ -784,7 +785,8 @@ fn sync_loops(
     // (key, name, position, distance from the centre)
     let mut wanted: Vec<(LoopKey, String, Vec2, f32)> = Vec::new();
     for s in &world.structures {
-        if let Some(name) = names(&s.kind) {
+        let name = if s.complete() { names(&s.kind) } else { a.building_loop.clone() };
+        if let Some(name) = name {
             let pos = cell_to_world(s.centre(), g);
             wanted.push((LoopKey::Structure(s.kind.clone(), s.cell), name, pos, view.edge(pos)));
         }
@@ -803,8 +805,9 @@ fn sync_loops(
     wanted.truncate(a.max_loops);
     let mut keep: HashMap<LoopKey, (String, Vec2)> = wanted.into_iter().map(|(k, n, p, _)| (k, (n, p))).collect();
     for (entity, l, sink) in existing.iter_mut() {
-        match keep.remove(&l.0) {
+        match keep.get(&l.0).filter(|(n, _)| n.eq_ignore_ascii_case(&l.1)).cloned() {
             Some((name, pos)) => {
+                keep.remove(&l.0);
                 let base_db = bank.get_or_load(&name, &mut sources).map(|(_, db)| db).unwrap_or(0.0);
                 if let (Some(gain), Some(mut sink)) = (gain_at(&view, pos, base_db, &data), sink) {
                     sink.set_volume(gain);
@@ -816,7 +819,7 @@ fn sync_loops(
     for (key, (name, pos)) in keep {
         let Some((handle, base_db)) = bank.get_or_load(&name, &mut sources) else { continue };
         let Some(gain) = gain_at(&view, pos, base_db, &data) else { continue };
-        commands.spawn((AudioPlayer::new(handle), PlaybackSettings::LOOP.with_volume(gain), ObjectLoop(key)));
+        commands.spawn((AudioPlayer::new(handle), PlaybackSettings::LOOP.with_volume(gain), ObjectLoop(key, name)));
     }
 }
 
@@ -1099,11 +1102,21 @@ fn bridge_keys(
 ) {
     let (crack, harden, destroy) = (keys.just_pressed(KeyCode::KeyC), keys.just_pressed(KeyCode::KeyH), keys.just_pressed(KeyCode::Delete));
     let salvage = keys.just_pressed(KeyCode::KeyV);
-    if !crack && !harden && !destroy && !salvage {
+    let upgrade = keys.just_pressed(KeyCode::KeyG);
+    if !crack && !harden && !destroy && !salvage && !upgrade {
         return;
     }
     let Some(cell) = cursor_cell(&windows, &cameras, data.grid()) else { return };
     let w = sim.world_mut();
+    if upgrade {
+        if let Some(i) = w.structures.iter().position(|s| s.owner == 0 && s.slots > 0 && s.covers(cell)) {
+            match w.upgrade_workshop(0, i) {
+                Ok(level) => info!("{} upgraded to level {level}: {} slots", w.structures[i].kind, w.structures[i].slots),
+                Err(e) => info!("cannot upgrade {}: {e}", w.structures[i].kind),
+            }
+        }
+        return;
+    }
     if salvage {
         if let Some(i) = w.structures.iter().position(|s| s.owner == 0 && s.covers(cell)) {
             let kind = w.structures[i].kind.clone();
@@ -1198,10 +1211,20 @@ fn overlays(mut commands: Commands, sim: Res<Sim>, data: Res<GameData>, existing
         ));
     };
     for s in &w.structures {
-        if s.max_hp > 0 && s.hp < s.max_hp {
-            let (x, y) = s.cell.top_left_px(g);
-            let width = (s.foot_x * g.cell_w) as f32;
-            let top = Vec2::new(x as f32 + g.cell_w as f32 - width / 2.0, -(y as f32 - ((s.foot_y - 1) * g.cell_h) as f32) + 4.0);
+        let (x, y) = s.cell.top_left_px(g);
+        let width = (s.foot_x * g.cell_w) as f32;
+        let top = Vec2::new(x as f32 + g.cell_w as f32 - width / 2.0, -(y as f32 - ((s.foot_y - 1) * g.cell_h) as f32) + 4.0);
+        if !s.complete() {
+            // Build progress in blue while the stream works.
+            let frac = s.progress();
+            commands.spawn((Sprite::from_color(Color::srgba(0.1, 0.1, 0.1, 0.8), Vec2::new(width, 3.0)), Transform::from_translation(top.extend(60.0)), Overlay));
+            let wdt = (width - 1.0) * frac.clamp(0.0, 1.0);
+            commands.spawn((
+                Sprite::from_color(Color::srgb(0.3, 0.6, 1.0), Vec2::new(wdt.max(0.5), 2.0)),
+                Transform::from_translation(Vec3::new(top.x - (width - 1.0 - wdt) / 2.0, top.y, 60.1)),
+                Overlay,
+            ));
+        } else if s.max_hp > 0 && s.hp < s.max_hp {
             bar(&mut commands, top, width, s.hp as f32 / s.max_hp as f32);
         }
     }
@@ -1302,6 +1325,19 @@ fn sync_structures(
     }
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
     world::spawn_structures(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, w);
+}
+
+/// A shell under construction shows through until its stream has built it.
+fn tint_shells(sim: Res<Sim>, mut sprites: Query<(&StructureSprite, &mut Sprite)>) {
+    let w = sim.world();
+    for (s, mut sprite) in &mut sprites {
+        let Some(st) = w.structures.get(s.0) else { continue };
+        let alpha = if st.complete() { 1.0 } else { 0.3 + 0.7 * st.progress() };
+        let wanted = Color::srgba(1.0, 1.0, 1.0, alpha);
+        if sprite.color != wanted {
+            sprite.color = wanted;
+        }
+    }
 }
 
 /// Rebuild platform terrain whenever buildings create new ground.

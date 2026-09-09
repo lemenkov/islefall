@@ -118,6 +118,8 @@ pub enum EventKind {
     UnitLost,
     /// A base sent an aerial attacker up; `kind` is the attacker.
     Launched,
+    /// A structure was placed and waits for its stream; `Built` follows.
+    Placed,
     /// A priest's ground fell away and he floats.
     Floating,
 }
@@ -691,7 +693,7 @@ impl World {
         let mut all = 0u8;
         for s in &self.structures {
             let Some(t) = s.produces else { continue };
-            if s.owner != owner {
+            if s.owner != owner || !s.complete() {
                 continue;
             }
             let (sx, sy) = s.centre().centre_px(g);
@@ -778,7 +780,7 @@ impl World {
         s.produces = rules.produces;
         s.theme = rules.theme;
         if rules.is_workshop {
-            s.slots = self.cfg.production.workshop_slots;
+            s.slots = self.cfg.production.workshop_slots[0];
         }
         // Rules built without the hook (tests, plain types) shoot at the ground.
         let a = rules.air_attack.unwrap_or(AirAttack { air_range: 0, air_damage: 0, ground: true });
@@ -814,6 +816,13 @@ impl World {
         }
         let centre = s.centre();
         let claims = s.is_outpost;
+        // In play, a stream must build the structure; the map's layout stands at once.
+        let build_ticks = if self.energy_enforced && !rules.is_geyser && rules.build_seconds > 0.0 { self.cfg.ticks(rules.build_seconds) } else { 0 };
+        if build_ticks > 0 {
+            s.building = build_ticks;
+            s.build_ticks = build_ticks;
+            s.hp = 1.max(s.max_hp.min(1));
+        }
         self.structures.push(s);
         self.structure_version += 1;
         if claims {
@@ -822,7 +831,11 @@ impl World {
                 self.island_owners[i] = Some(owner);
             }
         }
-        self.emit(EventKind::Built, kind, centre, owner);
+        if build_ticks > 0 {
+            self.emit(EventKind::Placed, kind, centre, owner);
+        } else {
+            self.emit(EventKind::Built, kind, centre, owner);
+        }
         Ok(self.structures.len() - 1)
     }
 
@@ -889,7 +902,7 @@ impl World {
     /// has them in production, except Temple-provided types, which need a Temple.
     pub fn check_production(&self, owner: u8, kind: &str, rules: &TypeRules) -> Result<(), DropError> {
         if self.is_temple_type(kind) {
-            return if self.structures.iter().any(|s| s.is_temple && s.owner == owner) { Ok(()) } else { Err(DropError::NoTemple) };
+            return if self.structures.iter().any(|s| s.is_temple && s.complete() && s.owner == owner) { Ok(()) } else { Err(DropError::NoTemple) };
         }
         if rules.energy.is_none() {
             return Ok(());
@@ -916,7 +929,7 @@ impl World {
         }
         let mut able = false;
         for (i, s) in self.structures.iter().enumerate() {
-            if s.owner != owner || s.slots == 0 {
+            if s.owner != owner || s.slots == 0 || !s.complete() {
                 continue;
             }
             if !scripts.workshop_can_produce(s.theme, rules.theme, rules.level).unwrap_or(false) {
@@ -1170,6 +1183,110 @@ impl World {
         }
     }
 
+    /// Damage dealt by player `by`, who is rewarded for a kill (the manual:
+    /// a share of the victim's Storm Power value).
+    pub fn damage_structure_by(&mut self, index: usize, amount: i32, by: Option<u8>, scripts: &Scripts) {
+        let Some(s) = self.structures.get(index) else { return };
+        let (victim, cost) = (s.owner, s.cost);
+        let kills = s.max_hp > 0 && s.hp - amount <= 0;
+        self.damage_structure(index, amount);
+        if kills {
+            self.reward_kill(by, victim, cost, scripts);
+        }
+    }
+
+    pub fn damage_unit_by(&mut self, index: usize, amount: i32, by: Option<u8>, scripts: &Scripts) {
+        let Some(u) = self.units.get(index) else { return };
+        let (victim, alive) = (u.owner, u.alive);
+        let cost = self.types.get(&u.kind).map(|r| r.cost).unwrap_or(0);
+        self.damage_unit(index, amount);
+        if alive && !self.units[index].alive {
+            self.reward_kill(by, victim, cost, scripts);
+        }
+    }
+
+    fn reward_kill(&mut self, by: Option<u8>, victim: u8, cost: i32, scripts: &Scripts) {
+        let Some(k) = by.filter(|&k| k != victim) else { return };
+        let reward = scripts.kill_reward(cost as i64, self.cfg.economy.kill_reward_percent as i64).unwrap_or(0);
+        let slot = self.slot(k);
+        self.powers[slot] += reward;
+    }
+
+    /// Ground cells a player's streams reach: everything connected by land
+    /// or bridge to one of their complete Temples, Workshops or Outposts.
+    fn stream_reach(&self, owner: u8) -> BTreeSet<Cell> {
+        let mut reached = BTreeSet::new();
+        let mut frontier: Vec<Cell> = self
+            .structures
+            .iter()
+            .filter(|s| s.owner == owner && s.complete() && (s.is_temple || s.is_outpost || s.slots > 0))
+            .flat_map(|s| s.cells().collect::<Vec<_>>())
+            .filter(|&c| self.is_ground(c))
+            .collect();
+        reached.extend(frontier.iter().copied());
+        while let Some(c) = frontier.pop() {
+            for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+                let n = c.offset(dx, dy);
+                if self.is_ground(n) && reached.insert(n) {
+                    frontier.push(n);
+                }
+            }
+        }
+        reached
+    }
+
+    /// Streams build every placed shell they can reach; a shell the stream
+    /// cannot reach waits. Health grows with the build.
+    fn run_construction(&mut self) {
+        let owners: BTreeSet<u8> = self.structures.iter().filter(|s| !s.complete()).map(|s| s.owner).collect();
+        for owner in owners {
+            let reach = self.stream_reach(owner);
+            let mut done = Vec::new();
+            for i in 0..self.structures.len() {
+                let s = &self.structures[i];
+                if s.owner != owner || s.complete() || !s.cells().any(|c| reach.contains(&c)) {
+                    continue;
+                }
+                let s = &mut self.structures[i];
+                s.building -= 1;
+                let progress = s.progress();
+                s.hp = ((s.max_hp as f32 * progress).round() as i32).max(1).min(s.max_hp.max(1));
+                if s.complete() {
+                    s.hp = s.max_hp;
+                    done.push((s.kind.clone(), s.centre(), s.owner));
+                }
+            }
+            for (kind, at, owner) in done {
+                self.structure_version += 1;
+                self.emit(EventKind::Built, &kind, at, owner);
+            }
+        }
+    }
+
+    /// Raise a Workshop to its next level for a share of its price (the
+    /// manual: twice at most, to Levels Two and Three).
+    pub fn upgrade_workshop(&mut self, owner: u8, index: usize) -> Result<u8, DropError> {
+        let levels = self.cfg.production.workshop_slots.len();
+        let Some(s) = self.structures.get(index).filter(|s| s.owner == owner && s.slots > 0 && s.complete()) else {
+            return Err(DropError::NotOwnGround);
+        };
+        let next = s.level as usize;
+        if next >= levels {
+            return Err(DropError::NotInProduction);
+        }
+        let price = s.cost * self.cfg.production.upgrade_cost_percent / 100;
+        let slot = self.slot(owner);
+        if price > self.powers[slot] {
+            return Err(DropError::NotEnoughPower { cost: price, have: self.powers[slot] });
+        }
+        self.powers[slot] -= price;
+        let s = &mut self.structures[index];
+        s.level += 1;
+        s.slots = self.cfg.production.workshop_slots[next];
+        self.structure_version += 1;
+        Ok(s.level)
+    }
+
     pub fn damage_unit(&mut self, index: usize, amount: i32) {
         let Some(u) = self.units.get_mut(index) else { return };
         if !u.alive {
@@ -1196,7 +1313,7 @@ impl World {
         let mut shots: Vec<(usize, Target)> = Vec::new();
         for (i, s) in self.structures.iter().enumerate() {
             let Some(w) = s.weapon else { continue };
-            if s.cooldown > 0 {
+            if s.cooldown > 0 || !s.complete() {
                 continue;
             }
             let in_range = |c: Cell| s.distance_to(c) <= w.range && (!w.cardinal_only || s.in_line(c));
@@ -1243,10 +1360,10 @@ impl World {
                 self.emit(EventKind::Hit, &kind, at, owner);
             }
             match target {
-                Target::Structure(j) => self.damage_structure(j, w.damage),
+                Target::Structure(j) => self.damage_structure_by(j, w.damage, Some(owner), scripts),
                 Target::Unit(j) => {
                     let dmg = if self.units[j].is_air { w.air_damage } else { w.damage };
-                    self.damage_unit(j, dmg);
+                    self.damage_unit_by(j, dmg, Some(owner), scripts);
                 }
             }
         }
@@ -1457,6 +1574,7 @@ impl World {
         }
         self.run_priests();
         self.run_tasks();
+        self.run_construction();
         self.run_air_bases();
         self.run_flyers(scripts);
         self.last_shots.clear();
@@ -1472,7 +1590,7 @@ impl World {
         let respawn = self.cfg.ticks(self.cfg.air.respawn_seconds);
         for i in 0..self.structures.len() {
             let Some(kind) = self.structures[i].launches.clone() else { continue };
-            if self.structures[i].flyer.is_some_and(|f| self.units.get(f).is_some_and(|u| u.alive)) {
+            if !self.structures[i].complete() || self.structures[i].flyer.is_some_and(|f| self.units.get(f).is_some_and(|u| u.alive)) {
                 continue;
             }
             if self.structures[i].respawn > 0 {
@@ -1580,11 +1698,11 @@ impl World {
             let killed = match target {
                 Target::Structure(j) => {
                     let before = self.structure_version;
-                    self.damage_structure(j, strike);
+                    self.damage_structure_by(j, strike, Some(owner), scripts);
                     self.structure_version != before
                 }
                 Target::Unit(j) => {
-                    self.damage_unit(j, strike);
+                    self.damage_unit_by(j, strike, Some(owner), scripts);
                     !self.units[j].alive
                 }
             };
@@ -2043,6 +2161,64 @@ mod tests {
     }
 
     #[test]
+    fn streams_build_placed_structures_over_connected_ground() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 6, 4), 0);
+        w.push_island(IslandMap::rect(Cell::new(20, 0), 6, 4), 0);
+        w.powers[0] = 10_000;
+        let scripts = test_scripts();
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        w.energy_enforced = true;
+        let cannon = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 600, cost: 400, build_seconds: 2.0, range: 6, hp_per_sec: 10, damage_per_shot: 50, ..TypeRules::plain() };
+        let near = w.drop_structure("suncannon", &cannon, Cell::new(4, 1)).unwrap();
+        let far = w.drop_structure("suncannon", &cannon, Cell::new(22, 1)).unwrap();
+        assert!(!w.structures[near].complete() && w.structures[near].hp == 1, "a shell at first");
+        assert_eq!(w.take_events().iter().filter(|e| e.what == EventKind::Placed).count(), 2);
+        let ticks = w.cfg.ticks(2.0);
+        for _ in 0..ticks {
+            w.step(&scripts);
+        }
+        assert!(w.structures[near].complete() && w.structures[near].hp == 600, "the stream built it");
+        assert!(!w.structures[far].complete(), "no ground connects the far island to a source");
+        assert_eq!(w.take_events().iter().filter(|e| e.what == EventKind::Built).count(), 1);
+        for x in 6..20 {
+            w.place_bridge(Cell::new(x, 1));
+        }
+        for _ in 0..ticks {
+            w.step(&scripts);
+        }
+        assert!(w.structures[far].complete(), "bridged, the stream arrives");
+    }
+
+    #[test]
+    fn kills_reward_the_killer_and_workshops_upgrade() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 6, 6), 0);
+        w.push_island(IslandMap::rect(Cell::new(6, 0), 4, 4), 1);
+        w.powers = vec![1000; 4];
+        let scripts = test_scripts();
+        let cannon = TypeRules { foot_x: 1, foot_y: 1, range: 6, hp_per_sec: 10, delay_between_shots: 1.0, damage_per_shot: 1000, ..TypeRules::plain() };
+        let tree = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 100, cost: 400, ..TypeRules::plain() };
+        w.drop_structure("suncannon", &cannon, Cell::new(1, 1)).unwrap();
+        w.drop_structure_for(1, "treetwo", &tree, Cell::new(7, 1)).unwrap();
+        w.step(&scripts);
+        assert_eq!(w.powers[0], 1000 + 100, "a quarter of the tree's price");
+        w.cfg.production.workshop_slots = vec![2, 3, 4];
+        w.cfg.production.upgrade_cost_percent = 50;
+        let workshop = TypeRules { foot_x: 2, foot_y: 2, is_workshop: true, cost: 600, ..TypeRules::plain() };
+        let ws = w.drop_structure("sunfactory", &workshop, Cell::new(3, 3)).unwrap();
+        assert_eq!(w.structures[ws].slots, 2);
+        assert_eq!(w.upgrade_workshop(0, ws), Ok(2));
+        assert_eq!(w.structures[ws].slots, 3);
+        assert_eq!(w.powers[0], 1100 - 600 - 300);
+        w.powers[0] = 1000;
+        assert_eq!(w.upgrade_workshop(0, ws), Ok(3));
+        assert!(w.upgrade_workshop(0, ws).is_err(), "twice at most");
+        assert!(w.upgrade_workshop(1, ws).is_err(), "not the enemy's to upgrade");
+    }
+
+    #[test]
     fn balloons_fly_over_the_sky_and_walkers_do_not() {
         let mut w = World::new(test_config());
         w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 4), 0);
@@ -2141,7 +2317,7 @@ mod tests {
         let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, produces: Some(Theme::Sun), ..TypeRules::plain() };
         w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
         // A Workshop with room for everything this test builds.
-        w.cfg.production.workshop_slots = 4;
+        w.cfg.production.workshop_slots = vec![4];
         let workshop = TypeRules { foot_x: 2, foot_y: 2, is_workshop: true, theme: Theme::Wind, may_drop_on_rim: true, ..TypeRules::plain() };
         w.drop_structure("windfactory", &workshop, Cell::new(2, 10)).unwrap();
         let scripts = test_scripts();

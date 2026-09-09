@@ -115,3 +115,19 @@ fn sound_gain(edge, zoom, base_db, edge_db, reference_zoom, db_per_halving) {
     let halvings = if zoom > 0.0 && reference_zoom > zoom { (reference_zoom / zoom).ln() / 2.0.ln() } else { 0.0 };
     base_db + edge * edge_db - halvings * db_per_halving
 }
+
+// Seconds a stream takes to build a placed structure, from its cost, its
+// `constructionRate` and the rules' Power per second per rate unit.
+// Types without a rate (the manual's "in a moment") take a second.
+fn construction_seconds(cost, construction_rate, power_per_rate) {
+    if construction_rate <= 0.0 || power_per_rate <= 0.0 || cost <= 0 {
+        return 1.0;
+    }
+    cost / (construction_rate * power_per_rate)
+}
+
+// Storm Power awarded for destroying an enemy's unit or structure: a share
+// of its cost (the manual: 25%, adjustable by the Battlemaster).
+fn kill_reward(cost, percent) {
+    cost * percent / 100
+}

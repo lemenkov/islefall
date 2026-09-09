@@ -214,6 +214,28 @@ and are placed anywhere.
 Not yet modelled: the Cloud Floater's one-in-twenty hit chance and
 unit-versus-unit ground combat (no walker shoots).
 
+## Construction and the Stream of Power
+
+The manual: once a unit is placed it must receive Storm Power before it
+becomes active; a stream is emitted from the Workshop (or Temple, or
+Outpost) and zigzags to the unit, and only then does the unit respond to
+its surroundings. The stream is what prevents building on islands or
+bridges not connected to the Home Island. Destroying an enemy unit or
+building rewards a quarter of its Storm Power value (adjustable by the
+Battlemaster); attackers that cost nothing return nothing.
+
+Islefall: a structure placed in play (not by the map, and never a geyser)
+starts as a shell with one hit point. Each tick, every player's streams
+reach the ground connected by land or bridge to one of their complete
+Temples, Workshops or Outposts; a shell any of whose cells is reached
+gains a tick of build, its health rising with the progress, and stands
+once `construction_seconds` (from cost, `constructionRate` and
+`construction.power_per_rate`, a guess) have passed. A shell shoots
+nothing, produces no Energy, launches nothing, builds nothing and takes
+no crystals. The stream's path is not drawn. `kill_reward` grants the
+killer `economy.kill_reward_percent` of the victim's cost; a Golem costs
+nothing and rewards nothing.
+
 ## Workshops and production
 
 The manual: Workshops build the units of battle; a Level One Workshop has
@@ -222,8 +244,11 @@ you put its Knowledge into production at a Workshop; units must be aligned
 with the Workshop; a destroyed Workshop loses what it was producing; the
 Temple gives the power to create bridges and Golems.
 
+The manual: Level One Workshops have two production slots, Level Two
+three and Level Three four; a Workshop may be upgraded twice, for a cost.
 Islefall: types with the `factory` flag are Workshops with
-`production.workshop_slots` slots. Placing a Battle unit (any type that
+`production.workshop_slots[level]` slots; `upgrade_workshop` raises the
+level for `upgrade_cost_percent` of the Workshop's own price (a guess). Placing a Battle unit (any type that
 needs Energy) requires it to be in production at one of the owner's
 Workshops; Temple-provided types (`production.temple_types`, the Golem)
 need an own Temple instead. The `workshop_can_produce` hook decides

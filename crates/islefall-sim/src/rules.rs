@@ -101,6 +101,8 @@ pub struct TypeRules {
     pub is_workshop: bool,
     /// Claims and wards the island it stands on; takes in crystals.
     pub is_outpost: bool,
+    /// Seconds a stream takes to build the type once placed in play.
+    pub build_seconds: f64,
     /// An aerial attacker (`flyer` flag): launched by a base, never a Transport.
     pub is_flyer: bool,
     /// Flies: an attacker or an Aerial Transport; needs no ground and never falls.
@@ -157,6 +159,8 @@ impl TypeRules {
             def.get_i64("range").unwrap_or(0),
             hp_per_sec,
         )?;
+        let cost = def.get_i64("cost").unwrap_or(0).clamp(0, i32::MAX as i64);
+        let build_seconds = scripts.construction_seconds(cost, def.get_f64("constructionRate").unwrap_or(0.0), cfg.construction.power_per_rate)?.max(0.0);
         let air_damage_per_shot = match air_attack {
             Some(a) if a.air_damage > 0 => scripts.damage_per_shot(a.air_damage as i64, delay)?,
             _ => 0,
@@ -170,7 +174,7 @@ impl TypeRules {
             may_drop_on_rim: has(&f.may_drop_on_rim),
             is_unit,
             speed: def.get_f64("speed").unwrap_or(1.0),
-            cost: def.get_i64("cost").unwrap_or(0).clamp(0, i32::MAX as i64) as i32,
+            cost: cost as i32,
             is_geyser: has(&f.geyser),
             is_temple: has(&f.temple),
             max_hit_points: def.get_i64("maxHitPoints").unwrap_or(0).clamp(0, i32::MAX as i64) as i32,
@@ -188,6 +192,7 @@ impl TypeRules {
             tech_bit: def.get_i64("techBit").filter(|b| (0..=255).contains(b)).map(|b| b as u8),
             is_workshop: has(&f.workshop),
             is_outpost: cfg.production.outpost_types.iter().any(|t| t.eq_ignore_ascii_case(&def.name)),
+            build_seconds,
             is_flyer,
             is_air,
             air_attack,
@@ -227,6 +232,7 @@ impl TypeRules {
             tech_bit: None,
             is_workshop: false,
             is_outpost: false,
+            build_seconds: 0.0,
             is_flyer: false,
             is_air: false,
             air_attack: None,

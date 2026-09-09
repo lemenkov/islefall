@@ -136,6 +136,16 @@ impl Scripts {
         v.as_float().map_err(|t| ScriptError::Call { hook: "sound_gain", message: format!("expected float, got {t}") })
     }
 
+    pub fn construction_seconds(&self, cost: i64, construction_rate: f64, power_per_rate: f64) -> Result<f64, ScriptError> {
+        let v = self.call("construction_seconds", (cost, construction_rate, power_per_rate))?;
+        v.as_float().map_err(|t| ScriptError::Call { hook: "construction_seconds", message: format!("expected float, got {t}") })
+    }
+
+    pub fn kill_reward(&self, cost: i64, percent: i64) -> Result<i32, ScriptError> {
+        let v = self.call("kill_reward", (cost, percent))?;
+        v.as_int().map(|i| i as i32).map_err(|t| ScriptError::Call { hook: "kill_reward", message: format!("expected int, got {t}") })
+    }
+
     pub fn target_priority(&self, threat: i64, distance: i64, is_unit: bool) -> Result<i64, ScriptError> {
         let v = self.call("target_priority", (threat, distance, is_unit))?;
         v.as_int().map_err(|t| ScriptError::Call { hook: "target_priority", message: format!("expected int, got {t}") })
@@ -174,6 +184,9 @@ mod tests {
         assert_eq!(s.air_attack("Shooter", 1, 12, 24, 8, 12).unwrap(), Some(AirAttack { air_range: 12, air_damage: 24, ground: true }));
         assert_eq!(s.air_attack("Shooter", 0, 0, 0, 22, 16).unwrap(), Some(AirAttack { air_range: 0, air_damage: 0, ground: true }));
         assert_eq!(s.air_attack("Defense", 0, 0, 0, 0, 0).unwrap(), None);
+        assert_eq!(s.construction_seconds(400, 10.0, 5.0).unwrap(), 8.0, "a Sun Cannon stands in eight seconds");
+        assert_eq!(s.construction_seconds(400, 0.0, 5.0).unwrap(), 1.0, "no rate: a moment");
+        assert_eq!(s.kill_reward(1200, 25).unwrap(), 300);
         assert_eq!(s.sound_gain(0.0, 4.0, -5.0, -9.0, 4.0, 6.0).unwrap(), -5.0, "centre at the reference zoom: the file's own gain");
         assert_eq!(s.sound_gain(1.0, 4.0, 0.0, -9.0, 4.0, 6.0).unwrap(), -9.0, "the edge loses edge_db");
         assert!((s.sound_gain(0.0, 2.0, 0.0, -9.0, 4.0, 6.0).unwrap() + 6.0).abs() < 1e-9, "half the zoom loses one halving");

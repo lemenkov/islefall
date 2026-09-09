@@ -51,6 +51,8 @@ Available hooks:
 - `workshop_can_produce(workshop_theme, type_theme, type_level)` -> bool
 - `air_attack(class, use_air_damage, air_range, air_damage, range, hp_per_sec)` -> `#{ air_range, air_damage, ground }` or `()`
 - `air_target_priority(distance, is_unit, is_transport, hunts_transports)` -> int or `()` to refuse
+- `construction_seconds(cost, construction_rate, power_per_rate)` -> seconds
+- `kill_reward(cost, percent)` -> int
 - `sound_gain(edge, zoom, base_db, edge_db, reference_zoom, db_per_halving)` -> decibels (presentation only)
 
 ## Sounds
