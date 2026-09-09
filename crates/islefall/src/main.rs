@@ -42,7 +42,7 @@ use bevy::sprite::Anchor;
 use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
-use islefall_data::{Installation, Picture, TypeDef};
+use islefall_data::{Installation, Picture};
 use bevy::audio::{AudioPlayer, AudioSink, AudioSinkPlayback, AudioSource, GlobalVolume, PlaybackSettings, Volume};
 use islefall_sim::config::Grid;
 use islefall_sim::map::{self, MapDef};
@@ -529,6 +529,7 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
+    lib.sheets = Some(data.data_dir.join(&data.cfg.sprites.dir));
     match *mode {
         Mode::Island => {
             setup_map(&mut commands, &data, &mut sim, &mut lib, &mut images, &mut layouts);
@@ -647,13 +648,12 @@ fn world_to_cell(p: Vec2, g: &Grid) -> Cell {
 fn spawn_animated(
     commands: &mut Commands,
     shape: &LoadedShape,
-    def: &TypeDef,
     animation: &str,
     pos: Vec2,
     z: f32,
     viewer: bool,
 ) -> Vec<Entity> {
-    let sequence = animation_sequence(def, animation);
+    let sequence = animation_sequence(&shape.labels, animation);
     let mut out = Vec::new();
     if sequence.is_empty() {
         return out;
@@ -682,13 +682,13 @@ fn spawn_animated(
 }
 
 /// Frame indices of one animation label, in file order.
-fn animation_sequence(def: &TypeDef, animation: &str) -> Vec<usize> {
-    let seq: Vec<usize> = def.frames.iter().enumerate().filter(|(_, f)| f.animation.eq_ignore_ascii_case(animation)).map(|(i, _)| i).collect();
+fn animation_sequence(labels: &[String], animation: &str) -> Vec<usize> {
+    let seq: Vec<usize> = labels.iter().enumerate().filter(|(_, l)| l.eq_ignore_ascii_case(animation)).map(|(i, _)| i).collect();
     if !seq.is_empty() || animation.eq_ignore_ascii_case("A") {
         return seq;
     }
     // Types without per-facing animations (flyers spin, balloons drift) use their first one.
-    def.frames.iter().enumerate().filter(|(_, f)| f.animation.eq_ignore_ascii_case("A")).map(|(i, _)| i).collect()
+    labels.iter().enumerate().filter(|(_, l)| l.eq_ignore_ascii_case("A")).map(|(i, _)| i).collect()
 }
 
 fn spawn_viewer_shape(
@@ -702,20 +702,15 @@ fn spawn_viewer_shape(
     let stem = SHAPE_ORDER[viewer.type_index];
     let install = &data.install;
     let palette = install.palette(&data.palette).expect("palette checked at start-up");
-    let Some(def) = install.type_def(stem) else { return };
-    let animations = def.animations();
-    let Some(&animation) = animations.get(viewer.animation) else { return };
-    info!(
-        "{stem} ({}): {} frames, {} animations, showing {animation}",
-        def.get_str("description").unwrap_or("-"),
-        def.frames.len(),
-        animations.len()
-    );
+    let description = install.type_def(stem).and_then(|d| d.get_str("description")).unwrap_or("-").to_string();
     let Some(shape) = lib.get_or_load(install, palette, stem, images, layouts) else {
         warn!("{stem}: no atlas");
         return;
     };
-    spawn_animated(commands, shape, def, animation, Vec2::ZERO, Z_UNIT, true);
+    let animations = shape.animations();
+    let Some(&animation) = animations.get(viewer.animation) else { return };
+    info!("{stem} ({description}): {} frames, {} animations, showing {animation}", shape.frames.len(), animations.len());
+    spawn_animated(commands, shape, animation, Vec2::ZERO, Z_UNIT, true);
 }
 
 fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>) {
@@ -911,11 +906,11 @@ fn sync_units(
         *known += 1;
         let unit = &w.units[i];
         let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
-        let (Some(def), Some(shape)) = (data.install.type_def(&unit.kind), lib.get_or_load(&data.install, palette, &unit.kind, &mut images, &mut layouts)) else {
+        let Some(shape) = lib.get_or_load(&data.install, palette, &unit.kind, &mut images, &mut layouts) else {
             warn!("unit {i}: no sprites for {}", unit.kind);
             continue;
         };
-        let entities = spawn_animated(&mut commands, shape, def, unit.facing.animation(), unit_to_world(unit, g), Z_UNIT, false);
+        let entities = spawn_animated(&mut commands, shape, unit.facing.animation(), unit_to_world(unit, g), Z_UNIT, false);
         for (k, e) in entities.into_iter().enumerate() {
             commands.entity(e).insert(UnitLayer { unit: i, facing: unit.facing, shadow: k == 1 });
         }
@@ -939,8 +934,8 @@ fn sync_units(
             depth_z(Z_STRUCTURE, row) + 0.005
         };
         if unit.facing != layer.facing {
-            if let Some(def) = data.install.type_def(&unit.kind) {
-                let seq = animation_sequence(def, unit.facing.animation());
+            if let Some(labels) = lib.labels(&unit.kind) {
+                let seq = animation_sequence(labels, unit.facing.animation());
                 if !seq.is_empty() {
                     shape.sequence = seq;
                     shape.step = 0;

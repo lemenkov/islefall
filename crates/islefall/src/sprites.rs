@@ -12,7 +12,7 @@ use bevy::image::{Image, ImageSampler, TextureAtlasLayout};
 use bevy::math::{URect, UVec2, Vec2};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::sprite::Anchor;
-use islefall_data::{Frame, Palette, ShapeFile};
+use islefall_data::{Frame, Palette, Picture, ShapeFile, Sheet};
 
 /// Largest atlas edge we are willing to build.
 const MAX_ATLAS_EDGE: u32 = 8192;
@@ -56,6 +56,8 @@ pub struct ShapeAtlas {
 pub enum AtlasError {
     NoFrames,
     TooLarge { width: u32, height: u32 },
+    /// A sheet frame's rect lies outside its picture.
+    BadRect(usize),
 }
 
 impl std::fmt::Display for AtlasError {
@@ -63,6 +65,7 @@ impl std::fmt::Display for AtlasError {
         match self {
             AtlasError::NoFrames => write!(f, "container has no decodable frames"),
             AtlasError::TooLarge { width, height } => write!(f, "atlas {width}x{height} exceeds limits"),
+            AtlasError::BadRect(i) => write!(f, "sheet frame {i} lies outside the picture"),
         }
     }
 }
@@ -139,4 +142,57 @@ pub fn build_atlas(shp: &ShapeFile, palette: &Palette, offsets: &[usize]) -> Res
     );
     image.sampler = ImageSampler::nearest();
     Ok(ShapeAtlas { image, layout, frames: infos })
+}
+
+/// A mod's sheet as atlases: the picture as it is, with one layout for the
+/// frames and, when any frame has one, another for the shadows.
+pub fn build_sheet_atlases(pic: &Picture, sheet: &Sheet) -> Result<(ShapeAtlas, Option<ShapeAtlas>), AtlasError> {
+    if sheet.frames.is_empty() {
+        return Err(AtlasError::NoFrames);
+    }
+    let size = UVec2::new(pic.width, pic.height);
+    let place = |layout: &mut TextureAtlasLayout, i: usize, rect: Option<[u32; 4]>, hotspot: Option<[i32; 2]>| -> Result<FrameInfo, AtlasError> {
+        match rect {
+            Some([x, y, w, h]) if w > 0 && h > 0 => {
+                if x + w > pic.width || y + h > pic.height {
+                    return Err(AtlasError::BadRect(i));
+                }
+                layout.add_texture(URect::new(x, y, x + w, y + h));
+                let hs = hotspot.unwrap_or([0, 0]);
+                Ok(FrameInfo { size: UVec2::new(w, h), hotspot: Vec2::new(hs[0] as f32, hs[1] as f32) })
+            }
+            _ => {
+                layout.add_texture(URect::new(0, 0, 1, 1));
+                Ok(FrameInfo { size: UVec2::ZERO, hotspot: Vec2::ZERO })
+            }
+        }
+    };
+    let image = || {
+        let mut image = Image::new(
+            Extent3d { width: pic.width, height: pic.height, depth_or_array_layers: 1 },
+            TextureDimension::D2,
+            pic.rgba.clone(),
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::RENDER_WORLD,
+        );
+        image.sampler = ImageSampler::nearest();
+        image
+    };
+    let mut layout = TextureAtlasLayout::new_empty(size);
+    let mut frames = Vec::with_capacity(sheet.frames.len());
+    for (i, f) in sheet.frames.iter().enumerate() {
+        frames.push(place(&mut layout, i, Some(f.rect), Some(f.hotspot))?);
+    }
+    let main = ShapeAtlas { image: image(), layout, frames };
+    let shadow = if sheet.frames.iter().any(|f| f.shadow.is_some()) {
+        let mut layout = TextureAtlasLayout::new_empty(size);
+        let mut frames = Vec::with_capacity(sheet.frames.len());
+        for (i, f) in sheet.frames.iter().enumerate() {
+            frames.push(place(&mut layout, i, f.shadow, f.shadow_hotspot)?);
+        }
+        Some(ShapeAtlas { image: image(), layout, frames })
+    } else {
+        None
+    };
+    Ok((main, shadow))
 }

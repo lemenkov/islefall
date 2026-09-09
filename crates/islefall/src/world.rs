@@ -3,10 +3,11 @@
 //! and a first scene with an island, an altar and the High Priest.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use bevy::prelude::*;
 use islefall_data::isle::{self, Theme};
-use islefall_data::{Installation, Palette, bridge};
+use islefall_data::{Installation, Palette, Picture, Sheet, bridge};
 use islefall_sim::config::Grid;
 use islefall_sim::{BridgeState, Cell, IslandMap, World};
 
@@ -38,12 +39,30 @@ pub struct LoadedShape {
     pub layout: Handle<TextureAtlasLayout>,
     pub frames: Vec<FrameInfo>,
     pub shadow: Option<(Handle<Image>, Handle<TextureAtlasLayout>, Vec<FrameInfo>)>,
+    /// Animation label of each frame, from the type file or the mod's sheet.
+    pub labels: Vec<String>,
 }
 
-/// Atlases built so far, keyed by type stem.
+impl LoadedShape {
+    /// Distinct animation labels in frame order.
+    pub fn animations(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        for l in &self.labels {
+            if !out.contains(&l.as_str()) {
+                out.push(l);
+            }
+        }
+        out
+    }
+}
+
+/// Atlases built so far, keyed by type stem. A type whose sheet lies in
+/// `sheets` (a mod's `<stem>.toml` plus picture) is loaded from there
+/// instead of the sprite cache.
 #[derive(Resource, Default)]
 pub struct ShapeLibrary {
     shapes: HashMap<String, LoadedShape>,
+    pub sheets: Option<PathBuf>,
 }
 
 impl ShapeLibrary {
@@ -56,21 +75,65 @@ impl ShapeLibrary {
         layouts: &mut Assets<TextureAtlasLayout>,
     ) -> Option<&LoadedShape> {
         if !self.shapes.contains_key(stem) {
-            let records = install.shape_records(stem)?;
-            let main = sprites::build_atlas(&install.shapes, palette, &records.images).ok()?;
-            let shadow = if records.shadows.is_empty() {
-                None
-            } else {
-                sprites::build_atlas(&install.shapes, palette, &records.shadows)
-                    .ok()
-                    .map(|a| (images.add(a.image), layouts.add(a.layout), a.frames))
-            };
-            self.shapes.insert(
-                stem.to_string(),
-                LoadedShape { image: images.add(main.image), layout: layouts.add(main.layout), frames: main.frames, shadow },
-            );
+            let loaded = self.load_sheet(stem, images, layouts).or_else(|| Self::load_cache(install, palette, stem, images, layouts))?;
+            self.shapes.insert(stem.to_string(), loaded);
         }
         self.shapes.get(stem)
+    }
+
+    /// Labels of a loaded type's frames.
+    pub fn labels(&self, stem: &str) -> Option<&[String]> {
+        self.shapes.get(stem).map(|s| s.labels.as_slice())
+    }
+
+    fn load_sheet(&self, stem: &str, images: &mut Assets<Image>, layouts: &mut Assets<TextureAtlasLayout>) -> Option<LoadedShape> {
+        let dir = self.sheets.as_ref()?;
+        let index = dir.join(format!("{stem}.toml"));
+        if !index.is_file() {
+            return None;
+        }
+        let sheet = match Sheet::load(&index) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("{}: {e}", index.display());
+                return None;
+            }
+        };
+        let pic = match Picture::load(dir.join(&sheet.image)) {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("{}: {}: {e}", index.display(), sheet.image);
+                return None;
+            }
+        };
+        let (main, shadow) = match sprites::build_sheet_atlases(&pic, &sheet) {
+            Ok(a) => a,
+            Err(e) => {
+                warn!("{}: {e}", index.display());
+                return None;
+            }
+        };
+        info!("{stem}: sprites from {}", index.display());
+        Some(LoadedShape {
+            image: images.add(main.image),
+            layout: layouts.add(main.layout),
+            frames: main.frames,
+            shadow: shadow.map(|a| (images.add(a.image), layouts.add(a.layout), a.frames)),
+            labels: sheet.labels(),
+        })
+    }
+
+    fn load_cache(install: &Installation, palette: &Palette, stem: &str, images: &mut Assets<Image>, layouts: &mut Assets<TextureAtlasLayout>) -> Option<LoadedShape> {
+        let records = install.shape_records(stem)?;
+        let main = sprites::build_atlas(&install.shapes, palette, &records.images).ok()?;
+        let shadow = if records.shadows.is_empty() {
+            None
+        } else {
+            sprites::build_atlas(&install.shapes, palette, &records.shadows).ok().map(|a| (images.add(a.image), layouts.add(a.layout), a.frames))
+        };
+        let mut labels: Vec<String> = install.type_def(stem).map(|d| d.frames.iter().map(|f| f.animation.clone()).collect()).unwrap_or_default();
+        labels.resize(main.frames.len(), "A".to_string());
+        Some(LoadedShape { image: images.add(main.image), layout: layouts.add(main.layout), frames: main.frames, shadow, labels })
     }
 }
 

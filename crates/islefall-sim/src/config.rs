@@ -27,6 +27,14 @@ pub struct Config {
     pub controls: Controls,
     pub sounds: Sounds,
     pub sky: Sky,
+    pub sprites: Sprites,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Sprites {
+    /// Directory under the data directory holding a mod's sprite sheets.
+    pub dir: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]

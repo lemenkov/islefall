@@ -100,9 +100,24 @@ in the installation second, so a data set of your own grows one file at
 a time: put a `sky/mine.png` next to `rules.toml` and name it under
 `[sky]`; put a WAV under the data directory and name it in
 `[sounds.overrides]`. Pictures may be GIF or PNG; sounds are WAV unless
-the app is built with more of Bevy's decoders. Sprites still come only
-from the installation's sprite cache; remapping them is the next step of
-this layer.
+the app is built with more of Bevy's decoders.
+
+Sprites are replaced per type. Put `<stem>.toml` and its picture under the
+directory `[sprites].dir` names (`sprites/` by default): the index lists
+the frames in animation order, each with its `animation` letter (`A` to
+`H` are the eight facings clockwise from north, `P` poses), its `rect`
+in the picture, its `hotspot` measured from the rect's top-left corner,
+and optionally a `shadow` rect and `shadow_hotspot` in the same picture.
+A type with a sheet never touches the sprite cache, so a whole data set
+of your own is a directory of sheets. To start from the originals:
+
+```sh
+cargo run -p islefall-data --bin shpdump -- export "$NETSTORM_DIR" /tmp/sheets sunwalker
+```
+
+writes `sunwalker.png` and `sunwalker.toml` in exactly this form; with no
+stems it exports every type. Keep exported originals out of the
+repository, as with all NetStorm data.
 
 ## Maps
 

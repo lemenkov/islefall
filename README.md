@@ -90,7 +90,11 @@ sheet:
 ```sh
 cargo run -p islefall-data --bin shpdump -- stats "$NETSTORM_DIR/d/_shapes.shp"
 cargo run -p islefall-data --bin shpdump -- sheet "$NETSTORM_DIR/d/_shapes.shp" 88 walker.png --col "$NETSTORM_DIR/d/SUNCANNON.COL"
+cargo run -p islefall-data --bin shpdump -- export "$NETSTORM_DIR" /tmp/sheets sunwalker
 ```
+
+`export` writes a type's sprites as a PNG plus a TOML frame index, the form
+a mod uses to replace them (see `docs/MODDING.md`).
 
 `tarcdump` lists or extracts the text archive and parses all unit definitions:
 

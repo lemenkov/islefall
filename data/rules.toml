@@ -140,6 +140,12 @@ layers = [
     { image = "Gifcloud2.GIF", speed = [-3.0, 4.0], opacity = 0.5 },
 ]
 
+# A mod's own sprites: `<dir>/<stem>.toml` next to its picture replaces a
+# type's sprites from the installation. `shpdump export` writes the
+# originals in that form to start from.
+[sprites]
+dir = "sprites"
+
 [controls]
 # Keys for the piece slots, as in the original Production window.
 slot_keys = ["Q", "W", "A", "S", "Z", "X"]

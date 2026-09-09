@@ -9,6 +9,8 @@ rust-version.workspace = true
 
 [dependencies]
 gif = "0.13"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
 
 [dev-dependencies]
 

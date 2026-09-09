@@ -5,12 +5,17 @@
 //! ```text
 //! shpdump stats <_shapes.shp>
 //! shpdump sheet <_shapes.shp> <container> <out.png> [--col FILE.COL] [--scale N] [--max N]
+//! shpdump export <NETSTORM_DIR> <out_dir> [stem ...]
 //! ```
+//!
+//! `export` writes a type's sprites as `<stem>.png` plus `<stem>.toml` in
+//! the sheet format a mod uses to replace them (every type with sprites
+//! when no stem is given).
 
 use std::process::ExitCode;
 
 use islefall_data::shp::{MAX_DIM, MAX_PIXELS};
-use islefall_data::{Frame, Palette, ShapeFile};
+use islefall_data::{Frame, Installation, Palette, ShapeFile, Sheet, SheetFrame};
 
 fn main() -> ExitCode {
     match run(std::env::args().skip(1).collect()) {
@@ -26,8 +31,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     match args.first().map(String::as_str) {
         Some("stats") if args.len() == 2 => stats(&args[1]),
         Some("sheet") if args.len() >= 4 => sheet(&args[1..]),
+        Some("export") if args.len() >= 3 => export(&args[1..]),
         _ => {
-            eprintln!("usage:\n  shpdump stats <_shapes.shp>\n  shpdump sheet <_shapes.shp> <container> <out.png> [--col FILE.COL] [--scale N] [--max N]");
+            eprintln!("usage:\n  shpdump stats <_shapes.shp>\n  shpdump sheet <_shapes.shp> <container> <out.png> [--col FILE.COL] [--scale N] [--max N]\n  shpdump export <NETSTORM_DIR> <out_dir> [stem ...]");
             Err("bad arguments".into())
         }
     }
@@ -198,6 +204,97 @@ fn draw(rgba: &mut [u8], sw: usize, fr: &Frame, pal: &Palette, x0: usize, y0: us
                     rgba[o..o + 4].copy_from_slice(&[r, g, b, 255]);
                 }
             }
+        }
+    }
+}
+
+/// Write each type's sprites as a picture plus a frame index, in the form a
+/// mod uses to replace them.
+fn export(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let install = Installation::load(&args[0])?;
+    let out = std::path::Path::new(&args[1]);
+    std::fs::create_dir_all(out)?;
+    let palette = install.palette("gifcloud").ok_or("no GIFCLOUD.COL in d/")?.clone();
+    let stems: Vec<String> = if args.len() > 2 {
+        args[2..].iter().map(|s| s.to_ascii_lowercase()).collect()
+    } else {
+        install.records.keys().cloned().collect()
+    };
+    for stem in &stems {
+        match export_one(&install, &palette, stem, out) {
+            Ok((frames, w, h)) => println!("{stem}: {frames} frames, {w}x{h}"),
+            Err(e) => eprintln!("{stem}: {e}"),
+        }
+    }
+    Ok(())
+}
+
+fn export_one(install: &Installation, palette: &Palette, stem: &str, out: &std::path::Path) -> Result<(usize, u32, u32), Box<dyn std::error::Error>> {
+    const PAD: u32 = 1;
+    const SHELF: u32 = 2048;
+    let records = install.shape_records(stem).ok_or("no sprites")?;
+    let labels: Vec<String> = install.type_def(stem).map(|d| d.frames.iter().map(|f| f.animation.clone()).collect()).unwrap_or_default();
+    let decode = |offsets: &[usize]| -> Vec<Option<Frame>> { offsets.iter().map(|&o| install.shapes.decode(o).ok().filter(|f| !f.is_empty())).collect() };
+    let images = decode(&records.images);
+    let shadows = decode(&records.shadows);
+    // Shelf-pack image blocks, then shadow blocks, on one sheet.
+    let blocks: Vec<Option<(u32, u32)>> = images.iter().chain(&shadows).map(|f| f.as_ref().map(|f| (f.width as u32, f.height as u32))).collect();
+    let mut rects = Vec::with_capacity(blocks.len());
+    let (mut x, mut y, mut shelf_h, mut width) = (0u32, 0u32, 0u32, 0u32);
+    for b in &blocks {
+        let Some((w, h)) = *b else {
+            rects.push([0, 0, 0, 0]);
+            continue;
+        };
+        if x > 0 && x + w > SHELF {
+            y += shelf_h + PAD;
+            x = 0;
+            shelf_h = 0;
+        }
+        rects.push([x, y, w, h]);
+        x += w + PAD;
+        shelf_h = shelf_h.max(h);
+        width = width.max(x - PAD);
+    }
+    let height = y + shelf_h;
+    if width == 0 || height == 0 {
+        return Err("no decodable frames".into());
+    }
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    let hotspot = |f: &Frame| [f.header.hot_x as i32 - f.block_x, f.header.hot_y as i32 - f.block_y];
+    let mut frames = Vec::with_capacity(images.len());
+    for (i, img) in images.iter().enumerate() {
+        let rect = rects[i];
+        let mut frame = SheetFrame { animation: labels.get(i).cloned().unwrap_or_else(|| "A".into()), rect, hotspot: [0, 0], shadow: None, shadow_hotspot: None };
+        if let Some(f) = img {
+            frame.hotspot = hotspot(f);
+            blit(&mut rgba, width, f, rect, |idx| { let [r, g, b] = palette.rgb(idx); [r, g, b, 255] });
+        }
+        if let Some(Some(sh)) = shadows.get(i) {
+            let rect = rects[images.len() + i];
+            frame.shadow = Some(rect);
+            frame.shadow_hotspot = Some(hotspot(sh));
+            blit(&mut rgba, width, sh, rect, |_| [0, 0, 0, 255]);
+        }
+        frames.push(frame);
+    }
+    let png_name = format!("{stem}.png");
+    let file = std::fs::File::create(out.join(&png_name))?;
+    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), width, height);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.write_header()?.write_image_data(&rgba)?;
+    let sheet = Sheet { image: png_name, frames };
+    std::fs::write(out.join(format!("{stem}.toml")), sheet.to_toml())?;
+    Ok((sheet.frames.len(), width, height))
+}
+
+fn blit(rgba: &mut [u8], width: u32, f: &Frame, rect: [u32; 4], colour: impl Fn(u8) -> [u8; 4]) {
+    for py in 0..f.height {
+        for px in 0..f.width {
+            let Some(idx) = f.pixel(px, py) else { continue };
+            let o = (((rect[1] as usize + py) * width as usize) + rect[0] as usize + px) * 4;
+            rgba[o..o + 4].copy_from_slice(&colour(idx));
         }
     }
 }
