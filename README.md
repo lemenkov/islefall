@@ -59,7 +59,9 @@ show a health bar, destroyed ones explode and crack nearby bridges.
 Left-click on a unit selects it, left-click elsewhere sends the selected unit
 there along a path around obstacles, left-click on a Storm Geyser sets it
 harvesting crystals to the Temple, left-click on a stunned enemy priest sends
-the selected golem to capture him, and left-click on your altar while he is
+the selected golem to capture him, left-click on an Obelisk sends it to
+learn the Spell there (`X` casts it, `Y` sets a High Priest praying for
+his own), and left-click on your altar while he is
 carried sacrifices him for Knowledge. The corner text and the window title show the Storm Power
 reserve, Knowledge, the tool in hand and the last thing the game had to
 say; sacrifice the enemy High Priest to win; drops cost their type's price and stand as translucent shells

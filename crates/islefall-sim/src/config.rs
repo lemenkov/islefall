@@ -24,6 +24,7 @@ pub struct Config {
     pub air: Air,
     pub production: Production,
     pub construction: Construction,
+    pub spells: Spells,
     pub ai: AiConfig,
     pub controls: Controls,
     pub sounds: Sounds,
@@ -160,6 +161,9 @@ pub struct SoundEvents {
     pub floating: SoundCue,
     pub eliminated: SoundCue,
     pub victory: SoundCue,
+    pub learned: SoundCue,
+    pub casting: SoundCue,
+    pub cast: SoundCue,
 }
 
 impl SoundEvents {
@@ -184,6 +188,9 @@ impl SoundEvents {
             EventKind::Floating => &self.floating,
             EventKind::Eliminated => &self.eliminated,
             EventKind::Victory => &self.victory,
+            EventKind::Learned => &self.learned,
+            EventKind::Casting => &self.casting,
+            EventKind::Cast => &self.cast,
         }
     }
 }
@@ -216,6 +223,37 @@ pub struct Production {
     pub upgrade_cost_percent: i32,
     pub temple_types: Vec<String>,
     pub outpost_types: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Spells {
+    pub default_cast_seconds: f64,
+    pub prayer: String,
+    pub seed: u64,
+    #[serde(default)]
+    pub pool: BTreeMap<String, u32>,
+    #[serde(default)]
+    pub effects: BTreeMap<String, SpellEffect>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SpellEffect {
+    pub kind: EffectKind,
+    #[serde(default)]
+    pub amount: i32,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EffectKind {
+    Damage,
+    Heal,
+    Harden,
+    Paralyse,
+    Invisible,
+    Treason,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -261,6 +299,8 @@ pub struct Flags {
     pub temple: Vec<String>,
     pub altar: Vec<String>,
     pub workshop: Vec<String>,
+    pub obelisk: Vec<String>,
+    pub spell: Vec<String>,
     pub energy_source_classes: Vec<String>,
 }
 
@@ -408,6 +448,9 @@ impl Config {
         }
         if !(0.0..=1.0).contains(&self.sounds.volume) {
             return bad("sounds.volume must be 0.0..1.0");
+        }
+        if self.spells.default_cast_seconds <= 0.0 {
+            return bad("spells.default_cast_seconds must be positive");
         }
         if self.production.workshop_slots.is_empty() || self.construction.power_per_rate <= 0.0 {
             return bad("production.workshop_slots needs a level and construction.power_per_rate must be positive");

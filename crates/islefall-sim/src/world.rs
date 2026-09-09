@@ -124,6 +124,12 @@ pub enum EventKind {
     Eliminated,
     /// Only one player with a High Priest remains; `owner` is the winner.
     Victory,
+    /// A Transport read an Obelisk; `kind` is the Spell.
+    Learned,
+    /// A cast began; `kind` is the Spell, `at` the caster.
+    Casting,
+    /// A cast landed.
+    Cast,
     /// A priest's ground fell away and he floats.
     Floating,
 }
@@ -782,6 +788,7 @@ impl World {
         s.stock = if rules.is_geyser && self.cfg.economy.geyser_stock_from_cost { rules.cost } else { 0 };
         s.is_temple = rules.is_temple;
         s.is_outpost = rules.is_outpost;
+        s.is_obelisk = rules.is_obelisk;
         s.owner = owner;
         s.hp = rules.max_hit_points;
         s.max_hp = rules.max_hit_points;
@@ -999,13 +1006,194 @@ impl World {
         self.known_tech[self.slot(owner)].contains(&bit)
     }
 
+    /// Give an Obelisk a Spell from the rules' pool, by weight, from a
+    /// draw seeded by the rules and the Obelisk's index: the same map
+    /// always holds the same Spells.
+    pub fn assign_obelisk_spell(&mut self, index: usize) {
+        let Some(s) = self.structures.get(index).filter(|s| s.is_obelisk && s.spell.is_none()) else { return };
+        let pool = &self.cfg.spells.pool;
+        let total: u64 = pool.values().map(|&w| w as u64).sum();
+        if total == 0 {
+            return;
+        }
+        let mut x = self.cfg.spells.seed ^ ((index as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)) | 1;
+        for _ in 0..3 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+        }
+        let mut pick = x % total;
+        let _ = s;
+        for (name, &w) in pool {
+            if pick < w as u64 {
+                self.structures[index].spell = Some(name.clone());
+                return;
+            }
+            pick -= w as u64;
+        }
+    }
+
+    /// Order a Transport to read an Obelisk and learn its Spell.
+    pub fn order_read(&mut self, unit: usize, obelisk: usize) -> bool {
+        let (Some(u), Some(o)) = (self.units.get(unit), self.structures.get(obelisk)) else { return false };
+        if !u.alive || !u.is_transport || u.stunned || u.held() || !o.is_obelisk || o.spell.is_none() {
+            return false;
+        }
+        if !self.walk_to_adjacent(unit, obelisk) {
+            return false;
+        }
+        self.units[unit].task = Task::Read { obelisk };
+        true
+    }
+
+    /// Cast the unit's Spell around it: pays the Spell's cost now, lands
+    /// after its cast time. The caster halts meanwhile.
+    pub fn order_cast(&mut self, unit: usize) -> Result<(), DropError> {
+        let Some(u) = self.units.get(unit).filter(|u| u.alive && !u.stunned && !u.held() && u.carried_by.is_none()) else { return Err(DropError::NotOwnGround) };
+        let Some(spell) = u.spell.clone() else { return Err(DropError::NotInProduction) };
+        let Some(rules) = self.types.get(&spell).cloned() else { return Err(DropError::NotInProduction) };
+        let slot = self.slot(u.owner);
+        if rules.cost > self.powers[slot] {
+            return Err(DropError::NotEnoughPower { cost: rules.cost, have: self.powers[slot] });
+        }
+        self.powers[slot] -= rules.cost;
+        let (at, owner) = (u.cell(), u.owner);
+        let u = &mut self.units[unit];
+        u.path.clear();
+        u.task = Task::Idle;
+        u.casting = self.cfg.ticks(rules.cast_seconds);
+        self.emit(EventKind::Casting, &spell, at, owner);
+        Ok(())
+    }
+
+    /// A High Priest prays for the rules' prayer Spell (the manual: a
+    /// short period of prayer, at a lower cost than a Transport pays).
+    pub fn order_pray(&mut self, unit: usize) -> bool {
+        let prayer = self.cfg.spells.prayer.clone();
+        let Some(rules) = self.types.get(&prayer) else { return false };
+        let ticks = self.cfg.ticks(rules.pray_seconds);
+        let Some(u) = self.units.get_mut(unit).filter(|u| u.alive && u.is_priest && !u.stunned && !u.held() && u.carried_by.is_none()) else { return false };
+        if u.spell.is_some() {
+            return false;
+        }
+        u.path.clear();
+        u.task = Task::Idle;
+        u.praying = ticks;
+        true
+    }
+
+    /// Casts land, prayers end, paralysis and invisibility wear off.
+    fn run_spells(&mut self) {
+        let prayer = self.cfg.spells.prayer.clone();
+        let mut landing = Vec::new();
+        for (i, u) in self.units.iter_mut().enumerate() {
+            if !u.alive {
+                continue;
+            }
+            u.paralysed = u.paralysed.saturating_sub(1);
+            u.invisible = u.invisible.saturating_sub(1);
+            if u.praying > 0 {
+                u.praying -= 1;
+                if u.praying == 0 {
+                    u.spell = Some(prayer.clone());
+                }
+            }
+            if u.casting > 0 {
+                u.casting -= 1;
+                if u.casting == 0 {
+                    landing.push(i);
+                }
+            }
+        }
+        for s in &mut self.structures {
+            s.paralysed = s.paralysed.saturating_sub(1);
+        }
+        for i in landing {
+            self.land_spell(i);
+        }
+    }
+
+    fn land_spell(&mut self, caster: usize) {
+        let Some(spell) = self.units[caster].spell.clone() else { return };
+        let (Some(rules), Some(effect)) = (self.types.get(&spell).cloned(), self.cfg.spells.effects.get(&spell).cloned()) else { return };
+        let (at, owner) = (self.units[caster].cell(), self.units[caster].owner);
+        let range = rules.spell_range;
+        let effect_ticks = self.cfg.ticks(rules.effect_seconds);
+        let near = |c: Cell| (c.x - at.x).abs() <= range && (c.y - at.y).abs() <= range;
+        let structures: Vec<usize> = (0..self.structures.len()).filter(|&i| self.structures[i].distance_to(at) <= range).collect();
+        let units: Vec<usize> = (0..self.units.len()).filter(|&i| i != caster && self.units[i].alive && near(self.units[i].cell())).collect();
+        use crate::config::EffectKind::*;
+        match effect.kind {
+            Damage => {
+                for i in structures.into_iter().rev() {
+                    self.damage_structure(i, effect.amount);
+                }
+                for i in units {
+                    self.damage_unit(i, effect.amount);
+                }
+            }
+            Heal => {
+                for i in structures {
+                    let s = &mut self.structures[i];
+                    if s.owner == owner && s.max_hp > 0 && s.complete() {
+                        s.hp = s.max_hp;
+                        s.paralysed = 0;
+                    }
+                }
+                for i in units {
+                    let u = &mut self.units[i];
+                    if u.owner == owner {
+                        u.hp = u.max_hp;
+                        u.paralysed = 0;
+                        u.invisible = 0;
+                    }
+                }
+            }
+            Harden => {
+                let cells: Vec<Cell> = self.bridges.keys().copied().filter(|&c| near(c)).collect();
+                for c in cells {
+                    self.harden_bridge(c);
+                }
+            }
+            Paralyse => {
+                for i in structures {
+                    self.structures[i].paralysed = effect_ticks;
+                }
+                for i in units {
+                    let u = &mut self.units[i];
+                    u.paralysed = effect_ticks;
+                    u.path.clear();
+                    u.casting = 0;
+                }
+            }
+            Invisible => {
+                for i in units {
+                    if self.units[i].owner == owner {
+                        self.units[i].invisible = effect_ticks;
+                    }
+                }
+            }
+            Treason => {
+                for i in units {
+                    let u = &mut self.units[i];
+                    if !u.is_priest && u.owner != owner {
+                        u.owner = owner;
+                        u.task = Task::Idle;
+                        u.path.clear();
+                    }
+                }
+            }
+        }
+        self.emit(EventKind::Cast, &spell, at, owner);
+    }
+
     /// Order a Transport to capture a stunned enemy priest.
     pub fn order_capture(&mut self, unit: usize, priest: usize) -> bool {
         let (Some(u), Some(p)) = (self.units.get(unit), self.units.get(priest)) else { return false };
-        if !u.alive || !u.is_transport || u.carrying.is_some() || u.stunned {
+        if !u.alive || !u.is_transport || u.carrying.is_some() || u.stunned || u.held() {
             return false;
         }
-        let takeable = p.stunned || (p.floating && u.is_air);
+        let takeable = (p.stunned || (p.floating && u.is_air)) && p.invisible == 0;
         if !p.alive || !p.is_priest || !takeable || p.owner == u.owner || p.carried_by.is_some() {
             return false;
         }
@@ -1344,7 +1532,7 @@ impl World {
         let mut shots: Vec<(usize, Target)> = Vec::new();
         for (i, s) in self.structures.iter().enumerate() {
             let Some(w) = s.weapon else { continue };
-            if s.cooldown > 0 || !s.complete() {
+            if s.cooldown > 0 || !s.complete() || s.paralysed > 0 {
                 continue;
             }
             let in_range = |c: Cell| s.distance_to(c) <= w.range && (!w.cardinal_only || s.in_line(c));
@@ -1359,7 +1547,7 @@ impl World {
                 }
             }
             for (j, u) in self.units.iter().enumerate() {
-                if !u.alive || u.owner == s.owner || u.carried_by.is_some() {
+                if !u.alive || u.owner == s.owner || u.carried_by.is_some() || u.invisible > 0 {
                     continue;
                 }
                 // Flyers are hit only by air weapons within their own reach.
@@ -1463,7 +1651,7 @@ impl World {
                         self.units[i].task = Task::Idle;
                         continue;
                     };
-                    let takeable = p.stunned || (p.floating && u.is_air);
+                    let takeable = (p.stunned || (p.floating && u.is_air)) && p.invisible == 0;
                     if !p.alive || !takeable || p.carried_by.is_some() {
                         self.units[i].task = Task::Idle;
                         continue;
@@ -1479,6 +1667,25 @@ impl World {
                         let (kind, owner) = (self.units[priest].kind.clone(), self.units[i].owner);
                         self.emit(EventKind::Pickup, &kind, pc, owner);
                     } else if !self.walk_next_to(i, pc) {
+                        self.units[i].task = Task::Idle;
+                    }
+                    continue;
+                }
+                Task::Read { obelisk } => {
+                    let Some(o) = self.structures.get(obelisk).filter(|o| o.is_obelisk) else {
+                        self.units[i].task = Task::Idle;
+                        continue;
+                    };
+                    if o.is_adjacent(at) || o.covers(at) {
+                        let spell = o.spell.clone();
+                        let (kind, owner) = (self.units[i].kind.clone(), self.units[i].owner);
+                        self.units[i].spell = spell.clone();
+                        self.units[i].task = Task::Idle;
+                        if let Some(spell) = spell {
+                            self.emit(EventKind::Learned, &spell, at, owner);
+                        }
+                        let _ = kind;
+                    } else if !self.walk_to_adjacent(i, obelisk) {
                         self.units[i].task = Task::Idle;
                     }
                     continue;
@@ -1557,7 +1764,7 @@ impl World {
     /// Order a unit to walk to `cell` along the cheapest walkable path.
     /// Returns `false` if the cell is unreachable.
     pub fn order_move(&mut self, unit: usize, cell: Cell) -> bool {
-        let Some(from) = self.units.get(unit).filter(|u| u.alive && !u.stunned && !u.floating && u.carried_by.is_none()).map(|u| u.cell()) else { return false };
+        let Some(from) = self.units.get(unit).filter(|u| u.alive && !u.stunned && !u.floating && !u.held() && u.carried_by.is_none()).map(|u| u.cell()) else { return false };
         if self.units[unit].is_air {
             // Flyers cross the sky in a straight line.
             let sub = self.subcell();
@@ -1605,6 +1812,7 @@ impl World {
             u.step();
         }
         self.run_priests();
+        self.run_spells();
         self.run_tasks();
         self.run_construction();
         self.run_air_bases();
@@ -1649,7 +1857,7 @@ impl World {
         let near = |a: Cell, b: Cell| (a.x - b.x).abs().max((a.y - b.y).abs());
         for i in 0..self.units.len() {
             let u = &self.units[i];
-            if !u.alive || !u.is_flyer {
+            if !u.alive || !u.is_flyer || u.paralysed > 0 {
                 continue;
             }
             let attacker = self.cfg.air.attackers.get(&u.kind).cloned();
@@ -1703,7 +1911,7 @@ impl World {
                 }
             }
             for (j, v) in self.units.iter().enumerate() {
-                if !v.alive || v.owner == owner || v.is_air || v.carried_by.is_some() || near(v.cell(), origin) > range {
+                if !v.alive || v.owner == owner || v.is_air || v.carried_by.is_some() || v.invisible > 0 || near(v.cell(), origin) > range {
                     continue;
                 }
                 let Ok(Some(key)) = scripts.air_target_priority(near(v.cell(), at) as i64, true, v.is_transport, hunts) else { continue };
@@ -2285,6 +2493,61 @@ mod tests {
         assert!(w.units[mine].alive);
         let kinds: Vec<EventKind> = w.take_events().iter().map(|e| e.what).filter(|k| matches!(k, EventKind::Eliminated | EventKind::Victory)).collect();
         assert_eq!(kinds, [EventKind::Eliminated, EventKind::Victory]);
+    }
+
+    #[test]
+    fn transports_learn_spells_from_obelisks_and_cast_them() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 12, 6), 0);
+        let scripts = test_scripts();
+        let devastation = TypeRules { is_spell: true, spell_range: 3, cost: 400, cast_seconds: 1.0, ..TypeRules::plain() };
+        let heal = TypeRules { is_spell: true, spell_range: 9, cost: 200, cast_seconds: 1.0, ..TypeRules::plain() };
+        let prayer = TypeRules { is_spell: true, spell_range: 3, cost: 100, cast_seconds: 1.0, pray_seconds: 2.0, ..TypeRules::plain() };
+        w.register_type("bombexplodemedium", devastation);
+        w.register_type("bombheal", heal);
+        w.register_type("bombspecialone", prayer);
+        let obelisk = TypeRules { foot_x: 1, foot_y: 1, is_obelisk: true, ..TypeRules::plain() };
+        let o = w.drop_structure("buried", &obelisk, Cell::new(5, 2)).unwrap();
+        w.assign_obelisk_spell(o);
+        assert!(w.structures[o].spell.is_some(), "the pool filled it");
+        w.structures[o].spell = Some("bombexplodemedium".into());
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 4.0, ..TypeRules::plain() };
+        let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, speed: 2.0, ..TypeRules::plain() };
+        let g = w.spawn_unit("sunwalker", &golem, Cell::new(1, 1)).unwrap();
+        let enemy = w.spawn_unit_for(1, "priest", &priest, Cell::new(9, 2)).unwrap();
+        w.powers[0] = 1000;
+        assert!(w.order_read(g, o));
+        for _ in 0..200 {
+            w.step(&scripts);
+            if w.units[g].spell.is_some() {
+                break;
+            }
+        }
+        assert_eq!(w.units[g].spell.as_deref(), Some("bombexplodemedium"), "learned by touching the Obelisk");
+        assert!(w.take_events().iter().any(|e| e.what == EventKind::Learned));
+        assert!(w.command_move(g, Cell::new(8, 2)));
+        for _ in 0..200 {
+            w.step(&scripts);
+            if !w.units[g].is_moving() {
+                break;
+            }
+        }
+        assert_eq!(w.order_cast(g), Ok(()));
+        assert_eq!(w.powers[0], 600, "the cast cost its price");
+        assert!(!w.order_move(g, Cell::new(1, 1)), "the caster halts while casting");
+        for _ in 0..w.cfg.ticks(1.0) + 1 {
+            w.step(&scripts);
+        }
+        assert_eq!(w.units[enemy].hp, 100 - 250, "Devastation struck the priest");
+        assert!(!w.units[enemy].alive || w.units[enemy].stunned);
+        assert_eq!(w.units[g].hp, 50, "spells do not affect the caster");
+        // The priest prays for his own Spell.
+        let mine = w.spawn_unit("priest", &priest, Cell::new(2, 4)).unwrap();
+        assert!(w.order_pray(mine));
+        for _ in 0..w.cfg.ticks(2.0) + 1 {
+            w.step(&scripts);
+        }
+        assert_eq!(w.units[mine].spell.as_deref(), Some("bombspecialone"));
     }
 
     #[test]

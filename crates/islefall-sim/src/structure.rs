@@ -55,6 +55,11 @@ pub struct Structure {
     pub build_ticks: u32,
     /// Workshop level, from one.
     pub level: u8,
+    /// An Obelisk and the Spell it holds.
+    pub is_obelisk: bool,
+    pub spell: Option<String>,
+    /// Ticks of paralysis left: no shooting.
+    pub paralysed: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -111,6 +116,9 @@ impl Structure {
             building: 0,
             build_ticks: 0,
             level: 1,
+            is_obelisk: false,
+            spell: None,
+            paralysed: 0,
         }
     }
 

@@ -25,7 +25,7 @@ Changing a flag list under `[flags]` changes which types the simulation
 treats as walk-blocking, island-creating, geysers, Temples and so on.
 Adding a piece to `[bridges].pieces` puts it into every player's queue.
 `[production]` sets the slots per Workshop and the types a Temple provides
-without one. `[ai]` names the opponent's shooter and generator and its pace. `[air]` names the base classes, which attacker each base
+without one. `[spells]` names the prayer Spell, the Obelisk pool and each Spell's effect. `[ai]` names the opponent's shooter and generator and its pace. `[air]` names the base classes, which attacker each base
 launches, the respawn wait and strike reach, and per attacker its flight
 time and habits (refuelling, hunting Transports, cracking bridges, feeding
 on kills).

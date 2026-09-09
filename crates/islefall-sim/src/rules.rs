@@ -103,6 +103,14 @@ pub struct TypeRules {
     pub is_outpost: bool,
     /// Seconds a stream takes to build the type once placed in play.
     pub build_seconds: f64,
+    /// Holds a Spell for Transports to read.
+    pub is_obelisk: bool,
+    /// A Spell: cast around the caster within `spell_range` cells.
+    pub is_spell: bool,
+    pub spell_range: i32,
+    pub cast_seconds: f64,
+    pub pray_seconds: f64,
+    pub effect_seconds: f64,
     /// An aerial attacker (`flyer` flag): launched by a base, never a Transport.
     pub is_flyer: bool,
     /// Flies: an attacker or an Aerial Transport; needs no ground and never falls.
@@ -193,6 +201,12 @@ impl TypeRules {
             is_workshop: has(&f.workshop),
             is_outpost: cfg.production.outpost_types.iter().any(|t| t.eq_ignore_ascii_case(&def.name)),
             build_seconds,
+            is_obelisk: has(&f.obelisk),
+            is_spell: has(&f.spell),
+            spell_range: def.get_i64("range").unwrap_or(0).clamp(0, 1000) as i32,
+            cast_seconds: def.get_f64("casttime").unwrap_or(cfg.spells.default_cast_seconds).max(0.0),
+            pray_seconds: def.get_f64("praytime").unwrap_or(0.0).max(0.0),
+            effect_seconds: def.get_f64("effecttime").unwrap_or(0.0).max(0.0),
             is_flyer,
             is_air,
             air_attack,
@@ -233,6 +247,12 @@ impl TypeRules {
             is_workshop: false,
             is_outpost: false,
             build_seconds: 0.0,
+            is_obelisk: false,
+            is_spell: false,
+            spell_range: 0,
+            cast_seconds: 0.0,
+            pray_seconds: 0.0,
+            effect_seconds: 0.0,
             is_flyer: false,
             is_air: false,
             air_attack: None,

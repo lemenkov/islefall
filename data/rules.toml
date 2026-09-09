@@ -39,6 +39,9 @@ geyser = ["geyser"]
 temple = ["residence"]
 altar = ["dais"]
 workshop = ["factory"]
+# Obelisks hold a Spell; `bomb` types are the Spells themselves.
+obelisk = ["buried"]
+spell = ["bomb"]
 # Type classes (the `class` property) that produce Energy of their theme.
 energy_source_classes = ["Source of Energy"]
 
@@ -70,6 +73,35 @@ strike_range = 1
 sunflyer = { life_seconds = 60.0, refuels = true, hunts_transports = false, cracks_bridges = false, kill_extends_life = false }
 windflyer = { life_seconds = 10.0, refuels = false, hunts_transports = true, cracks_bridges = true, kill_extends_life = false }
 rainflyer = { life_seconds = 60.0, refuels = false, hunts_transports = true, cracks_bridges = false, kill_extends_life = true }
+
+# Spells: a Transport reads an Obelisk to learn the Spell it holds, keeps it
+# for life, and casts it around itself for the Spell's `cost`, halting for
+# its `casttime`. A High Priest may pray `praytime` seconds for `prayer`.
+# Obelisks a map leaves blank draw from `pool` (weights) with `seed`.
+[spells]
+default_cast_seconds = 2.0
+prayer = "bombspecialone"
+seed = 7
+pool = { bombexplodesmall = 3, bombexplodemedium = 2, bombheal = 2, bombhardener = 2, bombparalyze = 1, bombinvisible = 1, bombtreason = 1, bombexplodelarge = 1 }
+
+# What each Spell does within its `range` (cells around the caster, never
+# the caster): damage deals `amount` hit points to everything; heal brings
+# the caster's own to full and lifts paralysis and invisibility; harden
+# makes bridges indestructible; paralyse stops movement, shooting and
+# casting for the Spell's `effecttime`; invisible hides the caster's own
+# units for it; treason hands every unit but a High Priest to the caster.
+# The damage figures are guesses; the manual gives none. Summons and the
+# Thunder, Bombardment and Graviton Spells are not modelled.
+[spells.effects]
+bombexplodesmall = { kind = "damage", amount = 150 }
+bombexplodemedium = { kind = "damage", amount = 250 }
+bombspecialone = { kind = "damage", amount = 250 }
+bombexplodelarge = { kind = "damage", amount = 400 }
+bombheal = { kind = "heal" }
+bombhardener = { kind = "harden" }
+bombparalyze = { kind = "paralyse" }
+bombinvisible = { kind = "invisible" }
+bombtreason = { kind = "treason" }
 
 [bridges]
 # Seconds an unsupported bridge cell stays cracked before it crumbles.
@@ -226,6 +258,9 @@ unit_lost = { file = "unitLost.wav" }
 launched = { property = "activeSound" }
 floating = { file = "priestFall.wav" }
 eliminated = { file = "itIsDone2.WAV" }
+learned = { property = "activeSound" }
+casting = { property = "fireSound" }
+cast = {}
 victory = { file = "70AriseMyChampions.wav" }
 
 # Every sound fades with its distance from the camera centre and with the

@@ -290,6 +290,31 @@ an `owner` is neutral; `production.outpost_types` names the Outpost. Not
 modelled: two Outposts raised at once cancelling each other (there is no
 construction time), Obelisks, and the Outpost's Storm Power stream.
 
+## Spells and Obelisks
+
+The manual: Spells are contained in Obelisks, found on neutral islands; a
+Transport that touches an Obelisk learns its Spell, keeps it until
+destroyed and casts it as often as Storm Power allows; a cast halts the
+Transport for a couple of seconds and never affects the caster; a High
+Priest may pray for Devastation at a lower cost. Point Blast, Devastation
+and Decimation damage everything within short, medium and long range;
+Heal restores every unit in range and lifts Paralysis and Invisibility;
+Invisibility hides units from targeting and capture; Paralysis stops
+movement, shooting and casting; Bridge Harden makes bridges
+indestructible; Treason hands every unit in range but a High Priest to
+the caster.
+
+Islefall: the `buried` type is the Obelisk and `bomb` types are Spells,
+each with its `range`, `cost`, `casttime`, `praytime` and `effecttime`
+from the type file. A map names an Obelisk's Spell or leaves it to a
+seeded draw from `spells.pool`. Reading needs a Transport next to the
+Obelisk; casting (`X`) pays the cost at once and lands after the cast
+time on everything within the range in cells; praying (`Y`) takes the
+prayer time. `[spells.effects]` maps each Spell to its effect and, for
+damage, a guessed amount. Not modelled: Summons (Hydra, Twister, Vortex,
+Whirlwind), Thunderstorm, Thunder Strike, Bombardment, Graviton, and the
+Spell icon in the original's overlay style.
+
 ## Winning
 
 The manual: to win a multiplayer game you must capture the enemy High

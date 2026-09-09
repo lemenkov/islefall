@@ -87,6 +87,8 @@ pub enum Task {
     Capture { priest: usize },
     /// Carry the held priest to the centre of `altar` and sacrifice him.
     Sacrifice { altar: usize },
+    /// Walk to an Obelisk and learn its Spell.
+    Read { obelisk: usize },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,11 +136,21 @@ pub struct Unit {
     /// Ticks between strikes, and ticks until the next one.
     pub delay: u32,
     pub cooldown: u32,
+    /// The Spell this Transport (or praying priest) knows.
+    pub spell: Option<String>,
+    /// Ticks until a cast in progress lands.
+    pub casting: u32,
+    /// Ticks of prayer left before the priest's Spell comes.
+    pub praying: u32,
+    /// Ticks of paralysis left: no moving, shooting or casting.
+    pub paralysed: u32,
+    /// Ticks of invisibility left: cannot be targeted or picked up.
+    pub invisible: u32,
 }
 
 impl Unit {
     pub fn new(kind: impl Into<String>, cell: Cell, speed: i32, subcell: i32) -> Unit {
-        Unit { kind: kind.into(), pos: Pos::cell_centre(cell, subcell), facing: Dir8::S, path: VecDeque::new(), speed, subcell, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1, threat: 0, is_priest: false, is_transport: false, stunned: false, floating: false, carrying: None, carried_by: None, is_air: false, is_flyer: false, base: None, life: 0, returning: false, strike: 0, range: 0, delay: 1, cooldown: 0 }
+        Unit { kind: kind.into(), pos: Pos::cell_centre(cell, subcell), facing: Dir8::S, path: VecDeque::new(), speed, subcell, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1, threat: 0, is_priest: false, is_transport: false, stunned: false, floating: false, carrying: None, carried_by: None, is_air: false, is_flyer: false, base: None, life: 0, returning: false, strike: 0, range: 0, delay: 1, cooldown: 0, spell: None, casting: 0, praying: 0, paralysed: 0, invisible: 0 }
     }
 
     /// The cell the unit stands in.
@@ -158,8 +170,13 @@ impl Unit {
     /// Advance one tick along the path, straight towards the next waypoint.
     /// Leftover movement after reaching a waypoint is not carried over, so a
     /// unit takes a whole tick per waypoint at most once per cell.
+    /// Held still by a cast, prayer or paralysis.
+    pub fn held(&self) -> bool {
+        self.casting > 0 || self.praying > 0 || self.paralysed > 0
+    }
+
     pub fn step(&mut self) {
-        if !self.alive || self.stunned || self.carried_by.is_some() {
+        if !self.alive || self.stunned || self.carried_by.is_some() || self.held() {
             return;
         }
         let Some(&t) = self.path.front() else { return };

@@ -648,8 +648,13 @@ fn setup_map(
         }
     }
     for st in &data.map.structures {
-        if let Err(e) = w.drop_structure_for(st.owner, &st.kind, &data.rules(&st.kind), map::cell(st.at)) {
-            warn!("map: {} at {:?}: {e}", st.kind, st.at);
+        match w.drop_structure_for(st.owner, &st.kind, &data.rules(&st.kind), map::cell(st.at)) {
+            Ok(i) if w.structures[i].is_obelisk => {
+                w.structures[i].spell = st.spell.clone();
+                w.assign_obelisk_spell(i);
+            }
+            Ok(_) => {}
+            Err(e) => warn!("map: {} at {:?}: {e}", st.kind, st.at),
         }
     }
     w.powers = vec![data.map.start_power; data.cfg.sim.max_players];
@@ -1152,6 +1157,12 @@ fn mouse_actions(
             } else if w.command_move(sel, cell) {
                 info!("unit {sel} ordered to {cell:?}");
             }
+        } else if let Some(o) = w.structures.iter().position(|s| s.is_obelisk && s.covers(cell)) {
+            if w.order_read(sel, o) {
+                status.say(format!("unit {sel} goes to read the Obelisk"));
+            } else {
+                status.say(format!("unit {sel} cannot read it: needs a free Transport and an Obelisk with a Spell"));
+            }
         } else if let Some(g) = w.structures.iter().position(|s| s.stock > 0 && s.covers(cell)) {
             if w.order_harvest(sel, g) {
                 info!("unit {sel} harvesting geyser {g}");
@@ -1205,6 +1216,22 @@ fn key_code(name: &str) -> Option<KeyCode> {
 const DIGIT_KEYS: [KeyCode; 9] = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9];
 
 fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<GameData>, mut player: ResMut<Player>, mut status: ResMut<Status>) {
+    if keys.just_pressed(KeyCode::KeyX) || keys.just_pressed(KeyCode::KeyY) {
+        let sel = player.selected;
+        let w = sim.world_mut();
+        if keys.just_pressed(KeyCode::KeyX) {
+            match w.order_cast(sel) {
+                Ok(()) => status.say(format!("unit {sel} casts {}", w.units[sel].spell.as_deref().unwrap_or("?"))),
+                Err(islefall_sim::DropError::NotInProduction) => status.say(format!("unit {sel} knows no Spell; read an Obelisk or pray")),
+                Err(e) => status.say(format!("unit {sel} cannot cast: {e}")),
+            }
+        } else if w.order_pray(sel) {
+            status.say(format!("unit {sel} prays"));
+        } else {
+            status.say(format!("unit {sel} cannot pray: needs a free High Priest without a Spell"));
+        }
+        return;
+    }
     let w = sim.world();
     if keys.just_pressed(KeyCode::KeyR) {
         if let Tool::Bridge(slot, piece) = &player.tool {
@@ -1348,12 +1375,56 @@ fn ghost(
 
 /// Draw a health bar over every damaged structure and unit, a ring around
 /// stunned priests, and a flash on the target of each shot fired this tick.
-fn overlays(mut commands: Commands, sim: Res<Sim>, data: Res<GameData>, existing: Query<Entity, With<Overlay>>) {
+#[allow(clippy::too_many_arguments)]
+fn overlays(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    player: Res<Player>,
+    mut lib: ResMut<ShapeLibrary>,
+    mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    existing: Query<Entity, With<Overlay>>,
+) {
     for e in &existing {
         commands.entity(e).despawn();
     }
     let w = sim.world();
     let g = data.grid();
+    let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+    // Spell icons over their bearers, the selected caster's reach, and casting, prayer, paralysis and invisibility marks.
+    for (i, u) in w.units.iter().enumerate() {
+        if !u.alive || u.carried_by.is_some() {
+            continue;
+        }
+        let p = unit_to_world(u, g);
+        if let Some(spell) = &u.spell {
+            if let Some(shape) = lib.get_or_load(&data.install, palette, spell, &mut images, &mut layouts) {
+                let frame = data.install.type_def(spell).and_then(|d| d.frames.iter().position(|f| f.has_flag("baseframe") || f.has_flag("default"))).unwrap_or(0);
+                if frame < shape.frames.len() {
+                    let e = world::spawn_frame(&mut commands, shape, frame, Vec2::new(p.x, p.y + 30.0), 62.0);
+                    commands.entity(e).insert(Overlay);
+                }
+                if i == player.selected && u.owner == 0 {
+                    let range = data.rules(spell).spell_range;
+                    let size = Vec2::new(((2 * range + 1) * g.cell_w) as f32, ((2 * range + 1) * g.cell_h) as f32);
+                    commands.spawn((Sprite::from_color(Color::srgba(0.6, 0.4, 1.0, 0.12), size), Transform::from_translation(Vec3::new(p.x, p.y + g.cell_h as f32 / 2.0, 58.0)), Overlay));
+                }
+            }
+        }
+        let mark = if u.casting > 0 || u.praying > 0 {
+            Some(Color::srgba(1.0, 1.0, 0.6, 0.6))
+        } else if u.paralysed > 0 {
+            Some(Color::srgba(0.4, 0.9, 1.0, 0.5))
+        } else if u.invisible > 0 {
+            Some(Color::srgba(1.0, 1.0, 1.0, 0.25))
+        } else {
+            None
+        };
+        if let Some(c) = mark {
+            commands.spawn((Sprite::from_color(c, Vec2::new(16.0, 16.0)), Transform::from_translation(Vec3::new(p.x, p.y + 8.0, 59.5)), Overlay));
+        }
+    }
     let bar = |commands: &mut Commands, pos: Vec2, width: f32, frac: f32| {
         let back = Color::srgba(0.1, 0.1, 0.1, 0.8);
         let front = if frac > 0.6 { Color::srgb(0.2, 0.9, 0.2) } else if frac > 0.3 { Color::srgb(0.9, 0.9, 0.2) } else { Color::srgb(0.9, 0.2, 0.2) };

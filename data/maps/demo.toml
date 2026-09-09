@@ -79,6 +79,13 @@ owner = 0
 kind = "geyser"
 at = [30, 11]
 
+# An Obelisk holding Devastation: send a Golem to read it, then cast with X.
+[[structures]]
+owner = 0
+kind = "buried"
+at = [26, 10]
+spell = "bombexplodemedium"
+
 [[structures]]
 owner = 1
 kind = "sunarcher"
