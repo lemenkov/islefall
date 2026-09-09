@@ -21,11 +21,66 @@ pub struct Structure {
     pub stock: i32,
     /// Whether units deliver crystals here.
     pub is_temple: bool,
+    pub owner: u8,
+    /// Hit points left; `max_hp` 0 means it cannot be damaged.
+    pub hp: i32,
+    pub max_hp: i32,
+    /// Storm Power it was bought for, refunded in part when salvaged.
+    pub cost: i32,
+    /// Weapon, if the type shoots.
+    pub weapon: Option<Weapon>,
+    /// Ticks until the weapon may fire again.
+    pub cooldown: u32,
+    pub threat: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Weapon {
+    pub range: i32,
+    pub damage: i32,
+    /// Ticks between shots.
+    pub delay: u32,
+    pub cardinal_only: bool,
 }
 
 impl Structure {
     pub fn new(kind: impl Into<String>, cell: Cell, foot_x: i32, foot_y: i32, walk: Walk) -> Structure {
-        Structure { kind: kind.into(), cell, foot_x: foot_x.max(1), foot_y: foot_y.max(1), walk, drop_blocking: false, stock: 0, is_temple: false }
+        Structure {
+            kind: kind.into(),
+            cell,
+            foot_x: foot_x.max(1),
+            foot_y: foot_y.max(1),
+            walk,
+            drop_blocking: false,
+            stock: 0,
+            is_temple: false,
+            owner: 0,
+            hp: 0,
+            max_hp: 0,
+            cost: 0,
+            weapon: None,
+            cooldown: 0,
+            threat: 0,
+        }
+    }
+
+    /// Centre of the footprint, in cells (rounded towards the hotspot).
+    pub fn centre(&self) -> Cell {
+        self.cell.offset(-(self.foot_x - 1) / 2, -(self.foot_y - 1) / 2)
+    }
+
+    /// Whether `cell` shares a row or column with the footprint: a straight line of fire.
+    pub fn in_line(&self, cell: Cell) -> bool {
+        let dx = self.cell.x - cell.x;
+        let dy = self.cell.y - cell.y;
+        (0..self.foot_x).contains(&dx) || (0..self.foot_y).contains(&dy)
+    }
+
+    /// Chebyshev distance from the footprint to `cell`, 0 when covered.
+    pub fn distance_to(&self, cell: Cell) -> i32 {
+        let dx = if cell.x > self.cell.x { cell.x - self.cell.x } else { (self.cell.x - self.foot_x + 1 - cell.x).max(0) };
+        let dy = if cell.y > self.cell.y { cell.y - self.cell.y } else { (self.cell.y - self.foot_y + 1 - cell.y).max(0) };
+        dx.max(dy)
     }
 
     /// Cells orthogonally adjacent to the footprint, where a unit can stand to work on it.
@@ -69,6 +124,7 @@ mod tests {
     #[test]
     fn footprint_cells() {
         let s = Structure::new("dais", Cell::new(9, 7), 3, 2, Walk::Free);
+        assert_eq!(s.owner, 0);
         let cells: Vec<Cell> = s.cells().collect();
         assert_eq!(cells.len(), 6);
         assert!(cells.contains(&Cell::new(9, 7)));
@@ -80,5 +136,10 @@ mod tests {
         assert_eq!(s.adjacent_cells().len(), 10);
         assert!(s.is_adjacent(Cell::new(10, 7)));
         assert!(!s.is_adjacent(Cell::new(10, 8)), "diagonal does not count");
+        assert_eq!(s.distance_to(Cell::new(9, 7)), 0);
+        assert_eq!(s.distance_to(Cell::new(12, 7)), 3);
+        assert_eq!(s.distance_to(Cell::new(5, 3)), 3);
+        assert!(s.in_line(Cell::new(20, 6)) && s.in_line(Cell::new(8, 0)) && !s.in_line(Cell::new(20, 0)));
+        assert_eq!(s.centre(), Cell::new(8, 7));
     }
 }

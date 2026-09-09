@@ -9,7 +9,7 @@
 //!   Tools: `Q`, `W`, `A`, `S` pick a bridge piece from the four slots on
 //!   offer (`R` rotates it), `1`..`5` drop a building, `U` spawn a golem.
 //!   `Delete` destroys, `C` cracks and `H` hardens the bridge cell under the
-//!   cursor. Arrow keys or WASD pan the camera, `-` and `=` zoom.
+//!   cursor; `V` salvages the player's structure under the cursor. Arrow keys or WASD pan the camera, `-` and `=` zoom.
 //! - `viewer`: animates one object type at a time. `[` and `]` step
 //!   through types, `,` and `.` through animations.
 //!
@@ -200,7 +200,7 @@ fn main() {
     .add_systems(Update, (common_keys, animate, auto_screenshot))
     .add_systems(
         Update,
-        (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, sync_units, sync_bridges, sync_structures, sync_platforms)
+        (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, overlays, sync_units, sync_bridges, sync_structures, sync_platforms)
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
@@ -270,14 +270,14 @@ fn setup_island(
     world::spawn_island(commands, install, lib, palette, images, layouts, &island, Theme::Sun, false);
     sim.world.islands.push(island);
     // A small neutral island to the east with a Storm Geyser on it.
-    let geyser_isle = IslandMap::rect(Cell::new(28, 5), 7, 7);
+    let geyser_isle = IslandMap::rect(Cell::new(28, 4), 9, 9);
     world::spawn_island(commands, install, lib, palette, images, layouts, &geyser_isle, Theme::Sun, false);
     sim.world.islands.push(geyser_isle);
 
     // The simulation owns everything else; sprites follow it through the sync systems.
     // The starting layout is free; the reserve is set once it stands.
     sim.world.storm_power = i32::MAX / 2;
-    for (stem, cell) in [("dais", Cell::new(9, 7)), ("residence", Cell::new(13, 6)), ("treetwo", Cell::new(2, 3)), ("treetwo", Cell::new(12, 8)), ("geyser", Cell::new(32, 9))] {
+    for (stem, cell) in [("dais", Cell::new(9, 7)), ("residence", Cell::new(13, 6)), ("treetwo", Cell::new(2, 3)), ("treetwo", Cell::new(12, 8)), ("geyser", Cell::new(34, 9))] {
         if let Err(e) = sim.world.drop_structure(stem, &data.rules(stem), cell) {
             warn!("{stem} at {cell:?}: {e}");
         }
@@ -289,6 +289,10 @@ fn setup_island(
     // A battery dropped in the sky off the bridge end at (21,3) makes its own island.
     if let Err(e) = sim.world.drop_structure("sunbattery", &data.rules("sunbattery"), Cell::new(24, 4)) {
         warn!("sunbattery: {e}");
+    }
+    // An enemy Disc Thrower guards the geyser island; its range reaches the battery islet.
+    if let Err(e) = sim.world.drop_structure_for(1, "sunarcher", &data.rules("sunarcher"), Cell::new(31, 7)) {
+        warn!("enemy sunarcher: {e}");
     }
     sim.world.storm_power = START_POWER;
     if let Some(i) = sim.world.spawn_unit("priest", &data.rules("priest"), Cell::new(2, 8)) {
@@ -562,10 +566,21 @@ fn bridge_keys(
     mut sim: ResMut<Sim>,
 ) {
     let (crack, harden, destroy) = (keys.just_pressed(KeyCode::KeyC), keys.just_pressed(KeyCode::KeyH), keys.just_pressed(KeyCode::Delete));
-    if !crack && !harden && !destroy {
+    let salvage = keys.just_pressed(KeyCode::KeyV);
+    if !crack && !harden && !destroy && !salvage {
         return;
     }
     let Some(cell) = cursor_cell(&windows, &cameras) else { return };
+    if salvage {
+        if let Some(i) = sim.world.structures.iter().position(|s| s.owner == 0 && s.covers(cell)) {
+            let kind = sim.world.structures[i].kind.clone();
+            match sim.world.salvage(i) {
+                Some(refund) => info!("salvaged {kind} for {refund} Storm Power"),
+                None => info!("cannot salvage {kind}"),
+            }
+        }
+        return;
+    }
     if crack {
         info!("crack {cell:?}: {}", sim.world.crack_bridge(cell));
     } else if harden {
@@ -614,6 +629,55 @@ fn ghost(
             Transform::from_translation(Vec3::new(x as f32 + CELL_W as f32 / 2.0, -(y as f32 + CELL_H as f32 / 2.0), 50.0)),
             Ghost,
         ));
+    }
+}
+
+/// Marks per-frame overlay sprites: health bars and shot flashes.
+#[derive(Component)]
+struct Overlay;
+
+/// Draw a health bar over every damaged structure and unit, and a flash on
+/// the target of each shot fired this tick.
+fn overlays(mut commands: Commands, sim: Res<Sim>, existing: Query<Entity, With<Overlay>>) {
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
+    let bar = |commands: &mut Commands, pos: Vec2, width: f32, frac: f32| {
+        let back = Color::srgba(0.1, 0.1, 0.1, 0.8);
+        let front = if frac > 0.6 { Color::srgb(0.2, 0.9, 0.2) } else if frac > 0.3 { Color::srgb(0.9, 0.9, 0.2) } else { Color::srgb(0.9, 0.2, 0.2) };
+        commands.spawn((Sprite::from_color(back, Vec2::new(width, 3.0)), Transform::from_translation(pos.extend(60.0)), Overlay));
+        let w = (width - 1.0) * frac.clamp(0.0, 1.0);
+        commands.spawn((
+            Sprite::from_color(front, Vec2::new(w.max(0.5), 2.0)),
+            Transform::from_translation(Vec3::new(pos.x - (width - 1.0 - w) / 2.0, pos.y, 60.1)),
+            Overlay,
+        ));
+    };
+    for s in &sim.world.structures {
+        if s.max_hp > 0 && s.hp < s.max_hp {
+            let (x, y) = s.cell.top_left_px();
+            let width = (s.foot_x * CELL_W) as f32;
+            let top = Vec2::new(x as f32 + CELL_W as f32 - width / 2.0, -(y as f32 - ((s.foot_y - 1) * CELL_H) as f32) + 4.0);
+            bar(&mut commands, top, width, s.hp as f32 / s.max_hp as f32);
+        }
+    }
+    for u in &sim.world.units {
+        if u.alive && u.hp < u.max_hp {
+            let p = unit_to_world(u);
+            bar(&mut commands, Vec2::new(p.x, p.y + 22.0), 12.0, u.hp as f32 / u.max_hp as f32);
+        }
+    }
+    for &(_, target) in &sim.world.last_shots {
+        let pos = match target {
+            islefall_sim::world::Target::Structure(j) => sim.world.structures.get(j).map(|s| {
+                let (x, y) = s.centre().top_left_px();
+                Vec2::new(x as f32 + CELL_W as f32 / 2.0, -(y as f32 + CELL_H as f32 / 2.0))
+            }),
+            islefall_sim::world::Target::Unit(j) => sim.world.units.get(j).map(unit_to_world),
+        };
+        if let Some(pos) = pos {
+            commands.spawn((Sprite::from_color(Color::srgba(1.0, 0.9, 0.3, 0.8), Vec2::new(6.0, 6.0)), Transform::from_translation(pos.extend(61.0)), Overlay));
+        }
     }
 }
 

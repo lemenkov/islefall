@@ -45,6 +45,18 @@ pub struct TypeRules {
     pub is_geyser: bool,
     /// A Temple (`residence`): where crystals become Storm Power.
     pub is_temple: bool,
+    /// `maxHitPoints`; 0 means indestructible (terrain-like types).
+    pub max_hit_points: i32,
+    /// Firing range in cells; 0 for things that do not shoot.
+    pub range: i32,
+    /// `hpPerSec`: damage dealt per second while firing.
+    pub hp_per_sec: i32,
+    /// `delayBetweenShots` in seconds (1.0 when absent).
+    pub delay_between_shots: f64,
+    /// Cannons fire only straight north, south, east or west (the manual).
+    pub cardinal_only: bool,
+    /// `threat`: targeting priority, higher first.
+    pub threat: i32,
 }
 
 impl TypeRules {
@@ -68,7 +80,19 @@ impl TypeRules {
             cost: def.get_i64("cost").unwrap_or(0).clamp(0, i32::MAX as i64) as i32,
             is_geyser: def.has_flag("geyser"),
             is_temple: def.has_flag("residence"),
+            max_hit_points: def.get_i64("maxHitPoints").unwrap_or(0).clamp(0, i32::MAX as i64) as i32,
+            range: if def.get_i64("hpPerSec").unwrap_or(0) > 0 { def.get_i64("range").unwrap_or(0) as i32 } else { 0 },
+            hp_per_sec: def.get_i64("hpPerSec").unwrap_or(0) as i32,
+            delay_between_shots: def.get_f64("delayBetweenShots").unwrap_or(1.0).max(0.1),
+            // No flag marks this; the manual says Sun/Rain/Thunder Cannons shoot only straight.
+            cardinal_only: def.name.to_ascii_lowercase().contains("cannon"),
+            threat: def.get_i64("threat").unwrap_or(0) as i32,
         }
+    }
+
+    /// Damage of one shot.
+    pub fn damage_per_shot(&self) -> i32 {
+        (self.hp_per_sec as f64 * self.delay_between_shots).round() as i32
     }
 
     /// Rules for a plain, unknown type: one cell, walkable, droppable.
@@ -85,6 +109,12 @@ impl TypeRules {
             cost: 0,
             is_geyser: false,
             is_temple: false,
+            max_hit_points: 0,
+            range: 0,
+            hp_per_sec: 0,
+            delay_between_shots: 1.0,
+            cardinal_only: false,
+            threat: 0,
         }
     }
 }
@@ -109,5 +139,9 @@ mod tests {
         let t = typefile::parse("typename g\ntypeflags geyser dropBlocking;\n{\n cost = 2000;\n}\nA00 : : \"a.gif\" #0;\n").unwrap();
         let r = TypeRules::from_type(&t);
         assert!(r.is_geyser && r.cost == 2000);
+        let t = typefile::parse("typename sunCannon\ntypeflags emplacement;\n{\n maxHitPoints = 600;\n range = 22;\n hpPerSec = 16;\n delayBetweenShots = 5.0;\n threat = 5;\n}\nA00 : : \"a.gif\" #0;\n").unwrap();
+        let r = TypeRules::from_type(&t);
+        assert_eq!((r.max_hit_points, r.range, r.damage_per_shot()), (600, 22, 80));
+        assert!(r.cardinal_only);
     }
 }

@@ -101,11 +101,14 @@ pub struct Unit {
     /// Dead units stay in the list so indices remain stable.
     pub alive: bool,
     pub task: Task,
+    pub owner: u8,
+    pub hp: i32,
+    pub max_hp: i32,
 }
 
 impl Unit {
     pub fn new(kind: impl Into<String>, cell: Cell, speed: i32) -> Unit {
-        Unit { kind: kind.into(), pos: Pos::cell_centre(cell), facing: Dir8::S, path: VecDeque::new(), speed, alive: true, task: Task::Idle }
+        Unit { kind: kind.into(), pos: Pos::cell_centre(cell), facing: Dir8::S, path: VecDeque::new(), speed, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1 }
     }
 
     pub fn is_moving(&self) -> bool {

@@ -8,7 +8,7 @@ use crate::island::IslandMap;
 use crate::path::find_path_costed;
 use crate::pieces::PieceQueue;
 use crate::rules::{AVOID_COST, TypeRules, Walk};
-use crate::structure::Structure;
+use crate::structure::{Structure, Weapon};
 use crate::unit::{Pos, Task, Unit};
 
 /// Simulation ticks per second. Rendering interpolates or samples; the
@@ -22,6 +22,12 @@ pub const PIECE_SLOTS: usize = 4;
 pub const NUGGET_POWER: i32 = 200;
 /// Ticks a unit spends taking a crystal or handing it in.
 pub const WORK_TICKS: u32 = TICK_HZ;
+/// Cells around an exploding structure that take damage and bridge shock.
+pub const EXPLOSION_RADIUS: i32 = 2;
+/// Damage an explosion deals to everything within the radius.
+pub const EXPLOSION_DAMAGE: i32 = 150;
+/// Share of the cost refunded when a healthy unit is salvaged.
+pub const SALVAGE_REFUND_PERCENT: i32 = 25;
 
 /// Condition of a bridge cell.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -32,6 +38,13 @@ pub enum BridgeState {
     Cracked,
     /// Hardened by the Bridge Harden spell; cannot crack.
     Hard,
+}
+
+/// What a shot was aimed at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Structure(usize),
+    Unit(usize),
 }
 
 /// Why a piece could not be placed.
@@ -108,6 +121,8 @@ pub struct World {
     pub queue: PieceQueue,
     /// The player's Storm Power reserve.
     pub storm_power: i32,
+    /// Shots fired during the last tick, for effects and logging.
+    pub last_shots: Vec<(usize, Target)>,
 }
 
 impl Default for World {
@@ -125,6 +140,7 @@ impl Default for World {
             doomed: BTreeMap::new(),
             queue: PieceQueue::new(PIECE_SLOTS, 0x5eed),
             storm_power: 0,
+            last_shots: Vec::new(),
         }
     }
 }
@@ -418,9 +434,14 @@ impl World {
     /// Drop a structure of type `kind`. Sky under a `createsisland` type
     /// becomes platform ground.
     pub fn drop_structure(&mut self, kind: &str, rules: &TypeRules, cell: Cell) -> Result<usize, DropError> {
+        self.drop_structure_for(0, kind, rules, cell)
+    }
+
+    /// Drop for a given owner; only the local player (owner 0) pays.
+    pub fn drop_structure_for(&mut self, owner: u8, kind: &str, rules: &TypeRules, cell: Cell) -> Result<usize, DropError> {
         self.can_drop(rules, cell)?;
         // Geysers are placed by the map, not bought; everything else costs its type's price.
-        let price = if rules.is_geyser { 0 } else { rules.cost };
+        let price = if rules.is_geyser || owner != 0 { 0 } else { rules.cost };
         if price > self.storm_power {
             return Err(DropError::NotEnoughPower { cost: price, have: self.storm_power });
         }
@@ -429,6 +450,19 @@ impl World {
         s.drop_blocking = rules.drop_blocking;
         s.stock = if rules.is_geyser { rules.cost } else { 0 };
         s.is_temple = rules.is_temple;
+        s.owner = owner;
+        s.hp = rules.max_hit_points;
+        s.max_hp = rules.max_hit_points;
+        s.cost = rules.cost;
+        s.threat = rules.threat;
+        if rules.range > 0 && rules.hp_per_sec > 0 {
+            s.weapon = Some(Weapon {
+                range: rules.range,
+                damage: rules.damage_per_shot(),
+                delay: (rules.delay_between_shots * TICK_HZ as f64).round().max(1.0) as u32,
+                cardinal_only: rules.cardinal_only,
+            });
+        }
         if rules.creates_island {
             let mut changed = false;
             for c in s.cells() {
@@ -450,11 +484,179 @@ impl World {
 
     /// Add a unit of type `kind` at `cell`. Returns its index.
     pub fn spawn_unit(&mut self, kind: &str, rules: &TypeRules, cell: Cell) -> Option<usize> {
+        self.spawn_unit_for(0, kind, rules, cell)
+    }
+
+    pub fn spawn_unit_for(&mut self, owner: u8, kind: &str, rules: &TypeRules, cell: Cell) -> Option<usize> {
         if !self.is_walkable(cell) {
             return None;
         }
-        self.units.push(Unit::new(kind, cell, speed_per_tick(rules.speed)));
+        let mut u = Unit::new(kind, cell, speed_per_tick(rules.speed));
+        u.owner = owner;
+        u.hp = rules.max_hit_points.max(1);
+        u.max_hp = u.hp;
+        self.units.push(u);
         Some(self.units.len() - 1)
+    }
+
+    /// Salvage one of the player's structures: part of its cost comes back,
+    /// scaled by its remaining health, and nearby bridges take the shock of
+    /// its removal but nothing else is damaged.
+    pub fn salvage(&mut self, index: usize) -> Option<i32> {
+        let s = self.structures.get(index)?;
+        if s.owner != 0 {
+            return None;
+        }
+        let health = if s.max_hp > 0 { s.hp.max(0) as i64 * 100 / s.max_hp as i64 } else { 100 };
+        let refund = (s.cost as i64 * SALVAGE_REFUND_PERCENT as i64 * health / 10_000) as i32;
+        self.storm_power += refund;
+        let centre = s.centre();
+        self.remove_structure(index);
+        self.shock_bridges(centre);
+        self.settle();
+        Some(refund)
+    }
+
+    fn remove_structure(&mut self, index: usize) {
+        self.structures.remove(index);
+        self.structure_version += 1;
+        for u in &mut self.units {
+            if let Task::Harvest { geyser, temple, .. } = u.task {
+                if geyser == index || temple == index {
+                    u.task = Task::Idle;
+                } else if geyser > index || temple > index {
+                    u.task = Task::Harvest {
+                        geyser: if geyser > index { geyser - 1 } else { geyser },
+                        temple: if temple > index { temple - 1 } else { temple },
+                        carrying: match u.task {
+                            Task::Harvest { carrying, .. } => carrying,
+                            _ => 0,
+                        },
+                        work: 0,
+                    };
+                }
+            }
+        }
+    }
+
+    /// Bridges near an explosion: cracked cells are destroyed, others crack.
+    fn shock_bridges(&mut self, centre: Cell) {
+        let mut destroyed = Vec::new();
+        let mut changed = false;
+        for (c, state) in self.bridges.iter_mut() {
+            if (c.x - centre.x).abs() > EXPLOSION_RADIUS || (c.y - centre.y).abs() > EXPLOSION_RADIUS {
+                continue;
+            }
+            match *state {
+                BridgeState::Cracked => destroyed.push(*c),
+                BridgeState::Normal => {
+                    *state = BridgeState::Cracked;
+                    changed = true;
+                }
+                BridgeState::Hard => {}
+            }
+        }
+        for c in destroyed {
+            self.bridges.remove(&c);
+            changed = true;
+        }
+        if changed {
+            self.bridge_version += 1;
+        }
+    }
+
+    /// A structure is destroyed: it explodes, damaging everything nearby
+    /// (which may chain) and shocking bridges, then unsupported ground falls.
+    pub fn destroy_structure(&mut self, index: usize) {
+        if index >= self.structures.len() {
+            return;
+        }
+        let centre = self.structures[index].centre();
+        self.remove_structure(index);
+        self.shock_bridges(centre);
+        let near = |c: Cell| (c.x - centre.x).abs() <= EXPLOSION_RADIUS && (c.y - centre.y).abs() <= EXPLOSION_RADIUS;
+        let victims: Vec<usize> = (0..self.structures.len()).filter(|&i| self.structures[i].distance_to(centre) <= EXPLOSION_RADIUS).collect();
+        for i in victims.into_iter().rev() {
+            self.damage_structure(i, EXPLOSION_DAMAGE);
+        }
+        for i in 0..self.units.len() {
+            if self.units[i].alive && near(self.units[i].pos.cell()) {
+                self.damage_unit(i, EXPLOSION_DAMAGE);
+            }
+        }
+        self.settle();
+    }
+
+    pub fn damage_structure(&mut self, index: usize, amount: i32) {
+        let Some(s) = self.structures.get_mut(index) else { return };
+        if s.max_hp == 0 {
+            return;
+        }
+        s.hp -= amount;
+        if s.hp <= 0 {
+            self.destroy_structure(index);
+        }
+    }
+
+    pub fn damage_unit(&mut self, index: usize, amount: i32) {
+        let Some(u) = self.units.get_mut(index) else { return };
+        if !u.alive {
+            return;
+        }
+        u.hp -= amount;
+        if u.hp <= 0 {
+            u.alive = false;
+            u.path.clear();
+            u.task = Task::Idle;
+        }
+    }
+
+    /// Every armed structure picks the highest-threat enemy in range and
+    /// fires when its cooldown allows. Cannons only fire along their row or column.
+    fn run_combat(&mut self) {
+        let mut shots: Vec<(usize, Target)> = Vec::new();
+        for (i, s) in self.structures.iter().enumerate() {
+            let Some(w) = s.weapon else { continue };
+            if s.cooldown > 0 {
+                continue;
+            }
+            let in_range = |c: Cell| s.distance_to(c) <= w.range && (!w.cardinal_only || s.in_line(c));
+            let mut best: Option<(i32, i32, Target)> = None;
+            for (j, t) in self.structures.iter().enumerate() {
+                if t.owner == s.owner || t.max_hp == 0 || !in_range(t.centre()) {
+                    continue;
+                }
+                let key = (t.threat, -s.distance_to(t.centre()));
+                if best.as_ref().is_none_or(|b| (b.0, b.1) < key) {
+                    best = Some((key.0, key.1, Target::Structure(j)));
+                }
+            }
+            for (j, u) in self.units.iter().enumerate() {
+                if !u.alive || u.owner == s.owner || !in_range(u.pos.cell()) {
+                    continue;
+                }
+                let key = (0, -s.distance_to(u.pos.cell()));
+                if best.as_ref().is_none_or(|b| (b.0, b.1) < key) {
+                    best = Some((key.0, key.1, Target::Unit(j)));
+                }
+            }
+            if let Some((_, _, target)) = best {
+                shots.push((i, target));
+            }
+        }
+        // Resolve in reverse index order so removals do not shift pending shooters.
+        for (i, target) in shots.into_iter().rev() {
+            let Some(w) = self.structures.get(i).and_then(|s| s.weapon) else { continue };
+            self.structures[i].cooldown = w.delay;
+            self.last_shots.push((i, target));
+            match target {
+                Target::Structure(j) => self.damage_structure(j, w.damage),
+                Target::Unit(j) => self.damage_unit(j, w.damage),
+            }
+        }
+        for s in &mut self.structures {
+            s.cooldown = s.cooldown.saturating_sub(1);
+        }
     }
 
     /// Order a unit to harvest from the geyser at `geyser` and deliver to the
@@ -581,6 +783,8 @@ impl World {
             u.step();
         }
         self.run_tasks();
+        self.last_shots.clear();
+        self.run_combat();
         self.crumble();
         self.tick += 1;
     }
@@ -810,6 +1014,88 @@ mod tests {
         assert_eq!(w.structures[g].kind, "emptygeyser");
         assert!(!w.order_harvest(u, g), "nothing left to harvest");
         let _ = t;
+    }
+
+    fn cannon() -> TypeRules {
+        TypeRules {
+            foot_x: 3,
+            foot_y: 3,
+            creates_island: true,
+            may_drop_on_rim: true,
+            max_hit_points: 600,
+            range: 6,
+            hp_per_sec: 16,
+            delay_between_shots: 5.0,
+            cardinal_only: true,
+            threat: 5,
+            cost: 400,
+            ..TypeRules::plain()
+        }
+    }
+
+    #[test]
+    fn cannons_fire_straight_at_enemies_in_range() {
+        let mut w = world();
+        w.islands.push(IslandMap::rect(Cell::new(0, 4), 12, 8));
+        w.storm_power = 1000;
+        let mine = w.drop_structure("suncannon", &cannon(), Cell::new(3, 6)).unwrap();
+        assert_eq!(w.storm_power, 600);
+        // Enemy cannon in the same rows, 4 cells east: both in range and in line.
+        let theirs = w.drop_structure_for(1, "suncannon", &cannon(), Cell::new(9, 6)).unwrap();
+        assert_eq!(w.storm_power, 600, "enemies do not spend our power");
+        w.step();
+        assert_eq!(w.structures[mine].hp, 520, "took one 80-point shot");
+        assert_eq!(w.structures[theirs].hp, 520);
+        assert_eq!(w.last_shots.len(), 2, "both cannons fired this tick");
+        w.step();
+        assert_eq!(w.last_shots.len(), 0, "a tick without shots logs none");
+        for _ in 0..148 {
+            w.step();
+        }
+        assert_eq!(w.structures[mine].hp, 520, "cooldown of five seconds");
+        w.step();
+        assert_eq!(w.structures[mine].hp, 440);
+        // A unit diagonal to the enemy cannon is out of its line of fire.
+        let golem = TypeRules { is_unit: true, max_hit_points: 50, ..TypeRules::plain() };
+        let u = w.spawn_unit("sunwalker", &golem, Cell::new(5, 10)).unwrap();
+        for _ in 0..200 {
+            w.step();
+        }
+        assert!(w.units[u].alive, "diagonal target never shot");
+    }
+
+    #[test]
+    fn destroyed_structures_explode_and_shock_bridges() {
+        let mut w = world();
+        for x in 8..14 {
+            w.place_bridge(Cell::new(x, 1));
+        }
+        let battery = TypeRules { foot_x: 3, foot_y: 3, creates_island: true, max_hit_points: 100, cost: 300, ..TypeRules::plain() };
+        w.storm_power = 300;
+        // In the sky off the open end at (13,1): footprint (14..16, 0..2).
+        let b = w.drop_structure("sunbattery", &battery, Cell::new(16, 2)).unwrap_or_else(|e| panic!("{e}"));
+        w.crack_bridge(Cell::new(13, 1));
+        w.damage_structure(b, 100);
+        assert!(w.structures.is_empty(), "battery destroyed");
+        assert!(!w.is_bridge(Cell::new(13, 1)), "cracked bridge in the blast was destroyed");
+        assert_eq!(w.bridge_state(Cell::new(12, 1)), Some(BridgeState::Normal), "outside the blast");
+        assert!(w.platforms.is_empty(), "its platform fell once the bridge was gone");
+    }
+
+    #[test]
+    fn salvage_refunds_a_quarter_scaled_by_health() {
+        let mut w = world();
+        w.storm_power = 1000;
+        let r = TypeRules { foot_x: 2, foot_y: 2, cost: 400, max_hit_points: 100, ..TypeRules::plain() };
+        let i = w.drop_structure("thing", &r, Cell::new(3, 2)).unwrap();
+        assert_eq!(w.storm_power, 600);
+        assert_eq!(w.salvage(i), Some(100));
+        assert_eq!(w.storm_power, 700);
+        let i = w.drop_structure("thing", &r, Cell::new(3, 2)).unwrap();
+        w.damage_structure(i, 50);
+        assert_eq!(w.salvage(i), Some(50), "half health, half refund");
+        let e = w.drop_structure_for(1, "thing", &r, Cell::new(3, 2)).unwrap();
+        assert_eq!(w.salvage(e), None, "cannot salvage enemy property");
     }
 
     #[test]
