@@ -12,6 +12,7 @@
 
 pub mod col;
 pub mod install;
+pub mod isle;
 pub mod shapes;
 pub mod shp;
 pub mod tarc;

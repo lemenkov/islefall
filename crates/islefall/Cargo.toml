@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 islefall-data = { workspace = true }
+islefall-sim = { workspace = true }
 
 [dependencies.bevy]
 version = "0.19.1"

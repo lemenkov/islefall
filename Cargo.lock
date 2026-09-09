@@ -2953,6 +2953,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "islefall-data",
+ "islefall-sim",
 ]
 
 [[package]]
@@ -2960,6 +2961,13 @@ name = "islefall-data"
 version = "0.1.0"
 dependencies = [
  "png 0.17.16",
+]
+
+[[package]]
+name = "islefall-sim"
+version = "0.1.0"
+dependencies = [
+ "islefall-data",
 ]
 
 [[package]]

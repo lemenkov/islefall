@@ -15,7 +15,8 @@ Status: early development. Nothing is playable yet.
 | Path | What |
 |------|------|
 | `crates/islefall-data` | Loaders for the original data files (sprite cache, palettes, the `netstorm.tarc` archive and its `.type` unit definitions). No engine dependency. |
-| `crates/islefall` | The game binary, built on Bevy. Currently a sprite viewer. |
+| `crates/islefall-sim` | The deterministic simulation: grid, islands, later units and rules. No engine dependency. |
+| `crates/islefall` | The game binary, built on Bevy. Currently draws a first island scene and doubles as a sprite viewer. |
 | `docs/FORMATS.md` | Reverse-engineered descriptions of the NetStorm file formats. |
 | `tools/shp_decode.py` | Python reference decoder used while working out the sprite format. |
 
@@ -37,14 +38,21 @@ cargo run --features dynamic_linking
 
 ## Running
 
-Point `NETSTORM_DIR` at the directory that contains the game's `d/` folder:
+Point `NETSTORM_DIR` at the directory that contains the game's `d/` folder
+and `netstorm.tarc`:
 
 ```sh
 NETSTORM_DIR=~/games/NetStorm cargo run --release
 ```
 
-The viewer animates one shape from the sprite cache. `[` and `]` step through
-shapes, `Space` pauses.
+By default this shows a first scene: an island assembled from the terrain
+tiles, the altar, and the High Priest. `ISLEFALL_MODE=viewer` instead
+animates one object type at a time: `[` and `]` step through types, `,` and
+`.` through its animations. In both modes `Space` pauses and `P` saves a
+screenshot; `ISLEFALL_SCREENSHOT=file.png` saves one automatically after
+start-up. `ISLEFALL_PALETTE` selects a palette file stem from `d/` (default
+`suncannon`; the real sprite palette has not been identified yet, so colours
+are approximate).
 
 ## Inspecting the data
 

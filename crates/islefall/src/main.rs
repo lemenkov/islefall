@@ -1,31 +1,45 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Islefall entry point. For now: a shape viewer that animates one object
-//! type from the NetStorm data, image and shadow, to prove the data path.
+//! Islefall entry point.
+//!
+//! Two modes, chosen with `ISLEFALL_MODE`:
+//! - `island` (default): a first scene with an island, an altar and the
+//!   High Priest, drawn from the simulation's grid.
+//! - `viewer`: animates one object type at a time. `[` and `]` step
+//!   through types, `,` and `.` through animations.
 //!
 //! Environment:
 //! - `NETSTORM_DIR`: directory containing the game's `d/` and `netstorm.tarc`.
 //! - `ISLEFALL_PALETTE`: palette file stem from `d/` (default `suncannon`).
 //! - `ISLEFALL_SCREENSHOT=file.png`: save a screenshot shortly after start-up.
 //!
-//! Keys: `[` and `]` step through types, `,` and `.` through animations,
-//! `Space` pauses, `P` saves a screenshot.
+//! Keys in both modes: `Space` pauses animation, `P` saves a screenshot.
 
 mod sprites;
+mod world;
 
 use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::sprite::Anchor;
-use islefall_data::Installation;
+use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
-use sprites::{FrameInfo, ShapeAtlas};
+use islefall_data::{Installation, TypeDef};
+use islefall_sim::{Cell, IslandMap};
+use sprites::FrameInfo;
+use world::{LoadedShape, ShapeLibrary, Z_SHADOW, Z_STRUCTURE, Z_UNIT};
 
 const START_TYPE: &str = "priest";
 const FRAME_SECONDS: f32 = 0.1;
-const ZOOM: f32 = 4.0;
+const ZOOM: f32 = 3.0;
 const AUTO_SCREENSHOT_SECONDS: f32 = 1.5;
 const DEFAULT_PALETTE: &str = "suncannon";
+
+#[derive(Resource, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Island,
+    Viewer,
+}
 
 /// The user-supplied NetStorm data, loaded once at startup.
 #[derive(Resource)]
@@ -60,6 +74,10 @@ struct ShapeSprite {
     step: usize,
 }
 
+/// Marks entities spawned by the viewer so they can be replaced.
+#[derive(Component)]
+struct ViewerEntity;
+
 fn main() {
     let dir = match std::env::var_os("NETSTORM_DIR") {
         Some(d) => PathBuf::from(d),
@@ -80,6 +98,10 @@ fn main() {
         eprintln!("palette {palette} not found in {}/d; available: {:?}", dir.display(), install.palettes.keys().collect::<Vec<_>>());
         std::process::exit(1);
     }
+    let mode = match std::env::var("ISLEFALL_MODE").as_deref() {
+        Ok("viewer") => Mode::Viewer,
+        _ => Mode::Island,
+    };
 
     let mut app = App::new();
     app.add_plugins(
@@ -91,6 +113,8 @@ fn main() {
             }),
     )
     .insert_resource(GameData { install, palette })
+    .insert_resource(mode)
+    .init_resource::<ShapeLibrary>()
     .insert_resource(Viewer {
         type_index: SHAPE_ORDER.iter().position(|s| *s == START_TYPE).unwrap_or(0),
         animation: 0,
@@ -98,7 +122,8 @@ fn main() {
         paused: false,
     })
     .add_systems(Startup, setup)
-    .add_systems(Update, (keys, animate, auto_screenshot));
+    .add_systems(Update, (common_keys, animate, auto_screenshot))
+    .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
         app.insert_resource(AutoScreenshot {
             path,
@@ -118,71 +143,128 @@ fn auto_screenshot(mut commands: Commands, time: Res<Time>, auto: Option<ResMut<
 
 fn setup(
     mut commands: Commands,
+    mode: Res<Mode>,
     data: Res<GameData>,
     viewer: Res<Viewer>,
+    mut lib: ResMut<ShapeLibrary>,
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
-    commands.spawn(Camera2d);
-    spawn_shape(&mut commands, &data, &viewer, &mut images, &mut layouts);
+    match *mode {
+        Mode::Island => setup_island(&mut commands, &data, &mut lib, &mut images, &mut layouts),
+        Mode::Viewer => {
+            commands.spawn((Camera2d, zoomed_projection()));
+            spawn_viewer_shape(&mut commands, &data, &viewer, &mut lib, &mut images, &mut layouts);
+        }
+    }
 }
 
-fn spawn_shape(
+fn zoomed_projection() -> Projection {
+    Projection::Orthographic(OrthographicProjection { scale: 1.0 / ZOOM, ..OrthographicProjection::default_2d() })
+}
+
+/// A first scene: a sun-themed island with a notch, the altar, and the priest.
+fn setup_island(
+    commands: &mut Commands,
+    data: &GameData,
+    lib: &mut ShapeLibrary,
+    images: &mut Assets<Image>,
+    layouts: &mut Assets<TextureAtlasLayout>,
+) {
+    let install = &data.install;
+    let palette = install.palette(&data.palette).expect("palette checked at start-up");
+    let (w, h) = (14, 10);
+    let mut island = IslandMap::rect(Cell::new(0, 0), w, h);
+    for c in [Cell::new(13, 0), Cell::new(12, 0), Cell::new(13, 1)] {
+        island.remove(c);
+    }
+    world::spawn_island(commands, install, lib, palette, images, layouts, &island, Theme::Sun);
+
+    // The altar has a 7x7 footprint; its hotspot is the bottom-right cell.
+    if let Some(def) = install.type_def("dais") {
+        let frame = def.frames.iter().position(|f| f.label.eq_ignore_ascii_case("P03")).unwrap_or(0);
+        if let Some(shape) = lib.get_or_load(install, palette, "dais", images, layouts) {
+            world::spawn_frame(commands, shape, frame, world::cell_to_world(Cell::new(9, 7)), Z_STRUCTURE);
+        }
+    }
+
+    if let Some(def) = install.type_def("priest") {
+        if let Some(shape) = lib.get_or_load(install, palette, "priest", images, layouts) {
+            spawn_animated(commands, shape, def, "A", world::cell_to_world(Cell::new(2, 8)), Z_UNIT, false);
+        }
+    }
+
+    let centre = (world::cell_to_world(Cell::new(0, 0)) + world::cell_to_world(Cell::new(w - 1, h - 1))) / 2.0;
+    commands.spawn((Camera2d, zoomed_projection(), Transform::from_translation(centre.extend(0.0))));
+    info!("island scene: {} cells, altar and priest", island.len());
+}
+
+/// Spawn image and shadow layers of one animation, looping.
+fn spawn_animated(
+    commands: &mut Commands,
+    shape: &LoadedShape,
+    def: &TypeDef,
+    animation: &str,
+    pos: Vec2,
+    z: f32,
+    viewer: bool,
+) {
+    let sequence: Vec<usize> = def
+        .frames
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.animation.eq_ignore_ascii_case(animation))
+        .map(|(i, _)| i)
+        .collect();
+    if sequence.is_empty() {
+        return;
+    }
+    let first = sequence[0];
+    let mut layers = vec![(shape.image.clone(), shape.layout.clone(), shape.frames.clone(), z, Color::WHITE)];
+    if let Some((img, lay, frames)) = &shape.shadow {
+        // Shadow records only carry a silhouette; draw it as translucent black.
+        layers.push((img.clone(), lay.clone(), frames.clone(), Z_SHADOW.min(z - 1.0), Color::srgba(0.0, 0.0, 0.0, 0.5)));
+    }
+    for (image, layout, frames, z, color) in layers {
+        let mut sprite = Sprite::from_atlas_image(image, TextureAtlas { layout, index: first });
+        sprite.color = color;
+        let mut e = commands.spawn((
+            sprite,
+            frames[first].anchor(),
+            Transform::from_translation(pos.extend(z)),
+            ShapeSprite { sequence: sequence.clone(), frames, step: 0 },
+        ));
+        if viewer {
+            e.insert(ViewerEntity);
+        }
+    }
+}
+
+fn spawn_viewer_shape(
     commands: &mut Commands,
     data: &GameData,
     viewer: &Viewer,
+    lib: &mut ShapeLibrary,
     images: &mut Assets<Image>,
     layouts: &mut Assets<TextureAtlasLayout>,
 ) {
     let stem = SHAPE_ORDER[viewer.type_index];
-    let (Some(def), Some(records), Some(palette)) =
-        (data.install.type_def(stem), data.install.shape_records(stem), data.install.palette(&data.palette))
-    else {
-        warn!("{stem}: missing type, records or palette");
-        return;
-    };
+    let install = &data.install;
+    let palette = install.palette(&data.palette).expect("palette checked at start-up");
+    let Some(def) = install.type_def(stem) else { return };
     let animations = def.animations();
-    let Some(&animation) = animations.get(viewer.animation) else {
-        warn!("{stem}: no animations");
-        return;
-    };
-    let sequence: Vec<usize> = def.frames.iter().enumerate().filter(|(_, f)| f.animation == animation).map(|(i, _)| i).collect();
+    let Some(&animation) = animations.get(viewer.animation) else { return };
     info!(
-        "{stem} ({}): {} frames, {} animations, showing {animation} with {} frames{}",
+        "{stem} ({}): {} frames, {} animations, showing {animation}",
         def.get_str("description").unwrap_or("-"),
         def.frames.len(),
-        animations.len(),
-        sequence.len(),
-        if records.shadows.is_empty() { "" } else { ", with shadows" }
+        animations.len()
     );
-
-    let layers = [(&records.shadows, -1.0), (&records.images, 0.0)];
-    for (offsets, z) in layers {
-        if offsets.is_empty() {
-            continue;
-        }
-        let atlas: ShapeAtlas = match sprites::build_atlas(&data.install.shapes, palette, offsets) {
-            Ok(a) => a,
-            Err(e) => {
-                warn!("{stem}: {e}");
-                continue;
-            }
-        };
-        let image = images.add(atlas.image);
-        let layout = layouts.add(atlas.layout);
-        let first = sequence[0];
-        let mut sprite = Sprite::from_atlas_image(image, TextureAtlas { layout, index: first });
-        if z < 0.0 {
-            // Shadow records only carry a silhouette; draw it as translucent black.
-            sprite.color = Color::srgba(0.0, 0.0, 0.0, 0.5);
-        }
-        commands.spawn((
-            sprite,
-            atlas.frames[first].anchor(),
-            Transform::from_translation(Vec3::new(0.0, 0.0, z)).with_scale(Vec3::splat(ZOOM)),
-            ShapeSprite { sequence: sequence.clone(), frames: atlas.frames, step: 0 },
-        ));
-    }
+    let Some(shape) = lib.get_or_load(install, palette, stem, images, layouts) else {
+        warn!("{stem}: no atlas");
+        return;
+    };
+    spawn_animated(commands, shape, def, animation, Vec2::ZERO, Z_UNIT, true);
 }
 
 fn animate(
@@ -202,21 +284,25 @@ fn animate(
     }
 }
 
-fn keys(
-    mut commands: Commands,
-    keys: Res<ButtonInput<KeyCode>>,
-    data: Res<GameData>,
-    mut viewer: ResMut<Viewer>,
-    mut images: ResMut<Assets<Image>>,
-    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-    existing: Query<Entity, With<ShapeSprite>>,
-) {
+fn common_keys(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>, mut viewer: ResMut<Viewer>) {
     if keys.just_pressed(KeyCode::Space) {
         viewer.paused = !viewer.paused;
     }
     if keys.just_pressed(KeyCode::KeyP) {
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk("islefall.png"));
     }
+}
+
+fn viewer_keys(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    data: Res<GameData>,
+    mut viewer: ResMut<Viewer>,
+    mut lib: ResMut<ShapeLibrary>,
+    mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    existing: Query<Entity, With<ViewerEntity>>,
+) {
     let n = SHAPE_ORDER.len();
     let mut changed = false;
     if keys.just_pressed(KeyCode::BracketRight) {
@@ -236,6 +322,6 @@ fn keys(
         for e in &existing {
             commands.entity(e).despawn();
         }
-        spawn_shape(&mut commands, &data, &viewer, &mut images, &mut layouts);
+        spawn_viewer_shape(&mut commands, &data, &viewer, &mut lib, &mut images, &mut layouts);
     }
 }
