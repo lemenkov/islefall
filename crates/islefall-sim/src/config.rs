@@ -2,9 +2,12 @@
 //! Game rules and parameters, loaded from `rules.toml`. The code carries
 //! no defaults: a world cannot exist without a loaded configuration.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::Deserialize;
+
+use crate::world::EventKind;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -21,6 +24,75 @@ pub struct Config {
     pub production: Production,
     pub ai: AiConfig,
     pub controls: Controls,
+    pub sounds: Sounds,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Sounds {
+    pub dir: String,
+    pub volume: f32,
+    pub max_per_frame: usize,
+    pub events: SoundEvents,
+    /// Shooter type stem to projectile type stem, consulted after the shooter.
+    #[serde(default)]
+    pub projectiles: BTreeMap<String, String>,
+    /// Names the type files use that exist under another name on disk.
+    #[serde(default)]
+    pub aliases: BTreeMap<String, String>,
+    /// Names replaced by files of the mod's own, relative to the data directory.
+    #[serde(default)]
+    pub overrides: BTreeMap<String, String>,
+}
+
+/// What an event plays: the type's `property` when it names a file, else `file`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SoundCue {
+    #[serde(default)]
+    pub property: Option<String>,
+    #[serde(default)]
+    pub file: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields, default)]
+pub struct SoundEvents {
+    pub fired: SoundCue,
+    pub hit: SoundCue,
+    pub built: SoundCue,
+    pub destroyed: SoundCue,
+    pub salvaged: SoundCue,
+    pub moved: SoundCue,
+    pub pickup: SoundCue,
+    pub sacrificed: SoundCue,
+    pub harvested: SoundCue,
+    pub piece_placed: SoundCue,
+    pub bridge_cracked: SoundCue,
+    pub bridge_fell: SoundCue,
+    pub island_fell: SoundCue,
+    pub unit_lost: SoundCue,
+}
+
+impl SoundEvents {
+    pub fn cue(&self, what: EventKind) -> &SoundCue {
+        match what {
+            EventKind::Fired => &self.fired,
+            EventKind::Hit => &self.hit,
+            EventKind::Built => &self.built,
+            EventKind::Destroyed => &self.destroyed,
+            EventKind::Salvaged => &self.salvaged,
+            EventKind::Moved => &self.moved,
+            EventKind::Pickup => &self.pickup,
+            EventKind::Sacrificed => &self.sacrificed,
+            EventKind::Harvested => &self.harvested,
+            EventKind::PiecePlaced => &self.piece_placed,
+            EventKind::BridgeCracked => &self.bridge_cracked,
+            EventKind::BridgeFell => &self.bridge_fell,
+            EventKind::IslandFell => &self.island_fell,
+            EventKind::UnitLost => &self.unit_lost,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -197,6 +269,9 @@ impl Config {
         if self.ai.move_seconds <= 0.0 || self.ai.shooter_every == 0 {
             return bad("ai.move_seconds and ai.shooter_every must be positive");
         }
+        if !(0.0..=1.0).contains(&self.sounds.volume) {
+            return bad("sounds.volume must be 0.0..1.0");
+        }
         Ok(())
     }
 
@@ -228,6 +303,8 @@ mod tests {
         assert_eq!(c.ticks(4.0), 120);
         assert_eq!(c.bridges.pieces.len(), 8);
         assert!(Config::has_any(&c.flags.walk_avoid, &["yuckwalk".to_string()]));
+        assert_eq!(c.sounds.events.cue(EventKind::Fired).property.as_deref(), Some("fireSound"));
+        assert!(c.sounds.events.cue(EventKind::Destroyed).file.is_some());
     }
 
     #[test]

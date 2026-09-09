@@ -75,7 +75,10 @@ animates one object type at a time: `[` and `]` step through types, `,` and
 `.` through its animations. In both modes `Space` pauses and `P` saves a
 screenshot; `ISLEFALL_SCREENSHOT=file.png` saves one automatically after
 start-up. `ISLEFALL_PALETTE` selects a palette file stem from `d/` (default
-`gifcloud`, which is the game's fixed 8-bit palette).
+`gifcloud`, which is the game's fixed 8-bit palette). Sounds come from the
+installation's `sound/` directory through Bevy's built-in audio; the
+`[sounds]` section of the rules says what each event plays, and
+`ISLEFALL_VOLUME=0` silences a run.
 
 ## Inspecting the data
 

@@ -83,6 +83,41 @@ pub enum DropError {
     NoTemple,
 }
 
+/// Something that happened, for sounds and effects. The simulation never
+/// reads these back; the app drains them with [`World::take_events`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Event {
+    pub what: EventKind,
+    /// Type stem of the thing involved: the shooter, the building, the unit.
+    pub kind: String,
+    pub at: Cell,
+    pub owner: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EventKind {
+    /// A structure fired; `kind` is the shooter.
+    Fired,
+    /// A shot landed; `kind` is the shooter, `at` the target's cell.
+    Hit,
+    Built,
+    Destroyed,
+    Salvaged,
+    /// A player ordered a unit to move.
+    Moved,
+    /// A stunned priest was picked up; `kind` is the priest.
+    Pickup,
+    /// A priest was sacrificed at an altar.
+    Sacrificed,
+    /// A unit took a crystal from a geyser.
+    Harvested,
+    PiecePlaced,
+    BridgeCracked,
+    BridgeFell,
+    IslandFell,
+    UnitLost,
+}
+
 /// Why a type could not be put into production.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProductionError {
@@ -162,6 +197,8 @@ pub struct World {
     pub known_tech: Vec<BTreeSet<u8>>,
     /// Shots fired during the last tick, for effects and logging.
     pub last_shots: Vec<(usize, Target)>,
+    /// Happenings since the last [`World::take_events`].
+    pub events: Vec<Event>,
     /// Knowledge granted to the player by sacrifices.
     pub knowledge: u32,
     /// Owners whose sacrifice has not been turned into a tech bit yet.
@@ -194,6 +231,7 @@ impl World {
             powers: vec![0; players],
             known_tech: vec![BTreeSet::new(); players],
             last_shots: Vec::new(),
+            events: Vec::new(),
             knowledge: 0,
             pending_knowledge: Vec::new(),
             energy_enforced: true,
@@ -350,6 +388,7 @@ impl World {
             self.bridge_owners.insert(c, owner);
         }
         self.bridge_version += 1;
+        self.emit(EventKind::PiecePlaced, "", cells[0], owner);
         Ok(())
     }
 
@@ -426,7 +465,7 @@ impl World {
     /// structures and units on them. Returns how many cells fell now.
     pub fn settle(&mut self) -> usize {
         let reached = self.supported();
-        let mut changed = false;
+        let mut changed: Option<Cell> = None;
         let crumble = self.cfg.ticks(self.cfg.bridges.crumble_seconds);
         for (c, state) in self.bridges.iter_mut() {
             if !reached.contains(c) && !self.doomed.contains_key(c) {
@@ -434,16 +473,20 @@ impl World {
                 if *state != BridgeState::Hard {
                     *state = BridgeState::Cracked;
                 }
-                changed = true;
+                changed.get_or_insert(*c);
             }
         }
-        if changed {
+        if let Some(c) = changed {
             self.bridge_version += 1;
+            let owner = self.bridge_owners.get(&c).copied().unwrap_or(0);
+            self.emit(EventKind::BridgeCracked, "", c, owner);
         }
         let falling: Vec<Cell> = self.platforms.cells().filter(|c| !reached.contains(c)).collect();
         if falling.is_empty() {
             return 0;
         }
+        let owner = self.platform_owners.get(&falling[0]).copied().unwrap_or(0);
+        self.emit(EventKind::IslandFell, "", falling[0], owner);
         for c in &falling {
             self.platforms.remove(*c);
             self.platform_owners.remove(c);
@@ -465,11 +508,16 @@ impl World {
         if self.structures.len() != before {
             self.structure_version += 1;
         }
+        let mut lost = Vec::new();
         for u in &mut self.units {
             if u.alive && !reached.contains(&u.cell()) {
                 u.alive = false;
                 u.path.clear();
+                lost.push((u.kind.clone(), u.cell(), u.owner));
             }
+        }
+        for (kind, at, owner) in lost {
+            self.emit(EventKind::UnitLost, &kind, at, owner);
         }
     }
 
@@ -485,6 +533,8 @@ impl World {
         if fell.is_empty() {
             return;
         }
+        let owner = self.bridge_owners.get(&fell[0]).copied().unwrap_or(0);
+        self.emit(EventKind::BridgeFell, "", fell[0], owner);
         for c in &fell {
             self.doomed.remove(c);
             self.bridges.remove(c);
@@ -674,8 +724,10 @@ impl World {
                 self.doomed.retain(|c, _| !Self::touches_land_static(&self.islands, &self.platforms, *c));
             }
         }
+        let centre = s.centre();
         self.structures.push(s);
         self.structure_version += 1;
+        self.emit(EventKind::Built, kind, centre, owner);
         Ok(self.structures.len() - 1)
     }
 
@@ -866,7 +918,8 @@ impl World {
             .unwrap_or(0);
         let slot = self.slot(owner);
         self.powers[slot] += refund;
-        let centre = s.centre();
+        let (centre, kind) = (s.centre(), s.kind.clone());
+        self.emit(EventKind::Salvaged, &kind, centre, owner);
         self.remove_structure(index);
         self.shock_bridges(centre);
         self.settle();
@@ -931,6 +984,8 @@ impl World {
         }
         let centre = self.structures[index].centre();
         let (radius, damage) = (self.cfg.combat.explosion_radius, self.cfg.combat.explosion_damage);
+        let (kind, owner) = (self.structures[index].kind.clone(), self.structures[index].owner);
+        self.emit(EventKind::Destroyed, &kind, centre, owner);
         self.remove_structure(index);
         self.shock_bridges(centre);
         let near = |c: Cell| (c.x - centre.x).abs() <= radius && (c.y - centre.y).abs() <= radius;
@@ -967,11 +1022,13 @@ impl World {
             u.alive = false;
             u.path.clear();
             u.task = Task::Idle;
+            let (kind, at, owner) = (u.kind.clone(), u.cell(), u.owner);
             if let Some(p) = u.carrying.take() {
                 if let Some(priest) = self.units.get_mut(p) {
                     priest.carried_by = None;
                 }
             }
+            self.emit(EventKind::UnitLost, &kind, at, owner);
         }
     }
 
@@ -1013,6 +1070,15 @@ impl World {
             let Some(w) = self.structures.get(i).and_then(|s| s.weapon) else { continue };
             self.structures[i].cooldown = w.delay;
             self.last_shots.push((i, target));
+            let (kind, from, owner) = (self.structures[i].kind.clone(), self.structures[i].centre(), self.structures[i].owner);
+            let hit = match target {
+                Target::Structure(j) => self.structures.get(j).map(|t| t.centre()),
+                Target::Unit(j) => self.units.get(j).map(|u| u.cell()),
+            };
+            self.emit(EventKind::Fired, &kind, from, owner);
+            if let Some(at) = hit {
+                self.emit(EventKind::Hit, &kind, at, owner);
+            }
             match target {
                 Target::Structure(j) => self.damage_structure(j, w.damage),
                 Target::Unit(j) => self.damage_unit(j, w.damage),
@@ -1094,6 +1160,8 @@ impl World {
                         self.units[priest].task = Task::Idle;
                         self.units[i].carrying = Some(priest);
                         self.units[i].task = Task::Idle;
+                        let (kind, owner) = (self.units[priest].kind.clone(), self.units[i].owner);
+                        self.emit(EventKind::Pickup, &kind, pc, owner);
                     } else if !self.walk_next_to(i, pc) {
                         self.units[i].task = Task::Idle;
                     }
@@ -1114,6 +1182,8 @@ impl World {
                             self.knowledge += 1;
                         }
                         self.pending_knowledge.push(owner);
+                        let kind = self.units[p].kind.clone();
+                        self.emit(EventKind::Sacrificed, &kind, centre, owner);
                     } else if !self.order_move(i, centre) {
                         self.units[i].task = Task::Idle;
                     }
@@ -1140,6 +1210,8 @@ impl World {
                             self.structure_version += 1;
                         }
                         self.units[i].task = Task::Harvest { geyser, temple, carrying: take, work: 0 };
+                        let (kind, at, owner) = (self.structures[geyser].kind.clone(), self.structures[geyser].centre(), self.units[i].owner);
+                        self.emit(EventKind::Harvested, &kind, at, owner);
                         if !self.walk_to_adjacent(i, temple) {
                             self.units[i].task = Task::Idle;
                         }
@@ -1185,7 +1257,21 @@ impl World {
         if let Some(u) = self.units.get_mut(unit) {
             u.task = Task::Idle;
         }
-        self.order_move(unit, cell)
+        let ok = self.order_move(unit, cell);
+        if ok {
+            let (kind, at, owner) = (self.units[unit].kind.clone(), self.units[unit].cell(), self.units[unit].owner);
+            self.emit(EventKind::Moved, &kind, at, owner);
+        }
+        ok
+    }
+
+    fn emit(&mut self, what: EventKind, kind: &str, at: Cell, owner: u8) {
+        self.events.push(Event { what, kind: kind.to_string(), at, owner });
+    }
+
+    /// Everything that happened since the last call, oldest first.
+    pub fn take_events(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.events)
     }
 
     /// Advance the simulation by one tick.
@@ -1505,6 +1591,31 @@ mod tests {
         assert!(!w.is_bridge(Cell::new(13, 1)), "cracked bridge in the blast was destroyed");
         assert_eq!(w.bridge_state(Cell::new(12, 1)), Some(BridgeState::Normal), "outside the blast");
         assert!(w.platforms.is_empty(), "its platform fell once the bridge was gone");
+    }
+
+    #[test]
+    fn events_report_what_happened_and_drain() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 4), 0);
+        w.push_island(IslandMap::rect(Cell::new(4, 0), 4, 4), 1);
+        w.powers[0] = 10_000;
+        w.powers[1] = 10_000;
+        let scripts = test_scripts();
+        let cannon = TypeRules { foot_x: 1, foot_y: 1, range: 6, hp_per_sec: 10, delay_between_shots: 1.0, damage_per_shot: 1000, ..TypeRules::plain() };
+        let target = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 100, ..TypeRules::plain() };
+        w.drop_structure("suncannon", &cannon, Cell::new(1, 1)).unwrap();
+        w.drop_structure_for(1, "treetwo", &target, Cell::new(5, 1)).unwrap();
+        let kinds: Vec<EventKind> = w.take_events().iter().map(|e| e.what).collect();
+        assert_eq!(kinds, [EventKind::Built, EventKind::Built]);
+        assert!(w.take_events().is_empty(), "taking drains");
+        w.step(&scripts);
+        let events = w.take_events();
+        let kinds: Vec<EventKind> = events.iter().map(|e| e.what).collect();
+        assert_eq!(kinds, [EventKind::Fired, EventKind::Hit, EventKind::Destroyed]);
+        assert_eq!(events[0].kind, "suncannon");
+        assert_eq!(events[1].at, Cell::new(5, 1), "the hit lands on the target");
+        assert_eq!(events[2].kind, "treetwo");
+        assert_eq!(events[2].owner, 1);
     }
 
     #[test]

@@ -33,7 +33,8 @@
 mod sprites;
 mod world;
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -42,6 +43,7 @@ use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
 use islefall_data::{Installation, TypeDef};
+use bevy::audio::{AudioPlayer, AudioSource, GlobalVolume, PlaybackSettings, Volume};
 use islefall_sim::config::Grid;
 use islefall_sim::map::{self, MapDef};
 use islefall_sim::{Ai, AiMove, Cell, Config, Dir8, IslandMap, Piece, Scripts, TypeRules, Unit, World};
@@ -76,6 +78,61 @@ struct GameData {
     scripts: Scripts,
     palette: String,
     map: MapDef,
+}
+
+/// Sound files by lowercase name: the install's sound directory plus
+/// overrides from the rules, decoded on first use.
+#[derive(Resource, Default)]
+struct SoundBank {
+    files: HashMap<String, PathBuf>,
+    loaded: HashMap<String, Option<Handle<AudioSource>>>,
+}
+
+impl SoundBank {
+    fn scan(dir: &Path, snd: &islefall_sim::config::Sounds, data_dir: &Path) -> SoundBank {
+        let mut files = HashMap::new();
+        match std::fs::read_dir(dir) {
+            Ok(entries) => {
+                for e in entries.flatten() {
+                    files.insert(e.file_name().to_string_lossy().to_lowercase(), e.path());
+                }
+            }
+            Err(e) => warn!("no sounds: {}: {e}", dir.display()),
+        }
+        for (name, target) in &snd.aliases {
+            match files.get(&target.to_lowercase()).cloned() {
+                Some(path) => {
+                    files.insert(name.to_lowercase(), path);
+                }
+                None => warn!("sound alias {name}: {target} is not in {}", dir.display()),
+            }
+        }
+        for (name, path) in &snd.overrides {
+            files.insert(name.to_lowercase(), data_dir.join(path));
+        }
+        info!("{} sound files", files.len());
+        SoundBank { files, loaded: HashMap::new() }
+    }
+
+    fn get_or_load(&mut self, name: &str, sources: &mut Assets<AudioSource>) -> Option<Handle<AudioSource>> {
+        let key = name.to_lowercase();
+        if let Some(h) = self.loaded.get(&key) {
+            return h.clone();
+        }
+        let handle = match self.files.get(&key).map(std::fs::read) {
+            Some(Ok(bytes)) => Some(sources.add(AudioSource { bytes: bytes.into() })),
+            Some(Err(e)) => {
+                warn!("sound {name}: {e}");
+                None
+            }
+            None => {
+                warn!("sound {name}: no such file");
+                None
+            }
+        };
+        self.loaded.insert(key, handle.clone());
+        handle
+    }
 }
 
 impl GameData {
@@ -215,6 +272,7 @@ fn main() {
     let frame_seconds = 1.0 / cfg.controls.animation_fps.max(0.1);
     let screenshot_at = std::env::var("ISLEFALL_SCREENSHOT_AT").ok().and_then(|s| s.parse().ok()).unwrap_or(cfg.controls.screenshot_seconds);
     let unit_tool = cfg.controls.unit_tool.clone();
+    let volume = std::env::var("ISLEFALL_VOLUME").ok().and_then(|s| s.parse().ok()).unwrap_or(cfg.sounds.volume);
 
     let mut app = App::new();
     app.add_plugins(
@@ -226,6 +284,7 @@ fn main() {
             }),
     )
     .insert_resource(GameData { install, cfg, scripts, palette, map })
+    .insert_resource(GlobalVolume::new(Volume::Linear(volume)))
     .insert_resource(mode)
     .insert_resource(Time::<Fixed>::from_hz(tick_hz as f64))
     .init_resource::<ShapeLibrary>()
@@ -238,6 +297,9 @@ fn main() {
         paused: false,
     })
     .add_systems(Startup, setup)
+    .add_systems(Startup, move |mut commands: Commands, game: Res<GameData>| {
+        commands.insert_resource(SoundBank::scan(&game.install.root.join(&game.cfg.sounds.dir), &game.cfg.sounds, &data));
+    })
     .add_systems(Startup, |mut commands: Commands, data: Res<GameData>, mut images: ResMut<Assets<Image>>| {
         let ring = make_ring(&mut images, data.cfg.energy.range_px);
         commands.insert_resource(RingImage(ring));
@@ -249,6 +311,7 @@ fn main() {
         (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
+    .add_systems(Update, play_sounds.after(mouse_actions).after(bridge_keys).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
         app.insert_resource(AutoScreenshot { path, delay: Timer::from_seconds(screenshot_at, TimerMode::Once) });
@@ -350,6 +413,8 @@ fn setup_map(
     }
     w.powers = vec![data.map.start_power; data.cfg.sim.max_players];
     w.energy_enforced = true;
+    // The layout was placed, not built: nothing to hear.
+    w.take_events();
     for u in &data.map.units {
         match w.spawn_unit_for(u.owner, &u.kind, &data.rules(&u.kind), map::cell(u.at)) {
             Some(i) => {
@@ -483,6 +548,37 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>) {
             Some(AiMove::Shooter { kind, at }) => info!("opponent {} drops a {kind} at {at:?}", ai.owner),
             _ => {}
         }
+    }
+}
+
+/// Play the sound each event names: the type's property first, then the
+/// rules' fallback file. The world's events are drained here.
+fn play_sounds(
+    mut commands: Commands,
+    mut sim: ResMut<Sim>,
+    data: Res<GameData>,
+    mut bank: ResMut<SoundBank>,
+    mut sources: ResMut<Assets<AudioSource>>,
+    volume: Res<GlobalVolume>,
+) {
+    let Some(world) = sim.world.as_mut() else { return };
+    let events = world.take_events();
+    if volume.volume == Volume::Linear(0.0) {
+        return;
+    }
+    let snd = &data.cfg.sounds;
+    let mut started = 0;
+    for e in events {
+        if started >= snd.max_per_frame {
+            break;
+        }
+        let cue = snd.events.cue(e.what);
+        let named = |stem: &str| cue.property.as_deref().and_then(|p| data.install.type_def(stem).and_then(|d| d.get_str(p))).map(str::to_string);
+        let from_type = named(&e.kind).or_else(|| snd.projectiles.get(&e.kind).and_then(|p| named(p)));
+        let Some(name) = from_type.or_else(|| cue.file.clone()).filter(|n| !n.is_empty()) else { continue };
+        let Some(handle) = bank.get_or_load(&name, &mut sources) else { continue };
+        commands.spawn((AudioPlayer::new(handle), PlaybackSettings::DESPAWN));
+        started += 1;
     }
 }
 

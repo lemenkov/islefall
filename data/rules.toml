@@ -120,3 +120,57 @@ animation_fps = 10.0
 screenshot_seconds = 1.5
 # Palette file stem from d/ used for all sprites (the game's fixed palette).
 palette = "gifcloud"
+
+[sounds]
+# Directory of sound files inside the NetStorm installation.
+dir = "sound"
+# Master volume, 0.0 (silent) to 1.0; ISLEFALL_VOLUME overrides it.
+volume = 0.6
+# At most this many sounds start in one frame, so a big explosion does not stack.
+max_per_frame = 4
+
+# What each event plays. A type's `property` is consulted first when the
+# event involves a type; `file` is the fallback. Omit both for silence.
+[sounds.events]
+fired = { property = "fireSound", file = "fireCrossbow.wav" }
+hit = { property = "impactSound", file = "impact.wav" }
+built = { property = "buildDoneSound", file = "buildDone.wav" }
+destroyed = { file = "explosion.wav" }
+salvaged = { file = "dissolve.wav" }
+moved = { property = "moveSound" }
+pickup = { property = "pickupSound", file = "priestPickUp.wav" }
+sacrificed = { file = "priestSacrifice2.WAV" }
+harvested = { file = "geyserMined1.WAV" }
+piece_placed = { file = "dropPiece-500.wav" }
+bridge_cracked = { file = "bridgecrack.wav" }
+bridge_fell = { file = "bridgeFall.WAV" }
+island_fell = { file = "islandFall.wav" }
+unit_lost = { file = "unitLost.wav" }
+
+# The projectile type of each shooter. The type files hold fire and impact
+# sounds on the projectile, but nothing in the data links the two, so the
+# pairing is by name here. A shooter's own property still wins.
+[sounds.projectiles]
+sunarcher = "sundisc"
+windarcher = "bolt"
+thundercannon = "thundercannonmissile"
+raincannon = "raincannonmissile"
+
+# Names the type files use that have no file of their own: the file in the
+# sound directory to play instead. Most differ only by a "-500" or "-1000"
+# suffix on disk (a gain hint, by the look of it); thunderBattery is a guess.
+[sounds.aliases]
+"dustDevilSpin.wav" = "dustDevilSpin-500.wav"
+"fireBow.wav" = "fireCrossbow.wav"
+"iceCannonImpact.wav" = "icecannonimpact-500.wav"
+"manOWarFire.wav" = "manOWarFire-500.wav"
+"sailSkaterMove.wav" = "sailMove.wav"
+"sunFenceImpact.wav" = "sunFenceImpact-500.wav"
+"thunderBattery.wav" = "shortZap.wav"
+"thunderCannon.wav" = "thunderCannon-1000.wav"
+
+# Replace a sound file by name (case-insensitive) with your own, as a path
+# relative to the data directory. Only WAV is decoded unless the app is
+# built with more of Bevy's audio decoders.
+[sounds.overrides]
+# "explosion.wav" = "mods/boom.wav"

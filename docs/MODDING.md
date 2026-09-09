@@ -47,6 +47,26 @@ Available hooks:
 - `target_priority(threat, distance, is_unit)` -> int, higher wins
 - `workshop_can_produce(workshop_theme, type_theme, type_level)` -> bool
 
+## Sounds
+
+The simulation emits events (a shot fired, a hit, a building finished, a
+structure destroyed or salvaged, a move order, a priest picked up or
+sacrificed, a crystal taken, a piece placed, a bridge cracking or falling,
+an island falling, a unit lost) and the app plays what `[sounds.events]`
+names for each. A cue has a `property`, the type's own sound as the `.type`
+files name it (`fireSound`, `impactSound`, `buildDoneSound`, `moveSound`,
+`pickupSound`), and a `file` used when the type names none; a cue with
+neither is silent. Fire and impact sounds mostly sit on projectile types,
+which nothing in the data ties to their shooter, so `[sounds.projectiles]`
+pairs them by name. Files are looked up case-insensitively in the
+installation's `sound/` directory; `[sounds.aliases]` points names the type
+files use at the files that actually exist (most differ by a `-500` or
+`-1000` suffix on disk). `[sounds.overrides]` maps a file name
+to a path of your own relative to the data directory, which is how a mod
+replaces a sound; only WAV is decoded unless the app is built with more of
+Bevy's decoders. `volume` is the master level, `max_per_frame` caps how
+many sounds start at once, and `ISLEFALL_VOLUME=0` silences a run.
+
 ## Maps
 
 Cells are `[x, y]` with y growing downwards. A structure's position is its
