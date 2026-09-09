@@ -54,24 +54,32 @@ pub struct Sprites {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sky {
+    /// The colour behind everything, RGB 0 to 1.
+    pub background: [f32; 3],
     pub extent_tiles: u32,
     #[serde(default)]
     pub layers: Vec<SkyLayer>,
 }
 
+/// One generated cloud layer.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkyLayer {
-    pub image: String,
-    pub speed: [f32; 2],
-    pub opacity: f32,
-    /// Colour the texture is multiplied by, RGB 0 to 1; white leaves it as authored.
-    #[serde(default = "white")]
+    pub seed: u32,
+    /// Tile edge in pixels.
+    pub tile: u32,
+    /// Cloud size across the tile: how many noise periods span it.
+    pub scale: f64,
+    pub octaves: u32,
+    pub gain: f64,
+    pub lacunarity: f64,
+    /// Share of the tile that is cloud, 0 to 1.
+    pub cover: f32,
+    /// Width of the cloud edge, 0 to 1 of the noise range.
+    pub softness: f32,
     pub tint: [f32; 3],
-}
-
-fn white() -> [f32; 3] {
-    [1.0, 1.0, 1.0]
+    pub opacity: f32,
+    pub speed: [f32; 2],
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -459,8 +467,8 @@ impl Config {
         if self.production.workshop_slots.is_empty() || self.construction.power_per_rate <= 0.0 {
             return bad("production.workshop_slots needs a level and construction.power_per_rate must be positive");
         }
-        if self.sky.extent_tiles == 0 || self.sky.layers.iter().any(|l| !(0.0..=1.0).contains(&l.opacity)) {
-            return bad("sky.extent_tiles must be positive and layer opacity 0.0..1.0");
+        if self.sky.extent_tiles == 0 || self.sky.layers.iter().any(|l| !(0.0..=1.0).contains(&l.opacity) || l.tile < 16 || l.tile > 2048 || l.octaves == 0 || l.scale <= 0.0) {
+            return bad("sky layers need a tile of 16..2048, octaves, a positive scale and opacity 0.0..1.0");
         }
         if self.sounds.footsteps.per_cycle == 0 {
             return bad("sounds.footsteps.per_cycle must be positive");

@@ -100,20 +100,19 @@ them.
 
 ## Sky
 
-`[sky]` lists the cloud layers drawn under the islands: each names an
-image (the game's two 512-pixel cloud tiles by default), a drift speed in
-source pixels per second along x and y, an opacity and a tint the
-texture is multiplied by (the originals are grey-violet as authored),
-bottom layer first. Layers follow the camera in whole tiles, so a mod can swap the
-textures or add a third layer without touching code.
+The sky is generated, so no picture is needed for it: `[sky]` sets the
+background colour and a list of cloud layers, each a seeded tile of
+fractal noise on a torus (it wraps without a seam) with its cloud size,
+detail, cover, edge softness, tint, opacity and drift speed, bottom
+layer first. Change a seed for a different sky, the cover for a clearer
+or heavier one, the tints for another time of day.
 
 ## Bringing your own files
 
 Every file the rules name is looked up in the data directory first and
 in the installation second, so a data set of your own grows one file at
-a time: put a `sky/mine.png` next to `rules.toml` and name it under
-`[sky]`; put a WAV under the data directory and name it in
-`[sounds.overrides]`. Pictures may be GIF or PNG; sounds are WAV unless
+a time: put a WAV under the data directory and name it in
+`[sounds.overrides]`, or a sprite sheet under `sprites/`. Pictures may be GIF or PNG; sounds are WAV unless
 the app is built with more of Bevy's decoders.
 
 Sprites are replaced per type. Put `<stem>.toml` and its picture under the

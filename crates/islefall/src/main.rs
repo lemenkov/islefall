@@ -42,7 +42,7 @@ use bevy::sprite::Anchor;
 use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
-use islefall_data::{Installation, Picture};
+use islefall_data::Installation;
 use bevy::audio::{AudioPlayer, AudioSink, AudioSinkPlayback, AudioSource, GlobalVolume, PlaybackSettings, Volume};
 use islefall_sim::config::Grid;
 use islefall_sim::map::{self, MapDef};
@@ -85,6 +85,7 @@ struct GameData {
 impl GameData {
     /// A picture or sound by name: the data directory first, so a mod can
     /// bring its own, then the installation's `d/` directory.
+    #[allow(dead_code)]
     fn asset_path(&self, name: &str) -> Option<PathBuf> {
         let own = self.data_dir.join(name);
         if own.is_file() {
@@ -134,35 +135,59 @@ fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
     std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.eq_ignore_ascii_case(name)))
 }
 
-/// Lay the sky's cloud layers out around the origin; `drift_sky` keeps
-/// them under the camera and moving.
+/// One cloud tile from fractal noise on a torus: the four-dimensional
+/// noise is sampled around two circles, so the tile wraps in both
+/// directions without a seam. Noise above `cover` is cloud, fading in
+/// over `softness`.
+fn cloud_tile(layer: &islefall_sim::config::SkyLayer) -> Vec<u8> {
+    use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
+    let fbm = Fbm::<Perlin>::new(layer.seed)
+        .set_octaves(layer.octaves.max(1) as usize)
+        .set_frequency(1.0)
+        .set_lacunarity(layer.lacunarity.max(1.0))
+        .set_persistence(layer.gain.clamp(0.05, 1.0));
+    let n = layer.tile as usize;
+    let radius = layer.scale / std::f64::consts::TAU;
+    let [r, g, b] = layer.tint;
+    let mut rgba = Vec::with_capacity(n * n * 4);
+    for y in 0..n {
+        let v = y as f64 / n as f64 * std::f64::consts::TAU;
+        for x in 0..n {
+            let u = x as f64 / n as f64 * std::f64::consts::TAU;
+            let p = [radius * u.cos(), radius * u.sin(), radius * v.cos(), radius * v.sin()];
+            // Fractal noise lands mostly within -1..1; map to 0..1.
+            let value = (fbm.get(p) as f32 * 0.5 + 0.5).clamp(0.0, 1.0);
+            let threshold = 1.0 - layer.cover.clamp(0.0, 1.0);
+            let t = ((value - threshold) / layer.softness.max(0.01)).clamp(0.0, 1.0);
+            let alpha = t * t * (3.0 - 2.0 * t);
+            rgba.extend_from_slice(&[(r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8, (alpha * 255.0) as u8]);
+        }
+    }
+    rgba
+}
+
+/// Make the sky's cloud layers and lay them out around the origin;
+/// `drift_sky` keeps them under the camera and moving.
 fn spawn_sky(commands: &mut Commands, data: &GameData, images: &mut Assets<Image>) {
     for (i, layer) in data.cfg.sky.layers.iter().enumerate() {
-        let Some(path) = data.asset_path(&layer.image) else {
-            warn!("sky: {} is neither in the data directory nor in the installation's d/", layer.image);
-            continue;
-        };
-        let img = match Picture::load(&path) {
-            Ok(img) => img,
-            Err(e) => {
-                warn!("sky: {}: {e}", path.display());
-                continue;
-            }
-        };
-        let handle = images.add(Image::new(
-            bevy::render::render_resource::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 },
+        let started = std::time::Instant::now();
+        let rgba = cloud_tile(layer);
+        info!("sky layer {i}: {}x{} tile from seed {} in {:?}", layer.tile, layer.tile, layer.seed, started.elapsed());
+        let mut image = Image::new(
+            bevy::render::render_resource::Extent3d { width: layer.tile, height: layer.tile, depth_or_array_layers: 1 },
             bevy::render::render_resource::TextureDimension::D2,
-            img.rgba,
+            rgba,
             bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
             bevy::asset::RenderAssetUsages::RENDER_WORLD,
-        ));
-        let tile = Vec2::new(img.width as f32, img.height as f32);
+        );
+        image.sampler = bevy::image::ImageSampler::linear();
+        let handle = images.add(image);
+        let tile = Vec2::splat(layer.tile as f32);
         let extent = tile * data.cfg.sky.extent_tiles as f32;
         let mut sprite = Sprite::from_image(handle);
         sprite.custom_size = Some(extent);
         sprite.image_mode = SpriteImageMode::Tiled { tile_x: true, tile_y: true, stretch_value: 1.0 };
-        let [r, g, b] = layer.tint;
-        sprite.color = Color::srgba(r, g, b, layer.opacity);
+        sprite.color = Color::srgba(1.0, 1.0, 1.0, layer.opacity);
         commands.spawn((
             sprite,
             Transform::from_translation(Vec3::new(0.0, 0.0, Z_SKY + i as f32 * 0.1)),
@@ -594,6 +619,7 @@ fn main() {
     let unit_tool = cfg.controls.unit_tools[0].clone();
     let volume = std::env::var("ISLEFALL_VOLUME").ok().and_then(|s| s.parse().ok()).unwrap_or(cfg.sounds.volume);
     let sky_first = cfg.sounds.ambient.sky_seconds[0];
+    let background = cfg.sky.background;
     let mut recording = Recording::default();
     if let Ok(addr) = std::env::var("ISLEFALL_JOIN") {
         let name = std::env::var("ISLEFALL_NAME").unwrap_or_else(|_| whoami());
@@ -629,6 +655,7 @@ fn main() {
     )
     .insert_resource(GameData { install, cfg, scripts, palette, map, data_dir: data.clone() })
     .insert_resource(GlobalVolume::new(Volume::Linear(volume)))
+    .insert_resource(ClearColor(Color::srgb(background[0], background[1], background[2])))
     .insert_resource(Sky {
         timer: Timer::from_seconds(sky_first, TimerMode::Once),
         rng: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0x9E37_79B9_7F4A_7C15) | 1,
