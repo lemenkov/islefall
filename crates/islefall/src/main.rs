@@ -9,7 +9,7 @@
 //!
 //! Environment:
 //! - `NETSTORM_DIR`: directory containing the game's `d/` and `netstorm.tarc`.
-//! - `ISLEFALL_PALETTE`: palette file stem from `d/` (default `suncannon`).
+//! - `ISLEFALL_PALETTE`: palette file stem from `d/` (default `gifcloud`, the game palette).
 //! - `ISLEFALL_SCREENSHOT=file.png`: save a screenshot shortly after start-up.
 //!
 //! Keys in both modes: `Space` pauses animation, `P` saves a screenshot.
@@ -33,7 +33,7 @@ const START_TYPE: &str = "priest";
 const FRAME_SECONDS: f32 = 0.1;
 const ZOOM: f32 = 3.0;
 const AUTO_SCREENSHOT_SECONDS: f32 = 1.5;
-const DEFAULT_PALETTE: &str = "suncannon";
+const DEFAULT_PALETTE: &str = "gifcloud";
 
 #[derive(Resource, Clone, Copy, PartialEq, Eq)]
 enum Mode {

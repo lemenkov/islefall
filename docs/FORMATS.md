@@ -237,14 +237,27 @@ Examples from the 8.2 data:
 ## `*.COL` palettes
 
 `d/*.COL` files are 776 bytes: an 8-byte header followed by 256 RGB triplets
-(768 bytes). Pixel bytes in `_shapes.shp` index this table directly. The
-640x480 screen GIFs in `d/` carry the identical palette as their global colour
-table, which is how the layout was confirmed.
+(768 bytes). Each is the global colour table of the GIF of the same name in
+`d/`, which is how the layout was confirmed.
 
 | Offset | Size | Field |
 |-------:|-----:|-------|
 | 0 | 8 | header, `08 03 00 00 23 b1 00 00` in every shipped file |
 | 8 | 768 | 256 x (R, G, B) |
+
+Most of these palettes belong to full-screen pictures (title screens, unit
+portraits) and differ from each other in nearly every entry. The game's own
+fixed palette, the one the `_shapes.shp` pixel indices refer to, is
+`GIFCLOUD.COL`: both 512 x 512 cloud overlay images (`Gifcloud.gif`,
+`Gifcloud2.GIF`) share it exactly, which only happens for images authored
+in the game palette, and it renders grass green, rims orange and units in
+their natural colours. Sprites use 254 of its indices (all but 252 and
+255); entries 254 and 255 are pure red and cyan, presumably markers.
+
+`d/!color.dat` is not a palette. Its 2304 bytes are nine 256-byte index
+remap tables (table 4 is the identity, table 5 maps everything to 0, table
+6 maps everything to 254); the others are presumably shading and
+player-colour remaps applied to palette indices before drawing.
 
 ---
 

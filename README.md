@@ -51,8 +51,7 @@ animates one object type at a time: `[` and `]` step through types, `,` and
 `.` through its animations. In both modes `Space` pauses and `P` saves a
 screenshot; `ISLEFALL_SCREENSHOT=file.png` saves one automatically after
 start-up. `ISLEFALL_PALETTE` selects a palette file stem from `d/` (default
-`suncannon`; the real sprite palette has not been identified yet, so colours
-are approximate).
+`gifcloud`, which is the game's fixed 8-bit palette).
 
 ## Inspecting the data
 
