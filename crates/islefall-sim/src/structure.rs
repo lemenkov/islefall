@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Things placed on the map that occupy a footprint of cells.
 
+use islefall_data::isle::Theme;
+
 use crate::grid::Cell;
 use crate::rules::Walk;
 
@@ -33,6 +35,8 @@ pub struct Structure {
     pub cooldown: u32,
     pub threat: i32,
     pub is_altar: bool,
+    /// Energy this structure radiates, for Generators and Temples.
+    pub produces: Option<Theme>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,6 +67,7 @@ impl Structure {
             cooldown: 0,
             threat: 0,
             is_altar: false,
+            produces: None,
         }
     }
 

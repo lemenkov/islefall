@@ -3,7 +3,9 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use crate::grid::Cell;
+use islefall_data::isle::Theme;
+
+use crate::grid::{CELL_H, CELL_W, Cell};
 use crate::island::IslandMap;
 use crate::path::find_path_costed;
 use crate::pieces::PieceQueue;
@@ -32,6 +34,9 @@ pub const SALVAGE_REFUND_PERCENT: i32 = 25;
 pub const TEMPLE_HEAL_RANGE: i32 = 8;
 /// Ticks between one point of priest regeneration.
 pub const HEAL_TICKS: u32 = TICK_HZ / 2;
+/// Radius of an Energy source's circle, in screen pixels (a guess; the
+/// manual only says the range is fixed).
+pub const ENERGY_RANGE_PX: i32 = 128;
 
 /// Condition of a bridge cell.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -86,6 +91,8 @@ pub enum DropError {
     UnitInTheWay(Cell),
     /// The player cannot afford the type.
     NotEnoughPower { cost: i32, have: i32 },
+    /// Not enough Energy of the right kind reaches the site.
+    NotEnoughEnergy { need: crate::rules::EnergyNeed, themed: u8, any: u8 },
 }
 
 impl std::fmt::Display for DropError {
@@ -98,6 +105,11 @@ impl std::fmt::Display for DropError {
             DropError::OnRim(c) => write!(f, "{c:?} is an island rim"),
             DropError::UnitInTheWay(c) => write!(f, "a unit stands on {c:?}"),
             DropError::NotEnoughPower { cost, have } => write!(f, "costs {cost} Storm Power, have {have}"),
+            DropError::NotEnoughEnergy { need, themed, any } => write!(
+                f,
+                "needs {} {:?} and {} any Energy here; {themed} {:?} and {any} other reach the site",
+                need.themed, need.theme, need.any, need.theme
+            ),
         }
     }
 }
@@ -129,6 +141,8 @@ pub struct World {
     pub last_shots: Vec<(usize, Target)>,
     /// Knowledge granted to the player by sacrifices.
     pub knowledge: u32,
+    /// Whether the player's drops need Energy; off while a map is laid out.
+    pub energy_enforced: bool,
 }
 
 impl Default for World {
@@ -148,6 +162,7 @@ impl Default for World {
             storm_power: 0,
             last_shots: Vec::new(),
             knowledge: 0,
+            energy_enforced: true,
         }
     }
 }
@@ -444,9 +459,49 @@ impl World {
         self.drop_structure_for(0, kind, rules, cell)
     }
 
-    /// Drop for a given owner; only the local player (owner 0) pays.
+    /// Energy sources of `owner` whose circle covers `cell`, counted by theme.
+    /// Returns `(themed matches of `theme`, all sources)`.
+    pub fn energy_at(&self, owner: u8, cell: Cell, theme: Theme) -> (u8, u8) {
+        let (px, py) = cell.top_left_px();
+        let (cx, cy) = (px + CELL_W / 2, py + CELL_H / 2);
+        let mut themed = 0u8;
+        let mut all = 0u8;
+        for s in &self.structures {
+            let Some(t) = s.produces else { continue };
+            if s.owner != owner {
+                continue;
+            }
+            let (sx, sy) = s.centre().top_left_px();
+            let (dx, dy) = (sx + CELL_W / 2 - cx, sy + CELL_H / 2 - cy);
+            if dx * dx + dy * dy <= ENERGY_RANGE_PX * ENERGY_RANGE_PX {
+                all = all.saturating_add(1);
+                if t == theme {
+                    themed = themed.saturating_add(1);
+                }
+            }
+        }
+        (themed, all)
+    }
+
+    /// Whether `owner` has the Energy to place `rules` with its hotspot at `cell`.
+    pub fn check_energy(&self, owner: u8, rules: &TypeRules, cell: Cell) -> Result<(), DropError> {
+        let Some(need) = rules.energy else { return Ok(()) };
+        let probe = Structure::new("", cell, rules.foot_x, rules.foot_y, Walk::Free);
+        let (themed, all) = self.energy_at(owner, probe.centre(), need.theme);
+        let themed_ok = need.theme == Theme::Sun || themed >= need.themed;
+        if themed_ok && all >= need.total() {
+            Ok(())
+        } else {
+            Err(DropError::NotEnoughEnergy { need, themed, any: all.saturating_sub(themed.min(need.themed)) })
+        }
+    }
+
+    /// Drop for a given owner; only the local player (owner 0) pays and needs Energy.
     pub fn drop_structure_for(&mut self, owner: u8, kind: &str, rules: &TypeRules, cell: Cell) -> Result<usize, DropError> {
         self.can_drop(rules, cell)?;
+        if owner == 0 && self.energy_enforced {
+            self.check_energy(owner, rules, cell)?;
+        }
         // Geysers are placed by the map, not bought; everything else costs its type's price.
         let price = if rules.is_geyser || owner != 0 { 0 } else { rules.cost };
         if price > self.storm_power {
@@ -463,6 +518,7 @@ impl World {
         s.cost = rules.cost;
         s.threat = rules.threat;
         s.is_altar = rules.is_altar;
+        s.produces = rules.produces;
         if rules.range > 0 && rules.hp_per_sec > 0 {
             s.weapon = Some(Weapon {
                 range: rules.range,
@@ -1288,6 +1344,30 @@ mod tests {
         }
         assert!(!w.units[p].stunned, "healed above half by the temple");
         assert!(w.units[p].hp > 50);
+    }
+
+    #[test]
+    fn placement_needs_energy_within_range() {
+        use crate::rules::EnergyNeed;
+        let mut w = world();
+        w.islands.push(IslandMap::rect(Cell::new(0, 4), 40, 8));
+        w.storm_power = 5000;
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, produces: Some(Theme::Sun), ..TypeRules::plain() };
+        w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        let thrower = TypeRules { foot_x: 1, foot_y: 1, energy: Some(EnergyNeed { theme: Theme::Sun, themed: 0, any: 1 }), ..TypeRules::plain() };
+        assert!(w.drop_structure("sunarcher", &thrower, Cell::new(5, 6)).is_ok(), "next to the temple");
+        // 128 px is 8 cells east; (2,2) centre to (30,6) is far outside.
+        assert!(matches!(w.drop_structure("sunarcher", &thrower, Cell::new(30, 6)), Err(DropError::NotEnoughEnergy { .. })));
+        // A Wind Generator there extends the reach, but wind units need wind.
+        let generator = TypeRules { foot_x: 1, foot_y: 1, produces: Some(Theme::Wind), energy: Some(EnergyNeed { theme: Theme::Sun, themed: 0, any: 1 }), ..TypeRules::plain() };
+        assert!(w.drop_structure("windbattery", &generator, Cell::new(8, 6)).is_ok());
+        assert!(w.drop_structure("sunarcher", &thrower, Cell::new(14, 6)).is_ok(), "fed by the generator's Sun-compatible energy");
+        let windarcher = TypeRules { foot_x: 1, foot_y: 1, energy: Some(EnergyNeed { theme: Theme::Wind, themed: 1, any: 1 }), ..TypeRules::plain() };
+        assert!(w.drop_structure("windarcher", &windarcher, Cell::new(6, 7)).is_ok(), "temple plus generator overlap");
+        assert!(matches!(w.drop_structure("windarcher", &windarcher, Cell::new(14, 7)), Err(DropError::NotEnoughEnergy { .. })), "only the generator reaches");
+        // Enemies place without energy checks and other owners' sources do not count.
+        assert_eq!(w.energy_at(1, Cell::new(3, 3), Theme::Sun), (0, 0));
+        assert!(w.drop_structure_for(1, "sunarcher", &thrower, Cell::new(36, 6)).is_ok());
     }
 
     #[test]

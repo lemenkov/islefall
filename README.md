@@ -61,7 +61,8 @@ reserve; drops cost their type's price. Right-click acts with the current tool:
 it), `1` to `5` drop a sun cannon, archer, battery, factory or tree, `U`
 spawns a golem. `Delete` destroys the bridge cell under the cursor, `C`
 cracks it, `H` hardens it, `V` salvages your structure under the cursor; unsupported bridges crack and crumble, taking
-whatever stands on them. Drops follow the rules in `docs/RULES.md`. Arrow
+whatever stands on them. Drops follow the rules in `docs/RULES.md`, including Energy: the rings
+around the Temple and Generators show where units can be placed. Arrow
 keys or WASD pan the camera and `-` / `=` zoom.
 `ISLEFALL_MODE=viewer` instead
 animates one object type at a time: `[` and `]` step through types, `,` and

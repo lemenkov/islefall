@@ -129,6 +129,24 @@ refund for destroying enemy units, Energy requirements from Temples and
 Generators, Workshops putting Knowledge into production, and capturing and
 sacrificing enemy High Priests.
 
+## Energy
+
+The manual: Temples and Generators each produce one unit of Energy in a
+fixed-range circle; placing a unit needs the right Energy at the site; Sun
+Energy means any kind; operation needs none. Examples given: a Level One
+Bulf needs one Thunder, a Level Two Whirlibase two Sun, a Level Three
+Thunder Cannon two Thunder and one Sun, an Air Ship two Wind and one Sun.
+
+Islefall reads a type's requirement from `mana` when present (`s` any, `w`,
+`r`, `t` themed, one unit per letter) and otherwise from `level` and
+`theme` for types that have a `class`: a Sun type needs `level` units of
+any kind; a themed type needs one of its theme at level one, and its theme
+for all but one unit from level two up. Types without a class (trees, the
+altar, geysers) need none. Generators (`class` "Source of Energy") radiate
+their theme; the Temple (`residence`) radiates Sun. The circle radius, 128
+source pixels, is a guess. Only the local player is checked; enemies place
+freely for now.
+
 ## Combat
 
 From the type properties and the manual:

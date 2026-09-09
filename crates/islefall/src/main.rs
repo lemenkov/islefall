@@ -36,7 +36,7 @@ use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
 use islefall_data::{Installation, TypeDef};
-use islefall_sim::{CELL_H, CELL_W, Cell, Dir8, IslandMap, Piece, TICK_HZ, TypeRules, Unit, World};
+use islefall_sim::{CELL_H, CELL_W, Cell, Dir8, ENERGY_RANGE_PX, IslandMap, Piece, TICK_HZ, TypeRules, Unit, World};
 use sprites::FrameInfo;
 use world::{BridgeTile, LoadedShape, ShapeLibrary, StructureSprite, TerrainTile, Z_SHADOW, Z_STRUCTURE, Z_UNIT};
 
@@ -111,6 +111,60 @@ struct Player {
 /// Marks the placement preview sprites.
 #[derive(Component)]
 struct Ghost;
+
+/// The ring image used to show Energy circles, built once.
+#[derive(Resource)]
+struct RingImage(Handle<Image>);
+
+/// A translucent ring of the Energy radius; drawn around every own source.
+fn make_ring(images: &mut Assets<Image>) -> Handle<Image> {
+    let r = ENERGY_RANGE_PX as f32;
+    let size = (ENERGY_RANGE_PX * 2 + 2) as u32;
+    let mut data = vec![0u8; (size * size * 4) as usize];
+    for y in 0..size {
+        for x in 0..size {
+            let dx = x as f32 + 0.5 - size as f32 / 2.0;
+            let dy = y as f32 + 0.5 - size as f32 / 2.0;
+            let d = (dx * dx + dy * dy).sqrt();
+            let alpha = if (d - r).abs() <= 1.0 { 160 } else if d < r { 18 } else { 0 };
+            let o = ((y * size + x) * 4) as usize;
+            data[o..o + 4].copy_from_slice(&[255, 240, 120, alpha]);
+        }
+    }
+    images.add(Image::new(
+        bevy::render::render_resource::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+        bevy::render::render_resource::TextureDimension::D2,
+        data,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD,
+    ))
+}
+
+/// Marks Energy circle sprites.
+#[derive(Component)]
+struct EnergyRing;
+
+/// Draw the Energy circle of every source the player owns whenever structures change.
+fn sync_energy_rings(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    ring: Res<RingImage>,
+    existing: Query<Entity, With<EnergyRing>>,
+    mut seen: Local<Option<u64>>,
+) {
+    if *seen == Some(sim.world.structure_version) {
+        return;
+    }
+    *seen = Some(sim.world.structure_version);
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
+    for s in sim.world.structures.iter().filter(|s| s.owner == 0 && s.produces.is_some()) {
+        let (x, y) = s.centre().top_left_px();
+        let pos = Vec3::new(x as f32 + CELL_W as f32 / 2.0, -(y as f32 + CELL_H as f32 / 2.0), 0.9);
+        commands.spawn((Sprite::from_image(ring.0.clone()), Transform::from_translation(pos), EnergyRing));
+    }
+}
 
 #[derive(Resource)]
 struct Viewer {
@@ -198,11 +252,15 @@ fn main() {
         paused: false,
     })
     .add_systems(Startup, setup)
+    .add_systems(Startup, |mut commands: Commands, mut images: ResMut<Assets<Image>>| {
+        let ring = make_ring(&mut images);
+        commands.insert_resource(RingImage(ring));
+    })
     .add_systems(FixedUpdate, sim_step.run_if(resource_equals(Mode::Island)))
     .add_systems(Update, (common_keys, animate, auto_screenshot))
     .add_systems(
         Update,
-        (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, overlays, sync_units, sync_bridges, sync_structures, sync_platforms)
+        (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
@@ -277,8 +335,9 @@ fn setup_island(
     sim.world.islands.push(geyser_isle);
 
     // The simulation owns everything else; sprites follow it through the sync systems.
-    // The starting layout is free; the reserve is set once it stands.
+    // The starting layout is free and needs no Energy; both apply once it stands.
     sim.world.storm_power = i32::MAX / 2;
+    sim.world.energy_enforced = false;
     for (stem, cell) in [("dais", Cell::new(9, 7)), ("residence", Cell::new(13, 6)), ("treetwo", Cell::new(2, 3)), ("treetwo", Cell::new(12, 8)), ("geyser", Cell::new(34, 9))] {
         if let Err(e) = sim.world.drop_structure(stem, &data.rules(stem), cell) {
             warn!("{stem} at {cell:?}: {e}");
@@ -301,6 +360,7 @@ fn setup_island(
         warn!("enemy priest could not be placed");
     }
     sim.world.storm_power = START_POWER;
+    sim.world.energy_enforced = true;
     if let Some(i) = sim.world.spawn_unit("priest", &data.rules("priest"), Cell::new(2, 8)) {
         sim.world.order_move(i, Cell::new(23, 3));
     }
@@ -639,7 +699,8 @@ fn ghost(
         Tool::Drop(stem) => {
             let rules = data.rules(stem);
             let probe = islefall_sim::Structure::new(*stem, cell, rules.foot_x, rules.foot_y, islefall_sim::Walk::Free);
-            (probe.cells().collect(), sim.world.can_drop(&rules, cell).is_ok())
+            let ok = sim.world.can_drop(&rules, cell).is_ok() && sim.world.check_energy(0, &rules, cell).is_ok();
+            (probe.cells().collect(), ok)
         }
         Tool::Spawn(_) => (vec![cell], sim.world.is_walkable(cell)),
     };
