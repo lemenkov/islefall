@@ -1,0 +1,119 @@
+// SPDX-License-Identifier: Apache-2.0
+//! Map files: the islands, bridges, structures, units and opponents a
+//! scene starts with, loaded from TOML.
+
+use std::path::Path;
+
+use serde::Deserialize;
+
+use crate::grid::Cell;
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MapDef {
+    pub name: String,
+    pub start_power: i32,
+    pub camera: [i32; 2],
+    #[serde(default)]
+    pub islands: Vec<IslandDef>,
+    #[serde(default)]
+    pub bridges: Vec<BridgeDef>,
+    #[serde(default)]
+    pub structures: Vec<PlacementDef>,
+    #[serde(default)]
+    pub units: Vec<UnitDef>,
+    #[serde(default)]
+    pub opponents: Vec<OpponentDef>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct IslandDef {
+    pub owner: u8,
+    pub theme: String,
+    pub origin: [i32; 2],
+    pub size: [i32; 2],
+    #[serde(default)]
+    pub remove: Vec<[i32; 2]>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BridgeDef {
+    pub owner: u8,
+    pub cells: Vec<[i32; 2]>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PlacementDef {
+    pub owner: u8,
+    pub kind: String,
+    pub at: [i32; 2],
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct UnitDef {
+    pub owner: u8,
+    pub kind: String,
+    pub at: [i32; 2],
+    pub move_to: Option<[i32; 2]>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct OpponentDef {
+    pub owner: u8,
+    pub target: Option<[i32; 2]>,
+}
+
+#[derive(Debug)]
+pub enum MapError {
+    Io(std::io::Error),
+    Parse(toml::de::Error),
+}
+
+impl std::fmt::Display for MapError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MapError::Io(e) => write!(f, "{e}"),
+            MapError::Parse(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for MapError {}
+
+impl MapDef {
+    pub fn parse(text: &str) -> Result<MapDef, MapError> {
+        toml::from_str(text).map_err(MapError::Parse)
+    }
+
+    pub fn load(path: impl AsRef<Path>) -> Result<MapDef, MapError> {
+        MapDef::parse(&std::fs::read_to_string(path).map_err(MapError::Io)?)
+    }
+
+    pub fn camera_cell(&self) -> Cell {
+        Cell::new(self.camera[0], self.camera[1])
+    }
+}
+
+pub fn cell(xy: [i32; 2]) -> Cell {
+    Cell::new(xy[0], xy[1])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn demo_map_parses() {
+        let m = MapDef::parse(include_str!("../../../data/maps/demo.toml")).unwrap();
+        assert_eq!(m.islands.len(), 2);
+        assert_eq!(m.structures.len(), 8);
+        assert_eq!(m.units.len(), 4);
+        assert_eq!(m.opponents.len(), 1);
+        assert_eq!(m.camera_cell(), Cell::new(7, 4));
+    }
+}

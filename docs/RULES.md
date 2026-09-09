@@ -4,7 +4,8 @@ Islefall derives its rules from the `typeflags` and properties of the
 original `.type` files, cross-checked against the game's own manual
 (`help/GAME.HLP`, a WinHelp file readable after decompiling it with
 `helpdeco`). This file records how each flag is interpreted and how sure
-that reading is. The implementation lives in `crates/islefall-sim/src/rules.rs`,
+that reading is. The numbers live in `data/rules.toml` and the formulas in
+`data/scripts/rules.rhai`; see `docs/MODDING.md`. The implementation lives in `crates/islefall-sim/src/rules.rs`,
 `pieces.rs` and `world.rs`.
 
 ## Map

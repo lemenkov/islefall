@@ -5,40 +5,15 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use islefall_data::isle::Theme;
 
-use crate::grid::{CELL_H, CELL_W, Cell};
+use crate::config::Config;
+use crate::grid::Cell;
 use crate::island::IslandMap;
 use crate::path::find_path_costed;
 use crate::pieces::PieceQueue;
-use crate::rules::{AVOID_COST, TypeRules, Walk};
+use crate::rules::{TypeRules, Walk};
+use crate::script::Scripts;
 use crate::structure::{Structure, Weapon};
 use crate::unit::{Pos, Task, Unit};
-
-/// Simulation ticks per second. Rendering interpolates or samples; the
-/// simulation never sees wall-clock time.
-pub const TICK_HZ: u32 = 30;
-/// Ticks an unsupported bridge cell stays cracked before it crumbles.
-pub const CRUMBLE_TICKS: u32 = 4 * TICK_HZ;
-/// Bridge pieces offered at once.
-pub const PIECE_SLOTS: usize = 4;
-/// Players the world keeps reserves for.
-pub const MAX_PLAYERS: usize = 4;
-/// Storm Power carried per trip: the `cost` of a Storm Crystal (`nugget`).
-pub const NUGGET_POWER: i32 = 200;
-/// Ticks a unit spends taking a crystal or handing it in.
-pub const WORK_TICKS: u32 = TICK_HZ;
-/// Cells around an exploding structure that take damage and bridge shock.
-pub const EXPLOSION_RADIUS: i32 = 2;
-/// Damage an explosion deals to everything within the radius.
-pub const EXPLOSION_DAMAGE: i32 = 150;
-/// Share of the cost refunded when a healthy unit is salvaged.
-pub const SALVAGE_REFUND_PERCENT: i32 = 25;
-/// Cells from an own Temple within which a priest regenerates.
-pub const TEMPLE_HEAL_RANGE: i32 = 8;
-/// Ticks between one point of priest regeneration.
-pub const HEAL_TICKS: u32 = TICK_HZ / 2;
-/// Radius of an Energy source's circle, in screen pixels (a guess; the
-/// manual only says the range is fixed).
-pub const ENERGY_RANGE_PX: i32 = 128;
 
 /// Condition of a bridge cell.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -125,8 +100,10 @@ impl std::fmt::Display for DropError {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct World {
+    /// The rules this world runs under.
+    pub cfg: Config,
     pub tick: u64,
     /// Natural islands.
     pub islands: Vec<IslandMap>,
@@ -153,9 +130,9 @@ pub struct World {
     /// The pieces on offer.
     pub queue: PieceQueue,
     /// Storm Power reserve per owner (index = owner).
-    pub powers: [i32; MAX_PLAYERS],
+    pub powers: Vec<i32>,
     /// Knowledge bits (`techBit`) each owner holds.
-    pub known_tech: [BTreeSet<u8>; MAX_PLAYERS],
+    pub known_tech: Vec<BTreeSet<u8>>,
     /// Shots fired during the last tick, for effects and logging.
     pub last_shots: Vec<(usize, Target)>,
     /// Knowledge granted to the player by sacrifices.
@@ -166,9 +143,13 @@ pub struct World {
     pub energy_enforced: bool,
 }
 
-impl Default for World {
-    fn default() -> World {
+impl World {
+    /// A world running under `cfg`.
+    pub fn new(cfg: Config) -> World {
+        let players = cfg.sim.max_players;
+        let queue = PieceQueue::from_defs(&cfg.bridges.pieces, cfg.bridges.piece_slots, cfg.bridges.queue_seed);
         World {
+            cfg,
             tick: 0,
             islands: Vec::new(),
             island_owners: Vec::new(),
@@ -182,20 +163,23 @@ impl Default for World {
             structure_version: 0,
             units: Vec::new(),
             doomed: BTreeMap::new(),
-            queue: PieceQueue::new(PIECE_SLOTS, 0x5eed),
-            powers: [0; MAX_PLAYERS],
-            known_tech: Default::default(),
+            queue,
+            powers: vec![0; players],
+            known_tech: vec![BTreeSet::new(); players],
             last_shots: Vec::new(),
             knowledge: 0,
             pending_knowledge: Vec::new(),
             energy_enforced: true,
         }
     }
-}
 
-impl World {
-    pub fn new() -> World {
-        World::default()
+    /// Fixed-point steps per cell.
+    pub fn subcell(&self) -> i32 {
+        self.cfg.walking.subcell
+    }
+
+    fn slot(&self, owner: u8) -> usize {
+        owner as usize % self.cfg.sim.max_players
     }
 
     /// Storm Power of the local player.
@@ -262,7 +246,7 @@ impl World {
         for s in self.structures.iter().filter(|s| s.covers(cell)) {
             match s.walk {
                 Walk::Blocked => return None,
-                Walk::Avoid => cost = cost.max(AVOID_COST),
+                Walk::Avoid => cost = cost.max(self.cfg.walking.avoid_cost),
                 Walk::Free => {}
             }
         }
@@ -416,9 +400,10 @@ impl World {
     pub fn settle(&mut self) -> usize {
         let reached = self.supported();
         let mut changed = false;
+        let crumble = self.cfg.ticks(self.cfg.bridges.crumble_seconds);
         for (c, state) in self.bridges.iter_mut() {
             if !reached.contains(c) && !self.doomed.contains_key(c) {
-                self.doomed.insert(*c, CRUMBLE_TICKS);
+                self.doomed.insert(*c, crumble);
                 if *state != BridgeState::Hard {
                     *state = BridgeState::Cracked;
                 }
@@ -454,7 +439,7 @@ impl World {
             self.structure_version += 1;
         }
         for u in &mut self.units {
-            if u.alive && !reached.contains(&u.pos.cell()) {
+            if u.alive && !reached.contains(&u.cell()) {
                 u.alive = false;
                 u.path.clear();
             }
@@ -532,7 +517,7 @@ impl World {
             if !rules.may_drop_on_rim && self.is_rim(c) {
                 return Err(DropError::OnRim(c));
             }
-            if self.units.iter().any(|u| u.alive && u.pos.cell() == c) {
+            if self.units.iter().any(|u| u.alive && u.cell() == c) {
                 return Err(DropError::UnitInTheWay(c));
             }
         }
@@ -548,8 +533,9 @@ impl World {
     /// Energy sources of `owner` whose circle covers `cell`, counted by theme.
     /// Returns `(themed matches of `theme`, all sources)`.
     pub fn energy_at(&self, owner: u8, cell: Cell, theme: Theme) -> (u8, u8) {
-        let (px, py) = cell.top_left_px();
-        let (cx, cy) = (px + CELL_W / 2, py + CELL_H / 2);
+        let g = &self.cfg.grid;
+        let (cx, cy) = cell.centre_px(g);
+        let r = self.cfg.energy.range_px;
         let mut themed = 0u8;
         let mut all = 0u8;
         for s in &self.structures {
@@ -557,9 +543,9 @@ impl World {
             if s.owner != owner {
                 continue;
             }
-            let (sx, sy) = s.centre().top_left_px();
-            let (dx, dy) = (sx + CELL_W / 2 - cx, sy + CELL_H / 2 - cy);
-            if dx * dx + dy * dy <= ENERGY_RANGE_PX * ENERGY_RANGE_PX {
+            let (sx, sy) = s.centre().centre_px(g);
+            let (dx, dy) = (sx - cx, sy - cy);
+            if dx * dx + dy * dy <= r * r {
                 all = all.saturating_add(1);
                 if t == theme {
                     themed = themed.saturating_add(1);
@@ -607,7 +593,7 @@ impl World {
         if self.energy_enforced {
             self.check_ownership(owner, rules, cell)?;
             if let Some(bit) = rules.tech_bit {
-                if !self.known_tech[owner as usize % MAX_PLAYERS].contains(&bit) {
+                if !self.known_tech[self.slot(owner)].contains(&bit) {
                     return Err(DropError::UnknownTech(bit));
                 }
             }
@@ -616,7 +602,7 @@ impl World {
             }
         }
         // Geysers are placed by the map, not bought; everything else costs its type's price.
-        let slot = owner as usize % MAX_PLAYERS;
+        let slot = self.slot(owner);
         let price = if rules.is_geyser { 0 } else { rules.cost };
         if price > self.powers[slot] {
             return Err(DropError::NotEnoughPower { cost: price, have: self.powers[slot] });
@@ -624,7 +610,7 @@ impl World {
         self.powers[slot] -= price;
         let mut s = Structure::new(kind, cell, rules.foot_x, rules.foot_y, rules.walk);
         s.drop_blocking = rules.drop_blocking;
-        s.stock = if rules.is_geyser { rules.cost } else { 0 };
+        s.stock = if rules.is_geyser && self.cfg.economy.geyser_stock_from_cost { rules.cost } else { 0 };
         s.is_temple = rules.is_temple;
         s.owner = owner;
         s.hp = rules.max_hit_points;
@@ -636,8 +622,8 @@ impl World {
         if rules.range > 0 && rules.hp_per_sec > 0 {
             s.weapon = Some(Weapon {
                 range: rules.range,
-                damage: rules.damage_per_shot(),
-                delay: (rules.delay_between_shots * TICK_HZ as f64).round().max(1.0) as u32,
+                damage: rules.damage_per_shot,
+                delay: self.cfg.ticks(rules.delay_between_shots),
                 cardinal_only: rules.cardinal_only,
             });
         }
@@ -670,7 +656,7 @@ impl World {
         if !self.is_walkable(cell) {
             return None;
         }
-        let mut u = Unit::new(kind, cell, speed_per_tick(rules.speed));
+        let mut u = Unit::new(kind, cell, speed_per_tick(&self.cfg, rules.speed), self.subcell());
         u.owner = owner;
         u.hp = rules.max_hit_points.max(1);
         u.max_hp = u.hp;
@@ -683,11 +669,12 @@ impl World {
 
     /// Grant a Knowledge bit to an owner.
     pub fn grant_tech(&mut self, owner: u8, bit: u8) -> bool {
-        self.known_tech[owner as usize % MAX_PLAYERS].insert(bit)
+        let slot = self.slot(owner);
+        self.known_tech[slot].insert(bit)
     }
 
     pub fn knows_tech(&self, owner: u8, bit: u8) -> bool {
-        self.known_tech[owner as usize % MAX_PLAYERS].contains(&bit)
+        self.known_tech[self.slot(owner)].contains(&bit)
     }
 
     /// Order a Transport to capture a stunned enemy priest.
@@ -699,7 +686,7 @@ impl World {
         if !p.alive || !p.is_priest || !p.stunned || p.owner == u.owner || p.carried_by.is_some() {
             return false;
         }
-        let target = p.pos.cell();
+        let target = p.cell();
         if !self.walk_next_to(unit, target) {
             return false;
         }
@@ -723,7 +710,7 @@ impl World {
 
     /// Path a unit onto `target` or, failing that, to a walkable cell next to it.
     fn walk_next_to(&mut self, unit: usize, target: Cell) -> bool {
-        let Some(from) = self.units.get(unit).map(|u| u.pos.cell()) else { return false };
+        let Some(from) = self.units.get(unit).map(|u| u.cell()) else { return false };
         if from == target || [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().any(|&(dx, dy)| from.offset(dx, dy) == target) {
             self.units[unit].path.clear();
             return true;
@@ -741,6 +728,8 @@ impl World {
     /// Stun and regeneration for priests, and carried units following their carrier.
     fn run_priests(&mut self) {
         let temples: Vec<(u8, Cell)> = self.structures.iter().filter(|s| s.is_temple).map(|s| (s.owner, s.centre())).collect();
+        let heal_range = self.cfg.priest.temple_heal_range;
+        let heal_ticks = (self.cfg.sim.tick_hz / self.cfg.priest.heal_per_second.max(1)).max(1) as u64;
         for i in 0..self.units.len() {
             let u = &self.units[i];
             if !u.alive {
@@ -754,9 +743,9 @@ impl World {
             if !u.is_priest {
                 continue;
             }
-            let at = u.pos.cell();
-            let near_temple = temples.iter().any(|&(o, c)| o == u.owner && (c.x - at.x).abs() <= TEMPLE_HEAL_RANGE && (c.y - at.y).abs() <= TEMPLE_HEAL_RANGE);
-            if near_temple && u.hp < u.max_hp && self.tick % HEAL_TICKS as u64 == 0 {
+            let at = u.cell();
+            let near_temple = temples.iter().any(|&(o, c)| o == u.owner && (c.x - at.x).abs() <= heal_range && (c.y - at.y).abs() <= heal_range);
+            if near_temple && u.hp < u.max_hp && self.tick % heal_ticks == 0 {
                 self.units[i].hp += 1;
             }
             let u = &mut self.units[i];
@@ -771,18 +760,20 @@ impl World {
     /// Salvage one of the player's structures: part of its cost comes back,
     /// scaled by its remaining health, and nearby bridges take the shock of
     /// its removal but nothing else is damaged.
-    pub fn salvage(&mut self, index: usize) -> Option<i32> {
-        self.salvage_for(0, index)
+    pub fn salvage(&mut self, index: usize, scripts: &Scripts) -> Option<i32> {
+        self.salvage_for(0, index, scripts)
     }
 
-    pub fn salvage_for(&mut self, owner: u8, index: usize) -> Option<i32> {
+    pub fn salvage_for(&mut self, owner: u8, index: usize, scripts: &Scripts) -> Option<i32> {
         let s = self.structures.get(index)?;
         if s.owner != owner {
             return None;
         }
-        let health = if s.max_hp > 0 { s.hp.max(0) as i64 * 100 / s.max_hp as i64 } else { 100 };
-        let refund = (s.cost as i64 * SALVAGE_REFUND_PERCENT as i64 * health / 10_000) as i32;
-        self.powers[owner as usize % MAX_PLAYERS] += refund;
+        let refund = scripts
+            .salvage_refund(s.cost as i64, s.hp.max(0) as i64, s.max_hp as i64, self.cfg.economy.salvage_refund_percent as i64)
+            .unwrap_or(0);
+        let slot = self.slot(owner);
+        self.powers[slot] += refund;
         let centre = s.centre();
         self.remove_structure(index);
         self.shock_bridges(centre);
@@ -816,8 +807,9 @@ impl World {
     fn shock_bridges(&mut self, centre: Cell) {
         let mut destroyed = Vec::new();
         let mut changed = false;
+        let radius = self.cfg.combat.explosion_radius;
         for (c, state) in self.bridges.iter_mut() {
-            if (c.x - centre.x).abs() > EXPLOSION_RADIUS || (c.y - centre.y).abs() > EXPLOSION_RADIUS {
+            if (c.x - centre.x).abs() > radius || (c.y - centre.y).abs() > radius {
                 continue;
             }
             match *state {
@@ -846,16 +838,17 @@ impl World {
             return;
         }
         let centre = self.structures[index].centre();
+        let (radius, damage) = (self.cfg.combat.explosion_radius, self.cfg.combat.explosion_damage);
         self.remove_structure(index);
         self.shock_bridges(centre);
-        let near = |c: Cell| (c.x - centre.x).abs() <= EXPLOSION_RADIUS && (c.y - centre.y).abs() <= EXPLOSION_RADIUS;
-        let victims: Vec<usize> = (0..self.structures.len()).filter(|&i| self.structures[i].distance_to(centre) <= EXPLOSION_RADIUS).collect();
+        let near = |c: Cell| (c.x - centre.x).abs() <= radius && (c.y - centre.y).abs() <= radius;
+        let victims: Vec<usize> = (0..self.structures.len()).filter(|&i| self.structures[i].distance_to(centre) <= radius).collect();
         for i in victims.into_iter().rev() {
-            self.damage_structure(i, EXPLOSION_DAMAGE);
+            self.damage_structure(i, damage);
         }
         for i in 0..self.units.len() {
-            if self.units[i].alive && near(self.units[i].pos.cell()) {
-                self.damage_unit(i, EXPLOSION_DAMAGE);
+            if self.units[i].alive && near(self.units[i].cell()) {
+                self.damage_unit(i, damage);
             }
         }
         self.settle();
@@ -892,7 +885,7 @@ impl World {
 
     /// Every armed structure picks the highest-threat enemy in range and
     /// fires when its cooldown allows. Cannons only fire along their row or column.
-    fn run_combat(&mut self) {
+    fn run_combat(&mut self, scripts: &Scripts) {
         let mut shots: Vec<(usize, Target)> = Vec::new();
         for (i, s) in self.structures.iter().enumerate() {
             let Some(w) = s.weapon else { continue };
@@ -900,26 +893,26 @@ impl World {
                 continue;
             }
             let in_range = |c: Cell| s.distance_to(c) <= w.range && (!w.cardinal_only || s.in_line(c));
-            let mut best: Option<(i32, i32, Target)> = None;
+            let mut best: Option<(i64, Target)> = None;
             for (j, t) in self.structures.iter().enumerate() {
                 if t.owner == s.owner || t.max_hp == 0 || !in_range(t.centre()) {
                     continue;
                 }
-                let key = (t.threat, -s.distance_to(t.centre()));
-                if best.as_ref().is_none_or(|b| (b.0, b.1) < key) {
-                    best = Some((key.0, key.1, Target::Structure(j)));
+                let key = scripts.target_priority(t.threat as i64, s.distance_to(t.centre()) as i64, false).unwrap_or(0);
+                if best.as_ref().is_none_or(|b| b.0 < key) {
+                    best = Some((key, Target::Structure(j)));
                 }
             }
             for (j, u) in self.units.iter().enumerate() {
-                if !u.alive || u.owner == s.owner || u.carried_by.is_some() || !in_range(u.pos.cell()) {
+                if !u.alive || u.owner == s.owner || u.carried_by.is_some() || !in_range(u.cell()) {
                     continue;
                 }
-                let key = (u.threat, -s.distance_to(u.pos.cell()));
-                if best.as_ref().is_none_or(|b| (b.0, b.1) < key) {
-                    best = Some((key.0, key.1, Target::Unit(j)));
+                let key = scripts.target_priority(u.threat as i64, s.distance_to(u.cell()) as i64, true).unwrap_or(0);
+                if best.as_ref().is_none_or(|b| b.0 < key) {
+                    best = Some((key, Target::Unit(j)));
                 }
             }
-            if let Some((_, _, target)) = best {
+            if let Some((_, target)) = best {
                 shots.push((i, target));
             }
         }
@@ -947,7 +940,7 @@ impl World {
             return false;
         }
         let Some(u) = self.units.get(unit).filter(|u| u.alive) else { return false };
-        let from = u.pos.cell();
+        let from = u.cell();
         let owner = u.owner;
         let Some(temple) = self
             .structures
@@ -968,7 +961,7 @@ impl World {
 
     /// Path a unit to the nearest reachable cell next to a structure.
     fn walk_to_adjacent(&mut self, unit: usize, structure: usize) -> bool {
-        let Some(from) = self.units.get(unit).map(|u| u.pos.cell()) else { return false };
+        let Some(from) = self.units.get(unit).map(|u| u.cell()) else { return false };
         let Some(s) = self.structures.get(structure) else { return false };
         if s.is_adjacent(from) {
             self.units[unit].path.clear();
@@ -991,7 +984,7 @@ impl World {
             if !u.alive || u.is_moving() {
                 continue;
             }
-            let at = u.pos.cell();
+            let at = u.cell();
             match u.task {
                 Task::Capture { priest } => {
                     let Some(p) = self.units.get(priest) else {
@@ -1002,7 +995,7 @@ impl World {
                         self.units[i].task = Task::Idle;
                         continue;
                     }
-                    let pc = p.pos.cell();
+                    let pc = p.cell();
                     let adjacent = pc == at || [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().any(|&(dx, dy)| at.offset(dx, dy) == pc);
                     if adjacent {
                         self.units[priest].carried_by = Some(i);
@@ -1045,10 +1038,10 @@ impl World {
                 if g.stock <= 0 {
                     self.units[i].task = Task::Idle;
                 } else if g.is_adjacent(at) {
-                    if work + 1 < WORK_TICKS {
+                    if work + 1 < self.cfg.ticks(self.cfg.economy.work_seconds) {
                         self.units[i].task = Task::Harvest { geyser, temple, carrying, work: work + 1 };
                     } else {
-                        let take = NUGGET_POWER.min(g.stock);
+                        let take = self.cfg.economy.nugget_power.min(g.stock);
                         self.structures[geyser].stock -= take;
                         if self.structures[geyser].stock == 0 {
                             self.structures[geyser].kind = "emptygeyser".into();
@@ -1063,10 +1056,11 @@ impl World {
                     self.units[i].task = Task::Idle;
                 }
             } else if t.is_adjacent(at) {
-                if work + 1 < WORK_TICKS {
+                if work + 1 < self.cfg.ticks(self.cfg.economy.work_seconds) {
                     self.units[i].task = Task::Harvest { geyser, temple, carrying, work: work + 1 };
                 } else {
-                    self.powers[self.units[i].owner as usize % MAX_PLAYERS] += carrying;
+                    let slot = self.slot(self.units[i].owner);
+                    self.powers[slot] += carrying;
                     let more = self.structures[geyser].stock > 0;
                     self.units[i].task = if more { Task::Harvest { geyser, temple, carrying: 0, work: 0 } } else { Task::Idle };
                     if more && !self.walk_to_adjacent(i, geyser) {
@@ -1082,13 +1076,14 @@ impl World {
     /// Order a unit to walk to `cell` along the cheapest walkable path.
     /// Returns `false` if the cell is unreachable.
     pub fn order_move(&mut self, unit: usize, cell: Cell) -> bool {
-        let Some(from) = self.units.get(unit).filter(|u| u.alive && !u.stunned && u.carried_by.is_none()).map(|u| u.pos.cell()) else { return false };
+        let Some(from) = self.units.get(unit).filter(|u| u.alive && !u.stunned && u.carried_by.is_none()).map(|u| u.cell()) else { return false };
         let Some(path) = find_path_costed(from, cell, |c| self.walk_cost(c)) else { return false };
+        let sub = self.subcell();
         let u = &mut self.units[unit];
-        u.path = path.into_iter().map(Pos::cell_centre).collect();
+        u.path = path.into_iter().map(|c| Pos::cell_centre(c, sub)).collect();
         if u.path.is_empty() {
             // Already in the cell: walk to its centre so the unit settles.
-            u.path.push_back(Pos::cell_centre(cell));
+            u.path.push_back(Pos::cell_centre(cell, sub));
         }
         true
     }
@@ -1102,34 +1097,43 @@ impl World {
     }
 
     /// Advance the simulation by one tick.
-    pub fn step(&mut self) {
+    pub fn step(&mut self, scripts: &Scripts) {
         for u in &mut self.units {
             u.step();
         }
         self.run_priests();
         self.run_tasks();
         self.last_shots.clear();
-        self.run_combat();
+        self.run_combat(scripts);
         self.crumble();
         self.tick += 1;
     }
 }
 
 /// Convert a type's `speed` property (cells per second) to fixed-point steps per tick.
-pub fn speed_per_tick(cells_per_second: f64) -> i32 {
-    ((cells_per_second * crate::unit::SUBCELL as f64) / TICK_HZ as f64).round().max(1.0) as i32
+pub fn speed_per_tick(cfg: &Config, cells_per_second: f64) -> i32 {
+    ((cells_per_second * cfg.walking.subcell as f64) / cfg.sim.tick_hz as f64).round().max(1.0) as i32
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::test_config;
+    use crate::script::test_scripts;
 
     fn world() -> World {
-        let mut w = World::new();
+        let mut w = World::new(test_config());
         w.islands.push(IslandMap::rect(Cell::new(0, 0), 8, 4));
-        w.units.push(Unit::new("priest", Cell::new(0, 1), speed_per_tick(1.0)));
+        let speed = speed_per_tick(&w.cfg, 1.0);
+        let sub = w.subcell();
+        w.units.push(Unit::new("priest", Cell::new(0, 1), speed, sub));
         w
     }
+
+    const CRUMBLE_TICKS: u32 = 120;
+    const NUGGET_POWER: i32 = 200;
+    const HEAL_TICKS: u32 = 15;
+    const PIECE_SLOTS: usize = 4;
 
     fn rules(foot: i32) -> TypeRules {
         TypeRules { foot_x: foot, foot_y: foot, ..TypeRules::plain() }
@@ -1141,9 +1145,9 @@ mod tests {
         assert!(!w.order_move(0, Cell::new(9, 9)));
         assert!(w.order_move(0, Cell::new(7, 3)));
         for _ in 0..400 {
-            w.step();
+            w.step(&test_scripts());
         }
-        assert_eq!(w.units[0].pos.cell(), Cell::new(7, 3));
+        assert_eq!(w.units[0].cell(), Cell::new(7, 3));
         assert!(!w.units[0].is_moving());
         assert_eq!(w.tick, 400);
     }
@@ -1159,13 +1163,13 @@ mod tests {
         assert!(w.order_move(0, Cell::new(7, 1)));
         let mut visited = Vec::new();
         for _ in 0..600 {
-            w.step();
-            visited.push(w.units[0].pos.cell());
+            w.step(&test_scripts());
+            visited.push(w.units[0].cell());
             if !w.units[0].is_moving() {
                 break;
             }
         }
-        assert_eq!(w.units[0].pos.cell(), Cell::new(7, 1));
+        assert_eq!(w.units[0].cell(), Cell::new(7, 1));
         assert!(visited.iter().all(|&c| w.is_walkable(c)), "never stood on the wall");
         assert!(visited.contains(&Cell::new(4, 0)), "went through the gap");
     }
@@ -1174,7 +1178,7 @@ mod tests {
     fn avoided_structures_are_passable_but_costly() {
         let mut w = world();
         w.structures.push(Structure::new("factory", Cell::new(4, 3), 1, 4, Walk::Avoid));
-        assert_eq!(w.walk_cost(Cell::new(4, 2)), Some(AVOID_COST));
+        assert_eq!(w.walk_cost(Cell::new(4, 2)), Some(w.cfg.walking.avoid_cost));
         assert!(w.order_move(0, Cell::new(7, 1)), "still reachable");
     }
 
@@ -1184,7 +1188,7 @@ mod tests {
         let r = rules(2);
         assert_eq!(w.can_drop(&r, Cell::new(9, 3)), Err(DropError::NotGround(Cell::new(9, 3))));
         assert_eq!(w.can_drop(&r, Cell::new(1, 1)), Err(DropError::OnRim(Cell::new(0, 1))), "island edge is rim");
-        w.units.push(Unit::new("golem", Cell::new(2, 1), 9));
+        w.units.push(Unit::new("golem", Cell::new(2, 1), 9, 256));
         assert_eq!(w.can_drop(&r, Cell::new(3, 2)), Err(DropError::UnitInTheWay(Cell::new(2, 1))));
         w.units.pop();
         assert_eq!(w.can_drop(&r, Cell::new(7, 3)), Err(DropError::OnRim(Cell::new(7, 3))), "rectangle edge is rim");
@@ -1246,7 +1250,7 @@ mod tests {
         assert!(w.is_bridge(Cell::new(8, 1)), "still attached to the island");
         assert!(w.units[far].alive, "the golem stands on a cracked bridge for now");
         for _ in 0..CRUMBLE_TICKS + 1 {
-            w.step();
+            w.step(&test_scripts());
         }
         assert!(!w.is_bridge(Cell::new(11, 1)), "hard but unsupported: it crumbled");
         assert!(!w.is_bridge(Cell::new(13, 1)));
@@ -1280,7 +1284,7 @@ mod tests {
         assert!(w.structures.is_empty(), "cannon fell with it");
         assert_eq!(w.bridge_state(Cell::new(9, 1)), Some(BridgeState::Cracked));
         for _ in 0..CRUMBLE_TICKS + 1 {
-            w.step();
+            w.step(&test_scripts());
         }
         assert!(w.bridges.is_empty());
     }
@@ -1328,7 +1332,7 @@ mod tests {
         assert!(w.order_harvest(u, g));
         assert!(matches!(w.units[u].task, Task::Harvest { .. }));
         for _ in 0..6000 {
-            w.step();
+            w.step(&test_scripts());
             if w.units[u].task == Task::Idle {
                 break;
             }
@@ -1351,6 +1355,7 @@ mod tests {
             range: 6,
             hp_per_sec: 16,
             delay_between_shots: 5.0,
+            damage_per_shot: 80,
             cardinal_only: true,
             threat: 5,
             cost: 400,
@@ -1371,23 +1376,23 @@ mod tests {
         w.powers[1] = 1000;
         let theirs = w.drop_structure_for(1, "suncannon", &cannon(), Cell::new(9, 6)).unwrap();
         assert_eq!(w.powers[0], 600, "enemies do not spend our power");
-        w.step();
+        w.step(&test_scripts());
         assert_eq!(w.structures[mine].hp, 520, "took one 80-point shot");
         assert_eq!(w.structures[theirs].hp, 520);
         assert_eq!(w.last_shots.len(), 2, "both cannons fired this tick");
-        w.step();
+        w.step(&test_scripts());
         assert_eq!(w.last_shots.len(), 0, "a tick without shots logs none");
         for _ in 0..148 {
-            w.step();
+            w.step(&test_scripts());
         }
         assert_eq!(w.structures[mine].hp, 520, "cooldown of five seconds");
-        w.step();
+        w.step(&test_scripts());
         assert_eq!(w.structures[mine].hp, 440);
         // A unit diagonal to the enemy cannon is out of its line of fire.
         let golem = TypeRules { is_unit: true, max_hit_points: 50, ..TypeRules::plain() };
         let u = w.spawn_unit("sunwalker", &golem, Cell::new(5, 10)).unwrap();
         for _ in 0..200 {
-            w.step();
+            w.step(&test_scripts());
         }
         assert!(w.units[u].alive, "diagonal target never shot");
     }
@@ -1417,15 +1422,15 @@ mod tests {
         let r = TypeRules { foot_x: 2, foot_y: 2, cost: 400, max_hit_points: 100, ..TypeRules::plain() };
         let i = w.drop_structure("thing", &r, Cell::new(3, 2)).unwrap();
         assert_eq!(w.powers[0], 600);
-        assert_eq!(w.salvage(i), Some(100));
+        assert_eq!(w.salvage(i, &test_scripts()), Some(100));
         assert_eq!(w.powers[0], 700);
         let i = w.drop_structure("thing", &r, Cell::new(3, 2)).unwrap();
         w.damage_structure(i, 50);
-        assert_eq!(w.salvage(i), Some(50), "half health, half refund");
+        assert_eq!(w.salvage(i, &test_scripts()), Some(50), "half health, half refund");
         w.energy_enforced = false;
         w.powers[1] = 1000;
         let e = w.drop_structure_for(1, "thing", &r, Cell::new(3, 2)).unwrap();
-        assert_eq!(w.salvage(e), None, "cannot salvage enemy property");
+        assert_eq!(w.salvage(e, &test_scripts()), None, "cannot salvage enemy property");
     }
 
     #[test]
@@ -1442,12 +1447,12 @@ mod tests {
         let g = w.spawn_unit("sunwalker", &golem, Cell::new(1, 6)).unwrap();
         assert!(!w.order_capture(g, p), "a healthy priest cannot be captured");
         w.damage_unit(p, 50);
-        w.step();
+        w.step(&test_scripts());
         assert!(w.units[p].stunned);
         assert!(!w.order_move(p, Cell::new(9, 9)), "stunned priests cannot move");
         assert!(w.order_capture(g, p));
         for _ in 0..400 {
-            w.step();
+            w.step(&test_scripts());
             if w.units[g].carrying.is_some() {
                 break;
             }
@@ -1456,14 +1461,14 @@ mod tests {
         assert_eq!(w.units[p].carried_by, Some(g));
         assert!(w.order_sacrifice(g, a));
         for _ in 0..400 {
-            w.step();
+            w.step(&test_scripts());
             if w.units[g].task == Task::Idle && w.units[g].carrying.is_none() {
                 break;
             }
         }
         assert!(!w.units[p].alive, "sacrificed");
         assert_eq!(w.knowledge, 1);
-        assert_eq!(w.units[g].pos.cell(), w.structures[a].centre());
+        assert_eq!(w.units[g].cell(), w.structures[a].centre());
     }
 
     #[test]
@@ -1474,10 +1479,10 @@ mod tests {
         let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, ..TypeRules::plain() };
         let p = w.spawn_unit("priest", &priest, Cell::new(4, 1)).unwrap();
         w.damage_unit(p, 60);
-        w.step();
+        w.step(&test_scripts());
         assert!(w.units[p].stunned);
         for _ in 0..(HEAL_TICKS * 12) {
-            w.step();
+            w.step(&test_scripts());
         }
         assert!(!w.units[p].stunned, "healed above half by the temple");
         assert!(w.units[p].hp > 50);
@@ -1509,10 +1514,10 @@ mod tests {
 
     #[test]
     fn ownership_and_knowledge_gate_building() {
-        let mut w = World::new();
+        let mut w = World::new(test_config());
         w.push_island(IslandMap::rect(Cell::new(0, 0), 8, 6), 0);
         w.push_island(IslandMap::rect(Cell::new(20, 0), 8, 6), 1);
-        w.powers = [1000, 1000, 0, 0];
+        w.powers = vec![1000, 1000, 0, 0];
         let piece = [Cell::new(8, 2), Cell::new(9, 2)];
         assert_eq!(w.can_place_piece_for(1, &piece), Err(PieceError::NotOwnGround), "off our island, not theirs");
         assert!(w.place_piece_for(0, &piece).is_ok());
@@ -1538,12 +1543,13 @@ mod tests {
         let golem = TypeRules { is_unit: true, speed: 1.8, ..TypeRules::plain() };
         assert_eq!(w.spawn_unit("sunwalker", &golem, Cell::new(9, 9)), None);
         assert_eq!(w.spawn_unit("sunwalker", &golem, Cell::new(2, 2)), Some(1));
-        assert_eq!(w.units[1].speed, speed_per_tick(1.8));
+        assert_eq!(w.units[1].speed, speed_per_tick(&w.cfg, 1.8));
     }
 
     #[test]
     fn speed_conversion() {
-        assert_eq!(speed_per_tick(1.0), 9);
-        assert_eq!(speed_per_tick(0.0), 1);
+        let c = test_config();
+        assert_eq!(speed_per_tick(&c, 1.0), 9);
+        assert_eq!(speed_per_tick(&c, 0.0), 1);
     }
 }

@@ -1,30 +1,34 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Islefall entry point.
 //!
+//! Every rule, number and key comes from the data directory: `rules.toml`
+//! for parameters, `scripts/rules.rhai` for decision hooks, `maps/*.toml`
+//! for scenes. Nothing about the game is hardcoded here.
+//!
 //! Two modes, chosen with `ISLEFALL_MODE`:
-//! - `island` (default): an island with the altar and the High Priest,
+//! - `island` (default): the map from `ISLEFALL_MAP` (default `demo`),
 //!   driven by the simulation. Left-click selects a unit, sends the selected
 //!   unit somewhere, on a Storm Geyser sets it harvesting, on a stunned enemy
 //!   priest sends a Transport to capture him, and on your Altar sacrifices a
-//!   carried priest; right-click acts with the current tool. The window
-//!   title shows Storm Power and Knowledge.
-//!   Tools: `Q`, `W`, `A`, `S` pick a bridge piece from the four slots on
-//!   offer (`R` rotates it), `1`..`6` drop a building (`6`, the Wind
-//!   Generator, needs Knowledge from a sacrifice), `U` spawn a golem.
-//!   `Delete` destroys, `C` cracks and `H` hardens the bridge cell under the
-//!   cursor; `V` salvages the player's structure under the cursor. Arrow keys or WASD pan the camera, `-` and `=` zoom.
+//!   carried priest; right-click acts with the current tool. Tools: the slot
+//!   keys pick a bridge piece (`R` rotates it), number keys drop a building,
+//!   `U` spawns a unit. `Delete` destroys, `C` cracks and `H` hardens the
+//!   bridge cell under the cursor; `V` salvages your structure under the
+//!   cursor. Arrow keys or WASD pan the camera, `-` and `=` zoom.
 //! - `viewer`: animates one object type at a time. `[` and `]` step
 //!   through types, `,` and `.` through animations.
 //!
 //! Environment:
 //! - `NETSTORM_DIR`: directory containing the game's `d/` and `netstorm.tarc`.
-//! - `ISLEFALL_PALETTE`: palette file stem from `d/` (default `gifcloud`, the game palette).
-//! - `ISLEFALL_SCREENSHOT=file.png`: save a screenshot shortly after start-up,
-//!   after `ISLEFALL_SCREENSHOT_AT` seconds (default 1.5).
-//! - `ISLEFALL_ISLAND=cross`: use a cross-shaped test island in the island scene.
-//! - `ISLEFALL_CAMERA=x,y`: start the camera centred on that cell instead of the island.
+//! - `ISLEFALL_DATA`: the data directory (default `data` next to the
+//!   working directory, or the repository's).
+//! - `ISLEFALL_MAP`: map name inside `maps/` (default `demo`).
+//! - `ISLEFALL_PALETTE`: palette file stem from `d/`, overriding the rules.
+//! - `ISLEFALL_SCREENSHOT=file.png`: save a screenshot after start-up,
+//!   after `ISLEFALL_SCREENSHOT_AT` seconds (default from the rules).
+//! - `ISLEFALL_CAMERA=x,y`: start the camera centred on that cell.
 //!
-//! Keys in both modes: `Space` pauses animation, `P` saves a screenshot.
+//! Keys in both modes: `Space` pauses, `P` saves a screenshot.
 
 mod sprites;
 mod world;
@@ -38,29 +42,11 @@ use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
 use islefall_data::{Installation, TypeDef};
-use islefall_sim::{Ai, AiMove, CELL_H, CELL_W, Cell, Dir8, ENERGY_RANGE_PX, IslandMap, Piece, TICK_HZ, TypeRules, Unit, World};
+use islefall_sim::config::Grid;
+use islefall_sim::map::{self, MapDef};
+use islefall_sim::{Ai, AiMove, Cell, Config, Dir8, IslandMap, Piece, Scripts, TypeRules, Unit, World};
 use sprites::FrameInfo;
 use world::{BridgeTile, LoadedShape, ShapeLibrary, StructureSprite, TerrainTile, Z_SHADOW, Z_STRUCTURE, Z_UNIT};
-
-const START_TYPE: &str = "priest";
-const FRAME_SECONDS: f32 = 0.1;
-const ZOOM: f32 = 4.0;
-const AUTO_SCREENSHOT_SECONDS: f32 = 1.5;
-const DEFAULT_PALETTE: &str = "gifcloud";
-/// Camera pan speed in source pixels per second.
-const PAN_SPEED: f32 = 120.0;
-/// Buildings on the number keys.
-const BUILD_TOOLS: [(KeyCode, &str); 6] = [
-    (KeyCode::Digit1, "suncannon"),
-    (KeyCode::Digit2, "sunarcher"),
-    (KeyCode::Digit3, "sunbattery"),
-    (KeyCode::Digit4, "sunfactory"),
-    (KeyCode::Digit5, "treetwo"),
-    (KeyCode::Digit6, "windbattery"),
-];
-const UNIT_TOOL: &str = "sunwalker";
-/// Storm Power to start the demo with.
-const START_POWER: i32 = 1500;
 
 /// Row-based draw order: things lower on screen draw over things above them.
 fn depth_z(base: f32, row: f32) -> f32 {
@@ -78,102 +64,59 @@ enum Mode {
 enum Tool {
     /// A bridge piece taken from queue slot `.0`, rotated as `.1`.
     Bridge(usize, Piece),
-    Drop(&'static str),
-    Spawn(&'static str),
+    Drop(String),
+    Spawn(String),
 }
 
-/// Keys for the piece slots, as in the original Production window.
-const SLOT_KEYS: [KeyCode; 6] = [KeyCode::KeyQ, KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyS, KeyCode::KeyZ, KeyCode::KeyX];
-
-/// The user-supplied NetStorm data, loaded once at startup.
+/// The user-supplied NetStorm data and the game's own rules, loaded once.
 #[derive(Resource)]
 struct GameData {
     install: Installation,
+    cfg: Config,
+    scripts: Scripts,
     palette: String,
+    map: MapDef,
 }
 
 impl GameData {
     fn rules(&self, stem: &str) -> TypeRules {
-        self.install.type_def(stem).map(TypeRules::from_type).unwrap_or_else(TypeRules::plain)
+        match self.install.type_def(stem) {
+            Some(def) => TypeRules::from_type(def, &self.cfg, &self.scripts).unwrap_or_else(|e| {
+                warn!("{stem}: {e}; using plain rules");
+                TypeRules::plain()
+            }),
+            None => TypeRules::plain(),
+        }
+    }
+
+    fn grid(&self) -> &Grid {
+        &self.cfg.grid
     }
 }
 
 /// The simulation state; stepped on the fixed schedule only.
 #[derive(Resource, Default)]
 struct Sim {
-    world: World,
+    world: Option<World>,
     /// Computer opponents, acting after each tick.
     ais: Vec<Ai>,
 }
 
-/// What the opponents drop.
-const AI_SHOOTER: &str = "sunarcher";
-/// Seconds between opponent moves.
-const AI_MOVE_SECONDS: u32 = 4;
+impl Sim {
+    fn world(&self) -> &World {
+        self.world.as_ref().expect("world is created at start-up")
+    }
+
+    fn world_mut(&mut self) -> &mut World {
+        self.world.as_mut().expect("world is created at start-up")
+    }
+}
 
 /// Player-side interaction state.
 #[derive(Resource)]
 struct Player {
     tool: Tool,
     selected: usize,
-}
-
-/// Marks the placement preview sprites.
-#[derive(Component)]
-struct Ghost;
-
-/// The ring image used to show Energy circles, built once.
-#[derive(Resource)]
-struct RingImage(Handle<Image>);
-
-/// A translucent ring of the Energy radius; drawn around every own source.
-fn make_ring(images: &mut Assets<Image>) -> Handle<Image> {
-    let r = ENERGY_RANGE_PX as f32;
-    let size = (ENERGY_RANGE_PX * 2 + 2) as u32;
-    let mut data = vec![0u8; (size * size * 4) as usize];
-    for y in 0..size {
-        for x in 0..size {
-            let dx = x as f32 + 0.5 - size as f32 / 2.0;
-            let dy = y as f32 + 0.5 - size as f32 / 2.0;
-            let d = (dx * dx + dy * dy).sqrt();
-            let alpha = if (d - r).abs() <= 1.0 { 160 } else if d < r { 18 } else { 0 };
-            let o = ((y * size + x) * 4) as usize;
-            data[o..o + 4].copy_from_slice(&[255, 240, 120, alpha]);
-        }
-    }
-    images.add(Image::new(
-        bevy::render::render_resource::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
-        bevy::render::render_resource::TextureDimension::D2,
-        data,
-        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
-        bevy::asset::RenderAssetUsages::RENDER_WORLD,
-    ))
-}
-
-/// Marks Energy circle sprites.
-#[derive(Component)]
-struct EnergyRing;
-
-/// Draw the Energy circle of every source the player owns whenever structures change.
-fn sync_energy_rings(
-    mut commands: Commands,
-    sim: Res<Sim>,
-    ring: Res<RingImage>,
-    existing: Query<Entity, With<EnergyRing>>,
-    mut seen: Local<Option<u64>>,
-) {
-    if *seen == Some(sim.world.structure_version) {
-        return;
-    }
-    *seen = Some(sim.world.structure_version);
-    for e in &existing {
-        commands.entity(e).despawn();
-    }
-    for s in sim.world.structures.iter().filter(|s| s.owner == 0 && s.produces.is_some()) {
-        let (x, y) = s.centre().top_left_px();
-        let pos = Vec3::new(x as f32 + CELL_W as f32 / 2.0, -(y as f32 + CELL_H as f32 / 2.0), 0.9);
-        commands.spawn((Sprite::from_image(ring.0.clone()), Transform::from_translation(pos), EnergyRing));
-    }
 }
 
 #[derive(Resource)]
@@ -215,30 +158,63 @@ struct UnitLayer {
     shadow: bool,
 }
 
+/// Marks the placement preview sprites.
+#[derive(Component)]
+struct Ghost;
+
+/// The ring image used to show Energy circles, built once.
+#[derive(Resource)]
+struct RingImage(Handle<Image>);
+
+/// Marks Energy circle sprites.
+#[derive(Component)]
+struct EnergyRing;
+
+/// Marks per-frame overlay sprites: health bars and shot flashes.
+#[derive(Component)]
+struct Overlay;
+
+/// Where the game's own data lives.
+fn data_dir() -> PathBuf {
+    if let Some(d) = std::env::var_os("ISLEFALL_DATA") {
+        return PathBuf::from(d);
+    }
+    let local = PathBuf::from("data");
+    if local.join("rules.toml").exists() {
+        return local;
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data")
+}
+
+fn fail(msg: impl std::fmt::Display) -> ! {
+    eprintln!("{msg}");
+    std::process::exit(1);
+}
+
 fn main() {
     let dir = match std::env::var_os("NETSTORM_DIR") {
         Some(d) => PathBuf::from(d),
-        None => {
-            eprintln!("NETSTORM_DIR is not set; point it at a NetStorm installation (the directory holding d/ and netstorm.tarc)");
-            std::process::exit(2);
-        }
+        None => fail("NETSTORM_DIR is not set; point it at a NetStorm installation (the directory holding d/ and netstorm.tarc)"),
     };
-    let install = match Installation::load(&dir) {
-        Ok(i) => i,
-        Err(e) => {
-            eprintln!("failed to load NetStorm data from {}: {e}", dir.display());
-            std::process::exit(1);
-        }
-    };
-    let palette = std::env::var("ISLEFALL_PALETTE").unwrap_or_else(|_| DEFAULT_PALETTE.into());
+    let data = data_dir();
+    let cfg = Config::load(data.join("rules.toml")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("rules.toml").display())));
+    let scripts = Scripts::load(data.join("scripts/rules.rhai")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("scripts/rules.rhai").display())));
+    let map_name = std::env::var("ISLEFALL_MAP").unwrap_or_else(|_| "demo".into());
+    let map_path = data.join("maps").join(format!("{map_name}.toml"));
+    let map = MapDef::load(&map_path).unwrap_or_else(|e| fail(format!("{}: {e}", map_path.display())));
+    let install = Installation::load(&dir).unwrap_or_else(|e| fail(format!("failed to load NetStorm data from {}: {e}", dir.display())));
+    let palette = std::env::var("ISLEFALL_PALETTE").unwrap_or_else(|_| cfg.controls.palette.clone());
     if install.palette(&palette).is_none() {
-        eprintln!("palette {palette} not found in {}/d; available: {:?}", dir.display(), install.palettes.keys().collect::<Vec<_>>());
-        std::process::exit(1);
+        fail(format!("palette {palette} not found in {}/d; available: {:?}", dir.display(), install.palettes.keys().collect::<Vec<_>>()));
     }
     let mode = match std::env::var("ISLEFALL_MODE").as_deref() {
         Ok("viewer") => Mode::Viewer,
         _ => Mode::Island,
     };
+    let tick_hz = cfg.sim.tick_hz;
+    let frame_seconds = 1.0 / cfg.controls.animation_fps.max(0.1);
+    let screenshot_at = std::env::var("ISLEFALL_SCREENSHOT_AT").ok().and_then(|s| s.parse().ok()).unwrap_or(cfg.controls.screenshot_seconds);
+    let unit_tool = cfg.controls.unit_tool.clone();
 
     let mut app = App::new();
     app.add_plugins(
@@ -249,21 +225,21 @@ fn main() {
                 ..default()
             }),
     )
-    .insert_resource(GameData { install, palette })
+    .insert_resource(GameData { install, cfg, scripts, palette, map })
     .insert_resource(mode)
-    .insert_resource(Time::<Fixed>::from_hz(TICK_HZ as f64))
+    .insert_resource(Time::<Fixed>::from_hz(tick_hz as f64))
     .init_resource::<ShapeLibrary>()
     .init_resource::<Sim>()
-    .insert_resource(Player { tool: Tool::Spawn(UNIT_TOOL), selected: 0 })
+    .insert_resource(Player { tool: Tool::Spawn(unit_tool), selected: 0 })
     .insert_resource(Viewer {
-        type_index: SHAPE_ORDER.iter().position(|s| *s == START_TYPE).unwrap_or(0),
+        type_index: 0,
         animation: 0,
-        timer: Timer::from_seconds(FRAME_SECONDS, TimerMode::Repeating),
+        timer: Timer::from_seconds(frame_seconds, TimerMode::Repeating),
         paused: false,
     })
     .add_systems(Startup, setup)
-    .add_systems(Startup, |mut commands: Commands, mut images: ResMut<Assets<Image>>| {
-        let ring = make_ring(&mut images);
+    .add_systems(Startup, |mut commands: Commands, data: Res<GameData>, mut images: ResMut<Assets<Image>>| {
+        let ring = make_ring(&mut images, data.cfg.energy.range_px);
         commands.insert_resource(RingImage(ring));
     })
     .add_systems(FixedUpdate, sim_step.run_if(resource_equals(Mode::Island)))
@@ -275,10 +251,33 @@ fn main() {
     )
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
-        let at = std::env::var("ISLEFALL_SCREENSHOT_AT").ok().and_then(|s| s.parse().ok()).unwrap_or(AUTO_SCREENSHOT_SECONDS);
-        app.insert_resource(AutoScreenshot { path, delay: Timer::from_seconds(at, TimerMode::Once) });
+        app.insert_resource(AutoScreenshot { path, delay: Timer::from_seconds(screenshot_at, TimerMode::Once) });
     }
     app.run();
+}
+
+/// A translucent ring of the Energy radius; drawn around every own source.
+fn make_ring(images: &mut Assets<Image>, radius: i32) -> Handle<Image> {
+    let r = radius as f32;
+    let size = (radius * 2 + 2) as u32;
+    let mut data = vec![0u8; (size * size * 4) as usize];
+    for y in 0..size {
+        for x in 0..size {
+            let dx = x as f32 + 0.5 - size as f32 / 2.0;
+            let dy = y as f32 + 0.5 - size as f32 / 2.0;
+            let d = (dx * dx + dy * dy).sqrt();
+            let alpha = if (d - r).abs() <= 1.0 { 160 } else if d < r { 18 } else { 0 };
+            let o = ((y * size + x) * 4) as usize;
+            data[o..o + 4].copy_from_slice(&[255, 240, 120, alpha]);
+        }
+    }
+    images.add(Image::new(
+        bevy::render::render_resource::Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+        bevy::render::render_resource::TextureDimension::D2,
+        data,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD,
+    ))
 }
 
 fn auto_screenshot(mut commands: Commands, time: Res<Time>, auto: Option<ResMut<AutoScreenshot>>) {
@@ -300,20 +299,21 @@ fn setup(
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
     match *mode {
-        Mode::Island => setup_island(&mut commands, &data, &mut sim, &mut lib, &mut images, &mut layouts),
+        Mode::Island => setup_map(&mut commands, &data, &mut sim, &mut lib, &mut images, &mut layouts),
         Mode::Viewer => {
-            commands.spawn((Camera2d, zoomed_projection()));
+            commands.spawn((Camera2d, zoomed_projection(data.cfg.controls.zoom)));
             spawn_viewer_shape(&mut commands, &data, &viewer, &mut lib, &mut images, &mut layouts);
         }
     }
 }
 
-fn zoomed_projection() -> Projection {
-    Projection::Orthographic(OrthographicProjection { scale: 1.0 / ZOOM, ..OrthographicProjection::default_2d() })
+fn zoomed_projection(zoom: f32) -> Projection {
+    Projection::Orthographic(OrthographicProjection { scale: 1.0 / zoom.max(0.1), ..OrthographicProjection::default_2d() })
 }
 
-/// A first scene: a sun-themed island with a notch, the altar, trees, a bridge and the priest.
-fn setup_island(
+/// Build the scene from the map file. The layout is free and needs no
+/// Energy; costs and Energy apply once it stands.
+fn setup_map(
     commands: &mut Commands,
     data: &GameData,
     sim: &mut Sim,
@@ -323,86 +323,80 @@ fn setup_island(
 ) {
     let install = &data.install;
     let palette = install.palette(&data.palette).expect("palette checked at start-up");
-    let (w, h) = (16, 10);
-    let mut island = IslandMap::rect(Cell::new(0, 0), w, h);
-    if std::env::var("ISLEFALL_ISLAND").as_deref() == Ok("cross") {
-        // A cross has all four inside corners; used to check the terrain set.
-        for c in [(0, 0), (1, 0), (0, 1), (15, 0), (14, 0), (15, 1), (0, 9), (1, 9), (0, 8), (15, 9), (14, 9), (15, 8)] {
-            island.remove(Cell::new(c.0, c.1));
-        }
-    } else {
-        for c in [Cell::new(15, 0), Cell::new(14, 0), Cell::new(15, 1)] {
-            island.remove(c);
-        }
-    }
-    world::spawn_island(commands, install, lib, palette, images, layouts, &island, Theme::Sun, false);
-    sim.world.push_island(island, 0);
-    // The enemy island to the east with a Storm Geyser on it.
-    let geyser_isle = IslandMap::rect(Cell::new(28, 4), 11, 11);
-    world::spawn_island(commands, install, lib, palette, images, layouts, &geyser_isle, Theme::Sun, false);
-    sim.world.push_island(geyser_isle, 1);
+    let mut w = World::new(data.cfg.clone());
+    w.powers = vec![i32::MAX / 2; data.cfg.sim.max_players];
+    w.energy_enforced = false;
 
-    // The simulation owns everything else; sprites follow it through the sync systems.
-    // The starting layout is free and needs no Energy; both apply once it stands.
-    sim.world.powers = [i32::MAX / 2; islefall_sim::world::MAX_PLAYERS];
-    sim.world.energy_enforced = false;
-    for (stem, cell) in [("dais", Cell::new(9, 7)), ("residence", Cell::new(13, 6)), ("treetwo", Cell::new(2, 3)), ("treetwo", Cell::new(12, 8)), ("geyser", Cell::new(34, 9))] {
-        if let Err(e) = sim.world.drop_structure(stem, &data.rules(stem), cell) {
-            warn!("{stem} at {cell:?}: {e}");
+    for isl in &data.map.islands {
+        let mut island = IslandMap::rect(map::cell(isl.origin), isl.size[0], isl.size[1]);
+        for c in &isl.remove {
+            island.remove(map::cell(*c));
+        }
+        let theme = Theme::parse(&isl.theme).unwrap_or(Theme::Sun);
+        world::spawn_island(commands, install, lib, palette, images, layouts, &island, theme, false, data.grid());
+        w.push_island(island, isl.owner);
+    }
+    for b in &data.map.bridges {
+        for c in &b.cells {
+            if !w.place_map_bridge(b.owner, map::cell(*c)) {
+                warn!("map bridge cell {c:?} could not be placed");
+            }
         }
     }
-    // A bridge off the east edge that uses straights, a cross, T pieces, corners and ends.
-    for (x, y) in [(16, 4), (17, 4), (18, 4), (19, 4), (20, 4), (20, 3), (20, 2), (18, 3), (18, 5), (18, 6), (21, 3), (19, 2), (17, 5), (19, 3)] {
-        sim.world.place_bridge(Cell::new(x, y));
+    for st in &data.map.structures {
+        if let Err(e) = w.drop_structure_for(st.owner, &st.kind, &data.rules(&st.kind), map::cell(st.at)) {
+            warn!("map: {} at {:?}: {e}", st.kind, st.at);
+        }
     }
-    // A battery dropped in the sky off the bridge end at (21,3) makes its own island.
-    if let Err(e) = sim.world.drop_structure("sunbattery", &data.rules("sunbattery"), Cell::new(24, 4)) {
-        warn!("sunbattery: {e}");
+    w.powers = vec![data.map.start_power; data.cfg.sim.max_players];
+    w.energy_enforced = true;
+    for u in &data.map.units {
+        match w.spawn_unit_for(u.owner, &u.kind, &data.rules(&u.kind), map::cell(u.at)) {
+            Some(i) => {
+                if let Some(to) = u.move_to {
+                    w.order_move(i, map::cell(to));
+                }
+            }
+            None => warn!("map: unit {} at {:?} could not be placed", u.kind, u.at),
+        }
     }
-    // An enemy Disc Thrower guards the geyser island; its range reaches the battery islet.
-    if let Err(e) = sim.world.drop_structure_for(1, "sunarcher", &data.rules("sunarcher"), Cell::new(31, 7)) {
-        warn!("enemy sunarcher: {e}");
-    }
-    // The enemy High Priest lives on the geyser island: stun, capture and sacrifice him.
-    if sim.world.spawn_unit_for(1, "priest", &data.rules("priest"), Cell::new(30, 11)).is_none() {
-        warn!("enemy priest could not be placed");
-    }
-    // The opponent's Temple and a golem, so it harvests its own geyser.
-    if let Err(e) = sim.world.drop_structure_for(1, "residence", &data.rules("residence"), Cell::new(35, 13)) {
-        warn!("enemy residence: {e}");
-    }
-    sim.world.spawn_unit_for(1, UNIT_TOOL, &data.rules(UNIT_TOOL), Cell::new(36, 6));
-    sim.world.powers = [START_POWER; islefall_sim::world::MAX_PLAYERS];
-    sim.world.energy_enforced = true;
-    // The opponent bridges towards our altar and drops shooters on the way.
-    let altar = sim.world.structures.iter().find(|s| s.is_altar && s.owner == 0).map(|s| s.centre()).unwrap_or(Cell::new(6, 4));
-    sim.ais.push(Ai::new(1, altar, AI_MOVE_SECONDS * TICK_HZ, 0xa1));
-    if let Some(i) = sim.world.spawn_unit("priest", &data.rules("priest"), Cell::new(2, 8)) {
-        sim.world.order_move(i, Cell::new(23, 3));
-    }
-    if let Some(i) = sim.world.spawn_unit(UNIT_TOOL, &data.rules(UNIT_TOOL), Cell::new(5, 8)) {
-        sim.world.order_move(i, Cell::new(11, 6));
+    let altar = w.structures.iter().find(|s| s.is_altar && s.owner == 0).map(|s| s.centre()).unwrap_or(data.map.camera_cell());
+    for op in &data.map.opponents {
+        let target = op.target.map(map::cell).unwrap_or(altar);
+        sim.ais.push(Ai::new(op.owner, target, &data.cfg));
     }
 
-    let mut centre = (world::cell_to_world(Cell::new(0, 0)) + world::cell_to_world(Cell::new(w - 1, h - 1))) / 2.0;
+    let mut centre = w.cfg.grid.clone();
+    let _ = &mut centre;
+    let mut cam = data.map.camera_cell();
     if let Ok(spec) = std::env::var("ISLEFALL_CAMERA") {
         if let Some((x, y)) = spec.split_once(',').and_then(|(x, y)| Some((x.trim().parse::<i32>().ok()?, y.trim().parse::<i32>().ok()?))) {
-            centre = world::cell_to_world(Cell::new(x, y));
+            cam = Cell::new(x, y);
         }
     }
-    commands.spawn((Camera2d, zoomed_projection(), Transform::from_translation(centre.extend(0.0))));
-    info!("island scene: {} islands, {} structures, {} bridge cells, {} Storm Power", sim.world.islands.len(), sim.world.structures.len(), sim.world.bridges.len(), sim.world.storm_power());
+    let centre = world::cell_to_world(cam, data.grid());
+    commands.spawn((Camera2d, zoomed_projection(data.cfg.controls.zoom), Transform::from_translation(centre.extend(0.0))));
+    info!(
+        "map {}: {} islands, {} structures, {} bridge cells, {} Storm Power, {} opponents",
+        data.map.name,
+        w.islands.len(),
+        w.structures.len(),
+        w.bridges.len(),
+        w.storm_power(),
+        sim.ais.len()
+    );
+    sim.world = Some(w);
 }
 
 /// World position of a unit's feet: cells to source pixels, y flipped.
-fn unit_to_world(unit: &Unit) -> Vec2 {
-    let (x, y) = unit.pos.to_f32();
-    Vec2::new(x * CELL_W as f32, -(y * CELL_H as f32))
+fn unit_to_world(unit: &Unit, g: &Grid) -> Vec2 {
+    let (x, y) = unit.pos_f32();
+    Vec2::new(x * g.cell_w as f32, -(y * g.cell_h as f32))
 }
 
 /// Cell under a world position.
-fn world_to_cell(p: Vec2) -> Cell {
-    Cell::new((p.x / CELL_W as f32).floor() as i32, (-p.y / CELL_H as f32).floor() as i32)
+fn world_to_cell(p: Vec2, g: &Grid) -> Cell {
+    Cell::new((p.x / g.cell_w as f32).floor() as i32, (-p.y / g.cell_h as f32).floor() as i32)
 }
 
 /// Spawn image and shadow layers of one animation, looping. Returns the entities.
@@ -479,11 +473,12 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>) {
     if viewer.paused {
         return;
     }
-    let Sim { world, ais } = &mut *sim;
-    world.step();
-    let shooter = data.rules(AI_SHOOTER);
+    let Sim { world: Some(world), ais } = &mut *sim else { return };
+    world.step(&data.scripts);
+    let shooter = data.cfg.ai.shooter.clone();
+    let rules = data.rules(&shooter);
     for ai in ais.iter_mut() {
-        match ai.tick(world, (AI_SHOOTER, &shooter)) {
+        match ai.tick(world, (&shooter, &rules)) {
             Some(AiMove::Piece { name, at }) => info!("opponent {} lays a {name} piece at {at:?}", ai.owner),
             Some(AiMove::Shooter { kind, at }) => info!("opponent {} drops a {kind} at {at:?}", ai.owner),
             _ => {}
@@ -493,36 +488,43 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>) {
 
 /// Keep the window title showing the Storm Power reserve and Knowledge.
 fn title(sim: Res<Sim>, mut windows: Query<&mut Window, With<PrimaryWindow>>, mut last: Local<Option<(i32, u32, usize)>>) {
-    let now = (sim.world.storm_power(), sim.world.knowledge, sim.world.known_tech[0].len());
+    let w = sim.world();
+    let now = (w.storm_power(), w.knowledge, w.known_tech[0].len());
     if *last == Some(now) {
         return;
     }
     *last = Some(now);
-    if let Ok(mut w) = windows.single_mut() {
-        w.title = format!("Islefall - Storm Power {} - Knowledge {} ({} techs)", now.0, now.1, now.2);
+    if let Ok(mut win) = windows.single_mut() {
+        win.title = format!("Islefall - Storm Power {} - Knowledge {} ({} techs)", now.0, now.1, now.2);
     }
 }
 
-/// Turn each sacrifice into the lowest Knowledge bit the owner lacks.
+/// Turn each sacrifice into the Knowledge bit the `knowledge_grant` hook picks.
 fn grant_knowledge(mut sim: ResMut<Sim>, data: Res<GameData>) {
-    if sim.world.pending_knowledge.is_empty() {
+    let w = sim.world_mut();
+    if w.pending_knowledge.is_empty() {
         return;
     }
-    let mut bits: Vec<u8> = data.install.types.values().filter_map(|t| TypeRules::from_type(t).tech_bit).collect();
+    let mut bits: Vec<u8> = data.install.types.values().filter_map(|t| TypeRules::from_type(t, &data.cfg, &data.scripts).ok().and_then(|r| r.tech_bit)).collect();
     bits.sort_unstable();
     bits.dedup();
-    let pending = std::mem::take(&mut sim.world.pending_knowledge);
+    let pending = std::mem::take(&mut w.pending_knowledge);
     for owner in pending {
-        if let Some(&bit) = bits.iter().find(|&&b| !sim.world.knows_tech(owner, b)) {
-            sim.world.grant_tech(owner, bit);
-            let unlocked: Vec<&str> = data
-                .install
-                .types
-                .iter()
-                .filter(|(_, t)| TypeRules::from_type(t).tech_bit == Some(bit))
-                .map(|(k, _)| k.as_str())
-                .collect();
-            info!("owner {owner} gains Knowledge {bit}: {unlocked:?}");
+        let known: Vec<u8> = w.known_tech[owner as usize % data.cfg.sim.max_players].iter().copied().collect();
+        match data.scripts.knowledge_grant(&known, &bits) {
+            Ok(Some(bit)) => {
+                w.grant_tech(owner, bit);
+                let unlocked: Vec<&str> = data
+                    .install
+                    .types
+                    .iter()
+                    .filter(|(_, t)| t.get_i64("techBit") == Some(bit as i64))
+                    .map(|(k, _)| k.as_str())
+                    .collect();
+                info!("owner {owner} gains Knowledge {bit}: {unlocked:?}");
+            }
+            Ok(None) => info!("owner {owner} already knows everything"),
+            Err(e) => warn!("{e}"),
         }
     }
 }
@@ -540,31 +542,32 @@ fn sync_units(
     mut layers: Query<(Entity, &mut Transform, &mut Sprite, &mut Anchor, &mut ShapeSprite, &mut UnitLayer)>,
     mut known: Local<usize>,
 ) {
-    // New units since last frame get their layers.
-    while *known < sim.world.units.len() {
+    let w = sim.world();
+    let g = data.grid();
+    while *known < w.units.len() {
         let i = *known;
         *known += 1;
-        let unit = &sim.world.units[i];
+        let unit = &w.units[i];
         let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
         let (Some(def), Some(shape)) = (data.install.type_def(&unit.kind), lib.get_or_load(&data.install, palette, &unit.kind, &mut images, &mut layouts)) else {
             warn!("unit {i}: no sprites for {}", unit.kind);
             continue;
         };
-        let entities = spawn_animated(&mut commands, shape, def, unit.facing.animation(), unit_to_world(unit), Z_UNIT, false);
+        let entities = spawn_animated(&mut commands, shape, def, unit.facing.animation(), unit_to_world(unit, g), Z_UNIT, false);
         for (k, e) in entities.into_iter().enumerate() {
             commands.entity(e).insert(UnitLayer { unit: i, facing: unit.facing, shadow: k == 1 });
         }
     }
     for (entity, mut tf, mut sprite, mut anchor, mut shape, mut layer) in &mut layers {
-        let Some(unit) = sim.world.units.get(layer.unit) else { continue };
+        let Some(unit) = w.units.get(layer.unit) else { continue };
         if !unit.alive {
             commands.entity(entity).despawn();
             continue;
         }
-        let pos = unit_to_world(unit);
+        let pos = unit_to_world(unit, g);
         tf.translation.x = pos.x;
         tf.translation.y = pos.y;
-        let (_, row) = unit.pos.to_f32();
+        let (_, row) = unit.pos_f32();
         tf.translation.z = if layer.shadow { Z_SHADOW } else { depth_z(Z_STRUCTURE, row) + 0.005 };
         if unit.facing != layer.facing {
             if let Some(def) = data.install.type_def(&unit.kind) {
@@ -589,11 +592,11 @@ fn sync_units(
 }
 
 /// Cell under the mouse cursor, if it is over the window.
-fn cursor_cell(windows: &Query<&Window, With<PrimaryWindow>>, cameras: &Query<(&Camera, &GlobalTransform)>) -> Option<Cell> {
+fn cursor_cell(windows: &Query<&Window, With<PrimaryWindow>>, cameras: &Query<(&Camera, &GlobalTransform)>, g: &Grid) -> Option<Cell> {
     let (Ok(window), Ok((camera, cam_tf))) = (windows.single(), cameras.single()) else { return None };
     let cursor = window.cursor_position()?;
     let world_pos = camera.viewport_to_world_2d(cam_tf, cursor).ok()?;
-    Some(world_to_cell(world_pos))
+    Some(world_to_cell(world_pos, g))
 }
 
 fn mouse_actions(
@@ -609,56 +612,52 @@ fn mouse_actions(
     if !left && !right {
         return;
     }
-    let Some(cell) = cursor_cell(&windows, &cameras) else { return };
+    let Some(cell) = cursor_cell(&windows, &cameras, data.grid()) else { return };
+    let w = sim.world_mut();
     if left {
-        // Click on an own unit selects it; on a stunned enemy priest, the selected
-        // Transport captures him; on a geyser it harvests; on your altar it
-        // sacrifices a carried priest; otherwise it moves.
         let sel = player.selected;
-        if let Some(i) = sim.world.units.iter().position(|u| u.alive && u.owner == 0 && u.carried_by.is_none() && u.pos.cell() == cell) {
+        if let Some(i) = w.units.iter().position(|u| u.alive && u.owner == 0 && u.carried_by.is_none() && u.cell() == cell) {
             player.selected = i;
-            info!("selected unit {i} ({})", sim.world.units[i].kind);
-        } else if let Some(p) = sim.world.units.iter().position(|u| u.alive && u.owner != 0 && u.is_priest && u.pos.cell() == cell) {
-            if sim.world.order_capture(sel, p) {
+            info!("selected unit {i} ({})", w.units[i].kind);
+        } else if let Some(p) = w.units.iter().position(|u| u.alive && u.owner != 0 && u.is_priest && u.cell() == cell) {
+            if w.order_capture(sel, p) {
                 info!("unit {sel} sent to capture the priest");
             } else {
                 info!("unit {sel} cannot capture: needs a Transport and a stunned priest");
             }
-        } else if let Some(a) = sim.world.structures.iter().position(|s| s.is_altar && s.owner == 0 && s.covers(cell)) {
-            if sim.world.order_sacrifice(sel, a) {
+        } else if let Some(a) = w.structures.iter().position(|s| s.is_altar && s.owner == 0 && s.covers(cell)) {
+            if w.order_sacrifice(sel, a) {
                 info!("unit {sel} carries the priest to the altar");
-            } else if sim.world.command_move(sel, cell) {
+            } else if w.command_move(sel, cell) {
                 info!("unit {sel} ordered to {cell:?}");
             }
-        } else if let Some(g) = sim.world.structures.iter().position(|s| s.stock > 0 && s.covers(cell)) {
-            let sel = player.selected;
-                if sim.world.order_harvest(sel, g) {
+        } else if let Some(g) = w.structures.iter().position(|s| s.stock > 0 && s.covers(cell)) {
+            if w.order_harvest(sel, g) {
                 info!("unit {sel} harvesting geyser {g}");
             } else {
                 info!("unit {sel} cannot harvest geyser {g}: needs a temple and a bridge connection");
             }
-        } else if sim.world.command_move(player.selected, cell) {
-            info!("unit {} ordered to {cell:?}", player.selected);
+        } else if w.command_move(sel, cell) {
+            info!("unit {sel} ordered to {cell:?}");
         } else {
             info!("{cell:?} is unreachable");
         }
         return;
     }
     match player.tool.clone() {
-        Tool::Bridge(slot, piece) => match sim.world.place_piece(&piece.cells_at(cell)) {
+        Tool::Bridge(slot, piece) => match w.place_piece(&piece.cells_at(cell)) {
             Ok(()) => {
                 info!("{} piece placed at {cell:?}", piece.name);
-                sim.world.queue.refill(slot);
-                // The slot now holds a fresh piece; pick it up so building can continue.
-                player.tool = Tool::Bridge(slot, sim.world.queue.slots[slot].clone());
+                w.queue.refill(slot);
+                player.tool = Tool::Bridge(slot, w.queue.slots[slot].clone());
             }
             Err(e) => info!("cannot place {}: {e}", piece.name),
         },
-        Tool::Drop(stem) => match sim.world.drop_structure(stem, &data.rules(stem), cell) {
+        Tool::Drop(stem) => match w.drop_structure(&stem, &data.rules(&stem), cell) {
             Ok(_) => info!("{stem} dropped at {cell:?}"),
             Err(e) => info!("cannot drop {stem}: {e}"),
         },
-        Tool::Spawn(stem) => match sim.world.spawn_unit(stem, &data.rules(stem), cell) {
+        Tool::Spawn(stem) => match w.spawn_unit(&stem, &data.rules(&stem), cell) {
             Some(i) => {
                 player.selected = i;
                 info!("{stem} spawned at {cell:?} as unit {i}");
@@ -668,33 +667,52 @@ fn mouse_actions(
     }
 }
 
-fn tool_keys(keys: Res<ButtonInput<KeyCode>>, sim: Res<Sim>, mut player: ResMut<Player>) {
+/// Key name from the rules file to a key code: single letters and digits.
+fn key_code(name: &str) -> Option<KeyCode> {
+    let c = name.chars().next()?.to_ascii_uppercase();
+    Some(match c {
+        'A' => KeyCode::KeyA, 'B' => KeyCode::KeyB, 'C' => KeyCode::KeyC, 'D' => KeyCode::KeyD, 'E' => KeyCode::KeyE,
+        'F' => KeyCode::KeyF, 'G' => KeyCode::KeyG, 'H' => KeyCode::KeyH, 'I' => KeyCode::KeyI, 'J' => KeyCode::KeyJ,
+        'K' => KeyCode::KeyK, 'L' => KeyCode::KeyL, 'M' => KeyCode::KeyM, 'N' => KeyCode::KeyN, 'O' => KeyCode::KeyO,
+        'P' => KeyCode::KeyP, 'Q' => KeyCode::KeyQ, 'R' => KeyCode::KeyR, 'S' => KeyCode::KeyS, 'T' => KeyCode::KeyT,
+        'U' => KeyCode::KeyU, 'V' => KeyCode::KeyV, 'W' => KeyCode::KeyW, 'X' => KeyCode::KeyX, 'Y' => KeyCode::KeyY,
+        'Z' => KeyCode::KeyZ,
+        _ => return None,
+    })
+}
+
+const DIGIT_KEYS: [KeyCode; 9] = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9];
+
+fn tool_keys(keys: Res<ButtonInput<KeyCode>>, sim: Res<Sim>, data: Res<GameData>, mut player: ResMut<Player>) {
+    let w = sim.world();
     if keys.just_pressed(KeyCode::KeyR) {
         if let Tool::Bridge(slot, piece) = &player.tool {
             player.tool = Tool::Bridge(*slot, piece.rotated());
         }
         return;
     }
-    if let Some(slot) = SLOT_KEYS.iter().position(|k| keys.just_pressed(*k)).filter(|&i| i < sim.world.queue.slots.len()) {
-        player.tool = Tool::Bridge(slot, sim.world.queue.slots[slot].clone());
-        info!("tool: bridge piece {} from slot {slot}", sim.world.queue.slots[slot].name);
+    let slot_keys: Vec<Option<KeyCode>> = data.cfg.controls.slot_keys.iter().map(|k| key_code(k)).collect();
+    if let Some(slot) = slot_keys.iter().position(|k| k.is_some_and(|k| keys.just_pressed(k))).filter(|&i| i < w.queue.slots.len()) {
+        player.tool = Tool::Bridge(slot, w.queue.slots[slot].clone());
+        info!("tool: bridge piece {} from slot {slot}", w.queue.slots[slot].name);
         return;
     }
     if keys.just_pressed(KeyCode::KeyU) {
-        player.tool = Tool::Spawn(UNIT_TOOL);
-    } else if let Some((_, stem)) = BUILD_TOOLS.iter().find(|(k, _)| keys.just_pressed(*k)) {
-        player.tool = Tool::Drop(stem);
+        player.tool = Tool::Spawn(data.cfg.controls.unit_tool.clone());
+    } else if let Some(i) = DIGIT_KEYS.iter().position(|k| keys.just_pressed(*k)).filter(|&i| i < data.cfg.controls.build_tools.len()) {
+        player.tool = Tool::Drop(data.cfg.controls.build_tools[i].clone());
     } else {
         return;
     }
     info!("tool: {:?}", player.tool);
 }
 
-/// Crack, harden or destroy the bridge cell under the cursor.
+/// Crack, harden, destroy or salvage under the cursor.
 fn bridge_keys(
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform)>,
+    data: Res<GameData>,
     mut sim: ResMut<Sim>,
 ) {
     let (crack, harden, destroy) = (keys.just_pressed(KeyCode::KeyC), keys.just_pressed(KeyCode::KeyH), keys.just_pressed(KeyCode::Delete));
@@ -702,11 +720,12 @@ fn bridge_keys(
     if !crack && !harden && !destroy && !salvage {
         return;
     }
-    let Some(cell) = cursor_cell(&windows, &cameras) else { return };
+    let Some(cell) = cursor_cell(&windows, &cameras, data.grid()) else { return };
+    let w = sim.world_mut();
     if salvage {
-        if let Some(i) = sim.world.structures.iter().position(|s| s.owner == 0 && s.covers(cell)) {
-            let kind = sim.world.structures[i].kind.clone();
-            match sim.world.salvage(i) {
+        if let Some(i) = w.structures.iter().position(|s| s.owner == 0 && s.covers(cell)) {
+            let kind = w.structures[i].kind.clone();
+            match w.salvage(i, &data.scripts) {
                 Some(refund) => info!("salvaged {kind} for {refund} Storm Power"),
                 None => info!("cannot salvage {kind}"),
             }
@@ -714,19 +733,18 @@ fn bridge_keys(
         return;
     }
     if crack {
-        info!("crack {cell:?}: {}", sim.world.crack_bridge(cell));
+        info!("crack {cell:?}: {}", w.crack_bridge(cell));
     } else if harden {
-        info!("harden {cell:?}: {}", sim.world.harden_bridge(cell));
+        info!("harden {cell:?}: {}", w.harden_bridge(cell));
     } else {
-        let before = sim.world.bridges.len();
-        if sim.world.destroy_bridge(cell) {
-            info!("destroyed {cell:?}; {} bridge cells fell", before - 1 - sim.world.bridges.len());
+        let before = w.bridges.len();
+        if w.destroy_bridge(cell) {
+            info!("destroyed {cell:?}; {} bridge cells fell", before - 1 - w.bridges.len());
         }
     }
 }
 
 /// Show the current piece or footprint under the cursor, green when it can go there.
-#[allow(clippy::too_many_arguments)]
 fn ghost(
     mut commands: Commands,
     windows: Query<&Window, With<PrimaryWindow>>,
@@ -739,74 +757,73 @@ fn ghost(
     for e in &existing {
         commands.entity(e).despawn();
     }
-    let Some(cell) = cursor_cell(&windows, &cameras) else { return };
+    let g = data.grid();
+    let Some(cell) = cursor_cell(&windows, &cameras, g) else { return };
+    let w = sim.world();
     let (cells, ok) = match &player.tool {
         Tool::Bridge(_, piece) => {
             let cells = piece.cells_at(cell);
-            let ok = sim.world.can_place_piece_for(0, &cells).is_ok();
+            let ok = w.can_place_piece_for(0, &cells).is_ok();
             (cells, ok)
         }
         Tool::Drop(stem) => {
             let rules = data.rules(stem);
-            let probe = islefall_sim::Structure::new(*stem, cell, rules.foot_x, rules.foot_y, islefall_sim::Walk::Free);
-            let ok = sim.world.can_drop(&rules, cell).is_ok()
-                && sim.world.check_ownership(0, &rules, cell).is_ok()
-                && rules.tech_bit.is_none_or(|b| sim.world.knows_tech(0, b))
-                && sim.world.check_energy(0, &rules, cell).is_ok();
+            let probe = islefall_sim::Structure::new(stem.as_str(), cell, rules.foot_x, rules.foot_y, islefall_sim::Walk::Free);
+            let ok = w.can_drop(&rules, cell).is_ok()
+                && w.check_ownership(0, &rules, cell).is_ok()
+                && rules.tech_bit.is_none_or(|b| w.knows_tech(0, b))
+                && w.check_energy(0, &rules, cell).is_ok();
             (probe.cells().collect(), ok)
         }
-        Tool::Spawn(_) => (vec![cell], sim.world.is_walkable(cell)),
+        Tool::Spawn(_) => (vec![cell], w.is_walkable(cell)),
     };
     let color = if ok { Color::srgba(0.2, 1.0, 0.2, 0.35) } else { Color::srgba(1.0, 0.2, 0.2, 0.35) };
     for c in cells {
-        let (x, y) = c.top_left_px();
+        let (x, y) = c.centre_px(g);
         commands.spawn((
-            Sprite::from_color(color, Vec2::new(CELL_W as f32, CELL_H as f32)),
-            Transform::from_translation(Vec3::new(x as f32 + CELL_W as f32 / 2.0, -(y as f32 + CELL_H as f32 / 2.0), 50.0)),
+            Sprite::from_color(color, Vec2::new(g.cell_w as f32, g.cell_h as f32)),
+            Transform::from_translation(Vec3::new(x as f32, -(y as f32), 50.0)),
             Ghost,
         ));
     }
 }
 
-/// Marks per-frame overlay sprites: health bars and shot flashes.
-#[derive(Component)]
-struct Overlay;
-
-/// Draw a health bar over every damaged structure and unit, and a flash on
-/// the target of each shot fired this tick.
-fn overlays(mut commands: Commands, sim: Res<Sim>, existing: Query<Entity, With<Overlay>>) {
+/// Draw a health bar over every damaged structure and unit, a ring around
+/// stunned priests, and a flash on the target of each shot fired this tick.
+fn overlays(mut commands: Commands, sim: Res<Sim>, data: Res<GameData>, existing: Query<Entity, With<Overlay>>) {
     for e in &existing {
         commands.entity(e).despawn();
     }
+    let w = sim.world();
+    let g = data.grid();
     let bar = |commands: &mut Commands, pos: Vec2, width: f32, frac: f32| {
         let back = Color::srgba(0.1, 0.1, 0.1, 0.8);
         let front = if frac > 0.6 { Color::srgb(0.2, 0.9, 0.2) } else if frac > 0.3 { Color::srgb(0.9, 0.9, 0.2) } else { Color::srgb(0.9, 0.2, 0.2) };
         commands.spawn((Sprite::from_color(back, Vec2::new(width, 3.0)), Transform::from_translation(pos.extend(60.0)), Overlay));
-        let w = (width - 1.0) * frac.clamp(0.0, 1.0);
+        let wdt = (width - 1.0) * frac.clamp(0.0, 1.0);
         commands.spawn((
-            Sprite::from_color(front, Vec2::new(w.max(0.5), 2.0)),
-            Transform::from_translation(Vec3::new(pos.x - (width - 1.0 - w) / 2.0, pos.y, 60.1)),
+            Sprite::from_color(front, Vec2::new(wdt.max(0.5), 2.0)),
+            Transform::from_translation(Vec3::new(pos.x - (width - 1.0 - wdt) / 2.0, pos.y, 60.1)),
             Overlay,
         ));
     };
-    for s in &sim.world.structures {
+    for s in &w.structures {
         if s.max_hp > 0 && s.hp < s.max_hp {
-            let (x, y) = s.cell.top_left_px();
-            let width = (s.foot_x * CELL_W) as f32;
-            let top = Vec2::new(x as f32 + CELL_W as f32 - width / 2.0, -(y as f32 - ((s.foot_y - 1) * CELL_H) as f32) + 4.0);
+            let (x, y) = s.cell.top_left_px(g);
+            let width = (s.foot_x * g.cell_w) as f32;
+            let top = Vec2::new(x as f32 + g.cell_w as f32 - width / 2.0, -(y as f32 - ((s.foot_y - 1) * g.cell_h) as f32) + 4.0);
             bar(&mut commands, top, width, s.hp as f32 / s.max_hp as f32);
         }
     }
-    for u in &sim.world.units {
+    for u in &w.units {
         if !u.alive {
             continue;
         }
-        let p = unit_to_world(u);
+        let p = unit_to_world(u, g);
         if u.hp < u.max_hp {
             bar(&mut commands, Vec2::new(p.x, p.y + 22.0), 12.0, u.hp as f32 / u.max_hp as f32);
         }
         if u.stunned {
-            // The manual's glowing ring around a stunned priest.
             commands.spawn((
                 Sprite::from_color(Color::srgba(1.0, 0.95, 0.3, 0.45), Vec2::new(18.0, 12.0)),
                 Transform::from_translation(Vec3::new(p.x, p.y - 2.0, 59.0)),
@@ -814,17 +831,40 @@ fn overlays(mut commands: Commands, sim: Res<Sim>, existing: Query<Entity, With<
             ));
         }
     }
-    for &(_, target) in &sim.world.last_shots {
+    for &(_, target) in &w.last_shots {
         let pos = match target {
-            islefall_sim::world::Target::Structure(j) => sim.world.structures.get(j).map(|s| {
-                let (x, y) = s.centre().top_left_px();
-                Vec2::new(x as f32 + CELL_W as f32 / 2.0, -(y as f32 + CELL_H as f32 / 2.0))
+            islefall_sim::world::Target::Structure(j) => w.structures.get(j).map(|s| {
+                let (x, y) = s.centre().centre_px(g);
+                Vec2::new(x as f32, -(y as f32))
             }),
-            islefall_sim::world::Target::Unit(j) => sim.world.units.get(j).map(unit_to_world),
+            islefall_sim::world::Target::Unit(j) => w.units.get(j).map(|u| unit_to_world(u, g)),
         };
         if let Some(pos) = pos {
             commands.spawn((Sprite::from_color(Color::srgba(1.0, 0.9, 0.3, 0.8), Vec2::new(6.0, 6.0)), Transform::from_translation(pos.extend(61.0)), Overlay));
         }
+    }
+}
+
+/// Draw the Energy circle of every source the player owns whenever structures change.
+fn sync_energy_rings(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    ring: Res<RingImage>,
+    existing: Query<Entity, With<EnergyRing>>,
+    mut seen: Local<Option<u64>>,
+) {
+    let w = sim.world();
+    if *seen == Some(w.structure_version) {
+        return;
+    }
+    *seen = Some(w.structure_version);
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
+    for s in w.structures.iter().filter(|s| s.owner == 0 && s.produces.is_some()) {
+        let (x, y) = s.centre().centre_px(data.grid());
+        commands.spawn((Sprite::from_image(ring.0.clone()), Transform::from_translation(Vec3::new(x as f32, -(y as f32), 0.9)), EnergyRing));
     }
 }
 
@@ -839,15 +879,16 @@ fn sync_bridges(
     existing: Query<Entity, With<BridgeTile>>,
     mut seen: Local<Option<u64>>,
 ) {
-    if *seen == Some(sim.world.bridge_version) {
+    let w = sim.world();
+    if *seen == Some(w.bridge_version) {
         return;
     }
-    *seen = Some(sim.world.bridge_version);
+    *seen = Some(w.bridge_version);
     for e in &existing {
         commands.entity(e).despawn();
     }
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
-    world::spawn_bridges(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, &sim.world);
+    world::spawn_bridges(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, w);
 }
 
 /// Rebuild structure sprites whenever the simulation's structures change.
@@ -861,15 +902,16 @@ fn sync_structures(
     existing: Query<Entity, With<StructureSprite>>,
     mut seen: Local<Option<u64>>,
 ) {
-    if *seen == Some(sim.world.structure_version) {
+    let w = sim.world();
+    if *seen == Some(w.structure_version) {
         return;
     }
-    *seen = Some(sim.world.structure_version);
+    *seen = Some(w.structure_version);
     for e in &existing {
         commands.entity(e).despawn();
     }
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
-    world::spawn_structures(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, &sim.world);
+    world::spawn_structures(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, w);
 }
 
 /// Rebuild platform terrain whenever buildings create new ground.
@@ -883,22 +925,24 @@ fn sync_platforms(
     existing: Query<(Entity, &TerrainTile)>,
     mut seen: Local<Option<u64>>,
 ) {
-    if *seen == Some(sim.world.terrain_version) {
+    let w = sim.world();
+    if *seen == Some(w.terrain_version) {
         return;
     }
-    *seen = Some(sim.world.terrain_version);
+    *seen = Some(w.terrain_version);
     for (e, t) in &existing {
         if t.platform {
             commands.entity(e).despawn();
         }
     }
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
-    world::spawn_island(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, &sim.world.platforms, Theme::Sun, true);
+    world::spawn_island(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, &w.platforms, Theme::Sun, true, data.grid());
 }
 
 fn camera_keys(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
+    data: Res<GameData>,
     mut cameras: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
 ) {
     let Ok((mut tf, mut proj)) = cameras.single_mut() else { return };
@@ -916,7 +960,7 @@ fn camera_keys(
         d.y -= 1.0;
     }
     if d != Vec2::ZERO {
-        let step = d.normalize() * PAN_SPEED * time.delta_secs();
+        let step = d.normalize() * data.cfg.controls.pan_speed * time.delta_secs();
         tf.translation.x += step.x;
         tf.translation.y += step.y;
     }

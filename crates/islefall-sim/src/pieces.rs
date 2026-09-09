@@ -6,21 +6,26 @@
 //! to the open end of another bridge". The exact shipped catalogue is not
 //! in the data files, so this is a plausible set that can be adjusted.
 
+use crate::config::PieceDef;
 use crate::grid::Cell;
 
 /// A piece shape as offsets from its origin cell, normalised so that the
 /// smallest x and y offsets are zero.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Piece {
-    pub name: &'static str,
+    pub name: String,
     pub cells: Vec<(i32, i32)>,
 }
 
 impl Piece {
-    fn new(name: &'static str, cells: &[(i32, i32)]) -> Piece {
-        let mut p = Piece { name, cells: cells.to_vec() };
+    pub fn new(name: &str, cells: &[(i32, i32)]) -> Piece {
+        let mut p = Piece { name: name.to_string(), cells: cells.to_vec() };
         p.normalise();
         p
+    }
+
+    pub fn from_def(def: &PieceDef) -> Piece {
+        Piece::new(&def.name, &def.cells.iter().map(|c| (c[0], c[1])).collect::<Vec<_>>())
     }
 
     fn normalise(&mut self) {
@@ -35,7 +40,7 @@ impl Piece {
 
     /// The piece turned a quarter turn clockwise on screen.
     pub fn rotated(&self) -> Piece {
-        let mut p = Piece { name: self.name, cells: self.cells.iter().map(|&(x, y)| (-y, x)).collect() };
+        let mut p = Piece { name: self.name.clone(), cells: self.cells.iter().map(|&(x, y)| (-y, x)).collect() };
         p.normalise();
         p
     }
@@ -63,13 +68,20 @@ pub struct PieceQueue {
 }
 
 impl PieceQueue {
-    pub fn new(slots: usize, seed: u64) -> PieceQueue {
-        let mut q = PieceQueue { slots: Vec::new(), catalogue: catalogue(), rng: seed | 1 };
+    pub fn new(catalogue: Vec<Piece>, slots: usize, seed: u64) -> PieceQueue {
+        let mut q = PieceQueue { slots: Vec::new(), catalogue, rng: seed | 1 };
+        if q.catalogue.is_empty() {
+            return q;
+        }
         for _ in 0..slots {
             let p = q.draw();
             q.slots.push(p);
         }
         q
+    }
+
+    pub fn from_defs(defs: &[PieceDef], slots: usize, seed: u64) -> PieceQueue {
+        PieceQueue::new(defs.iter().map(Piece::from_def).collect(), slots, seed)
     }
 
     /// Replace the piece in `slot` with a new random one; returns the old piece.
@@ -89,20 +101,6 @@ impl PieceQueue {
         let i = (self.rng >> 33) as usize % self.catalogue.len();
         self.catalogue[i].clone()
     }
-}
-
-/// The catalogue, small to large.
-pub fn catalogue() -> Vec<Piece> {
-    vec![
-        Piece::new("one", &[(0, 0)]),
-        Piece::new("two", &[(0, 0), (1, 0)]),
-        Piece::new("three", &[(0, 0), (1, 0), (2, 0)]),
-        Piece::new("corner", &[(0, 0), (1, 0), (1, 1)]),
-        Piece::new("tee", &[(0, 0), (1, 0), (2, 0), (1, 1)]),
-        Piece::new("zig", &[(0, 0), (1, 0), (1, 1), (2, 1)]),
-        Piece::new("four", &[(0, 0), (1, 0), (2, 0), (3, 0)]),
-        Piece::new("cross", &[(1, 0), (0, 1), (1, 1), (2, 1), (1, 2)]),
-    ]
 }
 
 #[cfg(test)]
@@ -127,10 +125,14 @@ mod tests {
         assert_eq!(two.cells_at(Cell::new(5, 7)), vec![Cell::new(5, 7), Cell::new(6, 7)]);
     }
 
+    fn catalogue() -> Vec<Piece> {
+        crate::config::test_config().bridges.pieces.iter().map(Piece::from_def).collect()
+    }
+
     #[test]
     fn queue_is_deterministic_and_refills() {
-        let mut a = PieceQueue::new(4, 42);
-        let mut b = PieceQueue::new(4, 42);
+        let mut a = PieceQueue::new(catalogue(), 4, 42);
+        let mut b = PieceQueue::new(catalogue(), 4, 42);
         assert_eq!(a.slots, b.slots);
         assert_eq!(a.slots.len(), 4);
         let used = a.refill(2).unwrap();

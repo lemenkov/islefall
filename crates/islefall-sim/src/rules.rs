@@ -16,6 +16,9 @@
 use islefall_data::TypeDef;
 use islefall_data::isle::Theme;
 
+use crate::config::Config;
+use crate::script::{ScriptError, Scripts};
+
 /// Energy a type needs at its placement site. Sun means any kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EnergyNeed {
@@ -41,9 +44,6 @@ pub enum Walk {
     Blocked,
 }
 
-/// Path cost multiplier for [`Walk::Avoid`] cells.
-pub const AVOID_COST: u32 = 5;
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypeRules {
     pub foot_x: i32,
@@ -68,8 +68,10 @@ pub struct TypeRules {
     pub range: i32,
     /// `hpPerSec`: damage dealt per second while firing.
     pub hp_per_sec: i32,
-    /// `delayBetweenShots` in seconds (1.0 when absent).
+    /// `delayBetweenShots` in seconds (the rules' default when absent).
     pub delay_between_shots: f64,
+    /// Damage of one shot, from the `damage_per_shot` hook.
+    pub damage_per_shot: i32,
     /// Cannons fire only straight north, south, east or west (the manual).
     pub cardinal_only: bool,
     /// `threat`: targeting priority, higher first.
@@ -89,45 +91,58 @@ pub struct TypeRules {
 }
 
 impl TypeRules {
-    pub fn from_type(def: &TypeDef) -> TypeRules {
-        let walk = if def.has_flag("walkBlocking") {
+    /// Read a type's rules: flag meanings come from the rules file, formulas
+    /// from the script hooks.
+    pub fn from_type(def: &TypeDef, cfg: &Config, scripts: &Scripts) -> Result<TypeRules, ScriptError> {
+        let f = &cfg.flags;
+        let has = |names: &[String]| Config::has_any(names, &def.flags);
+        let walk = if has(&f.walk_blocked) {
             Walk::Blocked
-        } else if def.has_flag("yuckWalk") {
+        } else if has(&f.walk_avoid) {
             Walk::Avoid
         } else {
             Walk::Free
         };
-        TypeRules {
+        let is_priest = has(&f.priest);
+        let is_unit = has(&f.unit);
+        let hp_per_sec = def.get_i64("hpPerSec").unwrap_or(0).max(0);
+        let delay = def.get_f64("delayBetweenShots").unwrap_or(cfg.combat.default_delay_between_shots).max(0.1);
+        let theme = def.get_str("theme").and_then(Theme::parse).unwrap_or(Theme::Sun);
+        let level = def.get_i64("level").unwrap_or(0).clamp(0, 9);
+        let energy = scripts.energy_need(level, theme, def.get_str("mana").unwrap_or(""), def.get_str("class").is_some())?;
+        let produces = if has(&f.temple) {
+            Some(theme)
+        } else if def.get_str("class").is_some_and(|c| f.energy_source_classes.iter().any(|e| e.eq_ignore_ascii_case(c))) {
+            Some(theme)
+        } else {
+            None
+        };
+        Ok(TypeRules {
             foot_x: def.get_i64("foot_x").unwrap_or(1).max(1) as i32,
             foot_y: def.get_i64("foot_y").unwrap_or(1).max(1) as i32,
             walk,
-            drop_blocking: def.has_flag("dropBlocking"),
-            creates_island: def.has_flag("createsisland"),
-            may_drop_on_rim: def.has_flag("mayDropOnRim"),
-            is_unit: def.has_flag("walker") || def.has_flag("flyer") || def.has_flag("balloon"),
+            drop_blocking: has(&f.drop_blocking),
+            creates_island: has(&f.creates_island),
+            may_drop_on_rim: has(&f.may_drop_on_rim),
+            is_unit,
             speed: def.get_f64("speed").unwrap_or(1.0),
             cost: def.get_i64("cost").unwrap_or(0).clamp(0, i32::MAX as i64) as i32,
-            is_geyser: def.has_flag("geyser"),
-            is_temple: def.has_flag("residence"),
+            is_geyser: has(&f.geyser),
+            is_temple: has(&f.temple),
             max_hit_points: def.get_i64("maxHitPoints").unwrap_or(0).clamp(0, i32::MAX as i64) as i32,
-            range: if def.get_i64("hpPerSec").unwrap_or(0) > 0 { def.get_i64("range").unwrap_or(0) as i32 } else { 0 },
-            hp_per_sec: def.get_i64("hpPerSec").unwrap_or(0) as i32,
-            delay_between_shots: def.get_f64("delayBetweenShots").unwrap_or(1.0).max(0.1),
-            // No flag marks this; the manual says Sun/Rain/Thunder Cannons shoot only straight.
-            cardinal_only: def.name.to_ascii_lowercase().contains("cannon"),
+            range: if hp_per_sec > 0 { def.get_i64("range").unwrap_or(0) as i32 } else { 0 },
+            hp_per_sec: hp_per_sec as i32,
+            delay_between_shots: delay,
+            damage_per_shot: scripts.damage_per_shot(hp_per_sec, delay)?,
+            cardinal_only: scripts.fires_straight(&def.name, &def.flags)?,
             threat: def.get_i64("threat").unwrap_or(0) as i32,
-            is_priest: def.has_flag("priest"),
-            is_transport: !def.has_flag("priest") && (def.has_flag("walker") || def.has_flag("flyer") || def.has_flag("balloon")),
-            is_altar: def.has_flag("dais"),
-            energy: energy_need(def),
-            produces: energy_produced(def),
+            is_priest,
+            is_transport: !is_priest && is_unit,
+            is_altar: has(&f.altar),
+            energy,
+            produces,
             tech_bit: def.get_i64("techBit").filter(|b| (0..=255).contains(b)).map(|b| b as u8),
-        }
-    }
-
-    /// Damage of one shot.
-    pub fn damage_per_shot(&self) -> i32 {
-        (self.hp_per_sec as f64 * self.delay_between_shots).round() as i32
+        })
     }
 
     /// Rules for a plain, unknown type: one cell, walkable, droppable.
@@ -148,6 +163,7 @@ impl TypeRules {
             range: 0,
             hp_per_sec: 0,
             delay_between_shots: 1.0,
+            damage_per_shot: 0,
             cardinal_only: false,
             threat: 0,
             is_priest: false,
@@ -160,86 +176,37 @@ impl TypeRules {
     }
 }
 
-/// Read a type's Energy requirement.
-///
-/// A `mana` string lists units by letter (`s` any, `w` wind, `r` rain,
-/// `t` thunder). Otherwise Battle units (those with a `class`) derive it
-/// from `level` and `theme`, following the manual's examples: a Level One
-/// Bulf needs one Thunder, a Level Two Whirlibase two Sun, and an Air Ship
-/// (Level Three, Wind) two Wind and one Sun. So a Sun type needs `level`
-/// units of any kind; a themed type needs its theme for all but one unit
-/// from level two up.
-fn energy_need(def: &TypeDef) -> Option<EnergyNeed> {
-    if let Some(m) = def.get_str("mana") {
-        let mut need = EnergyNeed { theme: Theme::Sun, themed: 0, any: 0 };
-        for ch in m.chars() {
-            match ch.to_ascii_lowercase() {
-                's' => need.any += 1,
-                'w' | 'r' | 't' => {
-                    need.theme = match ch.to_ascii_lowercase() {
-                        'w' => Theme::Wind,
-                        'r' => Theme::Rain,
-                        _ => Theme::Thunder,
-                    };
-                    need.themed += 1;
-                }
-                _ => {}
-            }
-        }
-        return (need.total() > 0).then_some(need);
-    }
-    let level = def.get_i64("level")?.clamp(0, 9) as u8;
-    if level == 0 || def.get_str("class").is_none() {
-        return None;
-    }
-    let theme = def.get_str("theme").and_then(Theme::parse).unwrap_or(Theme::Sun);
-    Some(match theme {
-        Theme::Sun => EnergyNeed { theme, themed: 0, any: level },
-        _ if level == 1 => EnergyNeed { theme, themed: 1, any: 0 },
-        _ => EnergyNeed { theme, themed: level - 1, any: 1 },
-    })
-}
-
-/// Generators ("Source of Energy") produce their theme; a Temple produces Sun.
-fn energy_produced(def: &TypeDef) -> Option<Theme> {
-    if def.has_flag("residence") {
-        return Some(def.get_str("theme").and_then(Theme::parse).unwrap_or(Theme::Sun));
-    }
-    if def.get_str("class").is_some_and(|c| c.eq_ignore_ascii_case("Source of Energy")) {
-        return Some(def.get_str("theme").and_then(Theme::parse).unwrap_or(Theme::Sun));
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use islefall_data::typefile;
 
+    fn rules_of(src: &str) -> TypeRules {
+        let cfg = crate::config::test_config();
+        let scripts = crate::script::test_scripts();
+        TypeRules::from_type(&typefile::parse(src).unwrap(), &cfg, &scripts).unwrap()
+    }
+
     #[test]
     fn reads_flags_and_footprint() {
-        let t = typefile::parse("typename x\ntypeflags yuckWalk dropBlocking factory;\n{\n foot_x = 8;\n foot_y = 6;\n}\nA00 : : \"a.gif\" #0;\n").unwrap();
-        let r = TypeRules::from_type(&t);
+        let r = rules_of("typename x\ntypeflags yuckWalk dropBlocking factory;\n{\n foot_x = 8;\n foot_y = 6;\n}\nA00 : : \"a.gif\" #0;\n");
         assert_eq!((r.foot_x, r.foot_y), (8, 6));
         assert_eq!(r.walk, Walk::Avoid);
         assert!(r.drop_blocking && !r.creates_island && !r.is_unit);
-        let t = typefile::parse("typename y\ntypeflags walker shadow;\n{\n speed = 1.8;\n}\nA00 : : \"a.gif\" #0;\n").unwrap();
-        let r = TypeRules::from_type(&t);
+        let r = rules_of("typename y\ntypeflags walker shadow;\n{\n speed = 1.8;\n}\nA00 : : \"a.gif\" #0;\n");
         assert!(r.is_unit);
         assert_eq!(r.speed, 1.8);
         assert_eq!(r.walk, Walk::Free);
-        let t = typefile::parse("typename g\ntypeflags geyser dropBlocking;\n{\n cost = 2000;\n}\nA00 : : \"a.gif\" #0;\n").unwrap();
-        let r = TypeRules::from_type(&t);
+        let r = rules_of("typename g\ntypeflags geyser dropBlocking;\n{\n cost = 2000;\n}\nA00 : : \"a.gif\" #0;\n");
         assert!(r.is_geyser && r.cost == 2000);
-        let t = typefile::parse("typename sunCannon\ntypeflags emplacement;\n{\n maxHitPoints = 600;\n range = 22;\n hpPerSec = 16;\n delayBetweenShots = 5.0;\n threat = 5;\n}\nA00 : : \"a.gif\" #0;\n").unwrap();
-        let r = TypeRules::from_type(&t);
-        assert_eq!((r.max_hit_points, r.range, r.damage_per_shot()), (600, 22, 80));
+        let r = rules_of("typename sunCannon\ntypeflags emplacement;\n{\n maxHitPoints = 600;\n range = 22;\n hpPerSec = 16;\n delayBetweenShots = 5.0;\n threat = 5;\n}\nA00 : : \"a.gif\" #0;\n");
+        assert_eq!((r.max_hit_points, r.range, r.damage_per_shot), (600, 22, 80));
         assert!(r.cardinal_only);
     }
 
     #[test]
     fn energy_needs_follow_level_theme_and_mana() {
-        let parse = |src: &str| TypeRules::from_type(&typefile::parse(src).unwrap());
+        let parse = rules_of;
         let cannon = parse("typename thunderCannon\ntypeflags emplacement;\n{\n class=\"Shooter\";\n theme=\"thunder\";\n level = 3;\n}\nA00 : : \"a.gif\" #0;\n");
         assert_eq!(cannon.energy, Some(EnergyNeed { theme: Theme::Thunder, themed: 2, any: 1 }));
         let bulf = parse("typename bulf\ntypeflags walker;\n{\n class=\"Ground Transport\";\n theme=\"thunder\";\n level = 1;\n}\nA00 : : \"a.gif\" #0;\n");

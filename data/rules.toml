@@ -1,0 +1,115 @@
+# Islefall game rules and parameters.
+#
+# Everything the simulation treats as a number or a name lives here; the
+# code holds no defaults. Values were chosen to match NetStorm's manual where
+# it gives figures and are marked "guess" where it does not. Formulas and
+# decisions live in scripts/rules.rhai.
+
+[sim]
+# Simulation ticks per second. Rendering samples; the simulation never sees wall-clock time.
+tick_hz = 30
+# Players the world keeps reserves and Knowledge for.
+max_players = 4
+
+[grid]
+# Cell size in source pixels (NetStorm's map is a plain 16 x 11 grid).
+cell_w = 16
+cell_h = 11
+
+[walking]
+# Path cost multiplier for cells units avoid (`yuckWalk`).
+avoid_cost = 5
+# Fixed-point steps per cell for unit positions.
+subcell = 256
+
+# Which type flags mean what. Flag names are matched case-insensitively.
+[flags]
+walk_blocked = ["walkBlocking"]
+walk_avoid = ["yuckWalk"]
+drop_blocking = ["dropBlocking"]
+creates_island = ["createsisland"]
+may_drop_on_rim = ["mayDropOnRim"]
+unit = ["walker", "flyer", "balloon"]
+priest = ["priest"]
+geyser = ["geyser"]
+temple = ["residence"]
+altar = ["dais"]
+# Type classes (the `class` property) that produce Energy of their theme.
+energy_source_classes = ["Source of Energy"]
+
+[bridges]
+# Seconds an unsupported bridge cell stays cracked before it crumbles.
+crumble_seconds = 4.0
+# Pieces on offer in the Production window (the game allows 2, 4 or 6).
+piece_slots = 4
+# Seed of the player's piece queue.
+queue_seed = 24301
+# The piece catalogue: cell offsets from the origin. The real catalogue is
+# not in the data; this is a plausible set.
+pieces = [
+    { name = "one", cells = [[0, 0]] },
+    { name = "two", cells = [[0, 0], [1, 0]] },
+    { name = "three", cells = [[0, 0], [1, 0], [2, 0]] },
+    { name = "corner", cells = [[0, 0], [1, 0], [1, 1]] },
+    { name = "tee", cells = [[0, 0], [1, 0], [2, 0], [1, 1]] },
+    { name = "zig", cells = [[0, 0], [1, 0], [1, 1], [2, 1]] },
+    { name = "four", cells = [[0, 0], [1, 0], [2, 0], [3, 0]] },
+    { name = "cross", cells = [[1, 0], [0, 1], [1, 1], [2, 1], [1, 2]] },
+]
+
+[economy]
+# Storm Power carried per trip: the `cost` of a Storm Crystal (`nugget`).
+nugget_power = 200
+# Seconds a unit spends taking a crystal or handing it in.
+work_seconds = 1.0
+# Share of the cost refunded when a healthy structure is salvaged (manual: 25%).
+salvage_refund_percent = 25
+# Type whose `cost` is a geyser's crystal stock; geysers themselves are free.
+geyser_stock_from_cost = true
+
+[combat]
+# Cells around an exploding structure that take damage and bridge shock (guess).
+explosion_radius = 2
+# Damage an explosion deals to everything within the radius (guess).
+explosion_damage = 150
+# Seconds between shots when a type has no `delayBetweenShots`.
+default_delay_between_shots = 1.0
+
+[priest]
+# Cells from an own Temple within which a priest regenerates (guess).
+temple_heal_range = 8
+# Hit points a priest regenerates per second near his Temple (guess).
+heal_per_second = 2
+
+[energy]
+# Radius of an Energy source's circle, in source pixels (guess; the manual only says fixed).
+range_px = 128
+
+[ai]
+# Seconds between opponent moves.
+move_seconds = 4.0
+# Every this many moves the opponent drops a shooter instead of a piece.
+shooter_every = 3
+# What the opponent drops.
+shooter = "sunarcher"
+# How far from an open end a shooter's hotspot may be tried.
+shooter_reach = 3
+# Seed of the opponent's piece queue.
+queue_seed = 161
+
+[controls]
+# Keys for the piece slots, as in the original Production window.
+slot_keys = ["Q", "W", "A", "S", "Z", "X"]
+# Buildings on the number keys.
+build_tools = ["suncannon", "sunarcher", "sunbattery", "sunfactory", "treetwo", "windbattery"]
+# What `U` spawns.
+unit_tool = "sunwalker"
+# Camera pan speed in source pixels per second, and the starting zoom.
+pan_speed = 120.0
+zoom = 4.0
+# Frames per second of sprite animation.
+animation_fps = 10.0
+# Seconds after start-up at which ISLEFALL_SCREENSHOT fires by default.
+screenshot_seconds = 1.5
+# Palette file stem from d/ used for all sprites (the game's fixed palette).
+palette = "gifcloud"

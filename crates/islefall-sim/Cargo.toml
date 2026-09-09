@@ -9,3 +9,6 @@ rust-version.workspace = true
 
 [dependencies]
 islefall-data = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+rhai = { version = "1.26", features = ["sync", "no_time", "only_i64"] }

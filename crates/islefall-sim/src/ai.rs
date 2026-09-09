@@ -3,14 +3,12 @@
 //! and drops shooters at its bridge ends. Deterministic: it only looks at
 //! the world and its own piece queue.
 
+use crate::config::Config;
 use crate::grid::Cell;
 use crate::pieces::{Piece, PieceQueue};
 use crate::rules::TypeRules;
 use crate::unit::Task;
-use crate::world::{PIECE_SLOTS, World};
-
-/// How far from an open end a shooter's hotspot may be tried.
-const SHOOTER_REACH: i32 = 3;
+use crate::world::World;
 
 pub struct Ai {
     pub owner: u8,
@@ -20,6 +18,7 @@ pub struct Ai {
     pub every: u32,
     /// Every this many moves, a shooter is dropped instead of a piece.
     pub shooter_every: u32,
+    pub shooter_reach: i32,
     pub queue: PieceQueue,
     ticks: u32,
     moves: u32,
@@ -28,14 +27,24 @@ pub struct Ai {
 /// What the opponent did in one move, for logging.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AiMove {
-    Piece { name: &'static str, at: Cell },
+    Piece { name: String, at: Cell },
     Shooter { kind: String, at: Cell },
     Nothing,
 }
 
 impl Ai {
-    pub fn new(owner: u8, target: Cell, every: u32, seed: u64) -> Ai {
-        Ai { owner, target, every, shooter_every: 3, queue: PieceQueue::new(PIECE_SLOTS, seed), ticks: 0, moves: 0 }
+    /// An opponent configured from the rules' `[ai]` section.
+    pub fn new(owner: u8, target: Cell, cfg: &Config) -> Ai {
+        Ai {
+            owner,
+            target,
+            every: cfg.ticks(cfg.ai.move_seconds),
+            shooter_every: cfg.ai.shooter_every.max(1),
+            shooter_reach: cfg.ai.shooter_reach,
+            queue: PieceQueue::from_defs(&cfg.bridges.pieces, cfg.bridges.piece_slots, cfg.ai.queue_seed.wrapping_add(owner as u64)),
+            ticks: 0,
+            moves: 0,
+        }
     }
 
     /// Call once per simulation tick; acts every `every` ticks.
@@ -68,7 +77,7 @@ impl Ai {
             .map(|(i, _)| i)
             .collect();
         for u in idle {
-            let at = world.units[u].pos.cell();
+            let at = world.units[u].cell();
             let mut geysers: Vec<usize> = (0..world.structures.len()).filter(|&i| world.structures[i].stock > 0).collect();
             geysers.sort_by_key(|&i| Self::distance(world.structures[i].cell, at));
             for g in geysers {
@@ -140,7 +149,7 @@ impl Ai {
             return AiMove::Nothing;
         }
         self.queue.refill(slot);
-        AiMove::Piece { name: piece.name, at: origin }
+        AiMove::Piece { name: piece.name.clone(), at: origin }
     }
 
     /// Drop a shooter in the sky next to the open end nearest the target.
@@ -149,8 +158,8 @@ impl Ai {
         ends.sort_by_key(|&c| Self::distance(c, self.target));
         for end in ends.into_iter().take(3) {
             let mut spots = Vec::new();
-            for dy in -SHOOTER_REACH..=SHOOTER_REACH {
-                for dx in -SHOOTER_REACH..=SHOOTER_REACH {
+            for dy in -self.shooter_reach..=self.shooter_reach {
+                for dx in -self.shooter_reach..=self.shooter_reach {
                     let at = end.offset(dx, dy);
                     if world.can_drop(rules, at).is_ok() {
                         spots.push(at);
@@ -171,20 +180,25 @@ impl Ai {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::test_config;
     use crate::island::IslandMap;
+    use crate::script::test_scripts;
 
     #[test]
     fn opponent_bridges_towards_the_target_and_drops_shooters() {
-        let mut w = World::new();
+        let mut cfg = test_config();
+        cfg.ai.move_seconds = 10.0 / cfg.sim.tick_hz as f64;
+        let mut ai = Ai::new(1, Cell::new(2, 2), &cfg);
+        let mut w = World::new(cfg);
         w.push_island(IslandMap::rect(Cell::new(0, 0), 6, 6), 0);
         w.push_island(IslandMap::rect(Cell::new(20, 0), 6, 6), 1);
-        let mut ai = Ai::new(1, Cell::new(2, 2), 10, 7);
         w.powers[1] = 5000;
-        let thrower = TypeRules { foot_x: 3, foot_y: 3, creates_island: true, may_drop_on_rim: true, max_hit_points: 400, range: 8, hp_per_sec: 12, ..TypeRules::plain() };
+        let scripts = test_scripts();
+        let thrower = TypeRules { foot_x: 3, foot_y: 3, creates_island: true, may_drop_on_rim: true, max_hit_points: 400, range: 8, hp_per_sec: 12, damage_per_shot: 12, ..TypeRules::plain() };
         let mut pieces = 0;
         let mut shooters = 0;
         for _ in 0..600 {
-            w.step();
+            w.step(&scripts);
             match ai.tick(&mut w, ("sunarcher", &thrower)) {
                 Some(AiMove::Piece { .. }) => pieces += 1,
                 Some(AiMove::Shooter { .. }) => shooters += 1,

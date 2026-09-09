@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use islefall_data::isle::{self, Theme};
 use islefall_data::{Installation, Palette, bridge};
+use islefall_sim::config::Grid;
 use islefall_sim::{BridgeState, Cell, IslandMap, World};
 
 /// Marks a terrain tile sprite; platform tiles are rebuilt when terrain changes.
@@ -72,8 +73,8 @@ impl ShapeLibrary {
 }
 
 /// Bevy world position (y up) of a cell's hotspot pixel, in source pixels.
-pub fn cell_to_world(cell: Cell) -> Vec2 {
-    let (x, y) = cell.hotspot_px();
+pub fn cell_to_world(cell: Cell, g: &Grid) -> Vec2 {
+    let (x, y) = cell.hotspot_px(g);
     Vec2::new(x as f32, -(y as f32))
 }
 
@@ -106,7 +107,9 @@ pub fn spawn_island(
     island: &IslandMap,
     theme: Theme,
     platform: bool,
+    grid: &Grid,
 ) {
+    let world_grid = grid.clone();
     let Some(isle_def) = install.type_def("isle") else { return };
     let mut by_piece = HashMap::new();
     let Some(shape) = lib.get_or_load(install, palette, "isle", images, layouts) else { return };
@@ -117,7 +120,7 @@ pub fn spawn_island(
             continue;
         }
         let frame = frames[variation(cell, frames.len())];
-        let e = spawn_frame(commands, shape, frame, cell_to_world(cell), Z_TERRAIN + if platform { 0.5 } else { 0.0 });
+        let e = spawn_frame(commands, shape, frame, cell_to_world(cell, &world_grid), Z_TERRAIN + if platform { 0.5 } else { 0.0 });
         commands.entity(e).insert(TerrainTile { platform });
     }
 }
@@ -137,7 +140,7 @@ pub fn spawn_structures(
         let frame = def.frames.iter().position(|f| f.has_flag("default")).unwrap_or(0);
         let Some(shape) = lib.get_or_load(install, palette, &st.kind, images, layouts) else { continue };
         let z = Z_STRUCTURE + st.cell.y as f32 * 0.01;
-        let e = spawn_frame(commands, shape, frame, cell_to_world(st.cell), z);
+        let e = spawn_frame(commands, shape, frame, cell_to_world(st.cell, &world.cfg.grid), z);
         commands.entity(e).insert(StructureSprite);
     }
 }
@@ -173,7 +176,7 @@ pub fn spawn_bridges(
         }
         let frame = frames[variation(cell, frames.len())];
         let z = Z_BRIDGE + cell.y as f32 * 0.001;
-        let e = spawn_frame(commands, shape, frame, cell_to_world(cell), z);
+        let e = spawn_frame(commands, shape, frame, cell_to_world(cell, &world.cfg.grid), z);
         commands.entity(e).insert(BridgeTile);
     }
     spawn_bridge_connectors(commands, install, lib, palette, images, layouts, world);
@@ -202,7 +205,7 @@ fn spawn_bridge_connectors(
                 continue;
             }
             let z = Z_BRIDGE - 0.5 + land.y as f32 * 0.001;
-            let e = spawn_frame(commands, shape, frame, cell_to_world(land), z);
+            let e = spawn_frame(commands, shape, frame, cell_to_world(land, &world.cfg.grid), z);
             commands.entity(e).insert(BridgeTile);
         }
     }

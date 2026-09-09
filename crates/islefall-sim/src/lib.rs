@@ -6,21 +6,27 @@
 //! crate reads this state and draws it; it never drives it.
 
 pub mod ai;
+pub mod config;
 pub mod grid;
+pub mod map;
 pub mod island;
 pub mod path;
 pub mod pieces;
 pub mod rules;
+pub mod script;
 pub mod structure;
 pub mod unit;
 pub mod world;
 
 pub use ai::{Ai, AiMove};
-pub use grid::{CELL_H, CELL_W, Cell};
+pub use config::{Config, ConfigError};
+pub use map::{MapDef, MapError};
+pub use script::{ScriptError, Scripts};
+pub use grid::Cell;
 pub use island::IslandMap;
 pub use path::{find_path, find_path_costed};
 pub use pieces::{Piece, PieceQueue};
 pub use rules::{EnergyNeed, TypeRules, Walk};
 pub use structure::{Structure, Weapon};
-pub use unit::{Dir8, Pos, SUBCELL, Task, Unit};
-pub use world::{BridgeState, DropError, ENERGY_RANGE_PX, NUGGET_POWER, PieceError, TICK_HZ, World, speed_per_tick};
+pub use unit::{Dir8, Pos, Task, Unit};
+pub use world::{BridgeState, DropError, PieceError, World, speed_per_tick};

@@ -8,9 +8,6 @@ use std::collections::VecDeque;
 
 use crate::grid::Cell;
 
-/// Fixed-point steps per cell.
-pub const SUBCELL: i32 = 256;
-
 /// The eight facing directions, in the order the walker animations are
 /// listed in the type files (`A` = north, clockwise to `H` = north-west).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -65,18 +62,18 @@ pub struct Pos {
 }
 
 impl Pos {
-    /// Centre of a cell.
-    pub const fn cell_centre(cell: Cell) -> Pos {
-        Pos { x: cell.x * SUBCELL + SUBCELL / 2, y: cell.y * SUBCELL + SUBCELL / 2 }
+    /// Centre of a cell, with `sub` fixed-point steps per cell.
+    pub const fn cell_centre(cell: Cell, sub: i32) -> Pos {
+        Pos { x: cell.x * sub + sub / 2, y: cell.y * sub + sub / 2 }
     }
 
-    pub const fn cell(self) -> Cell {
-        Cell::new(self.x.div_euclid(SUBCELL), self.y.div_euclid(SUBCELL))
+    pub const fn cell(self, sub: i32) -> Cell {
+        Cell::new(self.x.div_euclid(sub), self.y.div_euclid(sub))
     }
 
     /// Position in cell units as floats, for rendering only.
-    pub fn to_f32(self) -> (f32, f32) {
-        (self.x as f32 / SUBCELL as f32, self.y as f32 / SUBCELL as f32)
+    pub fn to_f32(self, sub: i32) -> (f32, f32) {
+        (self.x as f32 / sub as f32, self.y as f32 / sub as f32)
     }
 }
 
@@ -102,6 +99,8 @@ pub struct Unit {
     pub path: VecDeque<Pos>,
     /// Movement per tick in fixed-point steps.
     pub speed: i32,
+    /// Fixed-point steps per cell (from the rules; kept here so positions can be read alone).
+    pub subcell: i32,
     /// Dead units stay in the list so indices remain stable.
     pub alive: bool,
     pub task: Task,
@@ -120,8 +119,18 @@ pub struct Unit {
 }
 
 impl Unit {
-    pub fn new(kind: impl Into<String>, cell: Cell, speed: i32) -> Unit {
-        Unit { kind: kind.into(), pos: Pos::cell_centre(cell), facing: Dir8::S, path: VecDeque::new(), speed, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1, threat: 0, is_priest: false, is_transport: false, stunned: false, carrying: None, carried_by: None }
+    pub fn new(kind: impl Into<String>, cell: Cell, speed: i32, subcell: i32) -> Unit {
+        Unit { kind: kind.into(), pos: Pos::cell_centre(cell, subcell), facing: Dir8::S, path: VecDeque::new(), speed, subcell, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1, threat: 0, is_priest: false, is_transport: false, stunned: false, carrying: None, carried_by: None }
+    }
+
+    /// The cell the unit stands in.
+    pub fn cell(&self) -> Cell {
+        self.pos.cell(self.subcell)
+    }
+
+    /// Position in cell units as floats, for rendering only.
+    pub fn pos_f32(&self) -> (f32, f32) {
+        self.pos.to_f32(self.subcell)
     }
 
     pub fn is_moving(&self) -> bool {
@@ -174,23 +183,23 @@ mod tests {
 
     #[test]
     fn walks_to_target_and_stops() {
-        let mut u = Unit::new("priest", Cell::new(0, 0), 64);
-        u.path.push_back(Pos::cell_centre(Cell::new(3, 0)));
+        let mut u = Unit::new("priest", Cell::new(0, 0), 64, 256);
+        u.path.push_back(Pos::cell_centre(Cell::new(3, 0), 256));
         let mut ticks = 0;
         while u.is_moving() {
             u.step();
             ticks += 1;
             assert!(ticks < 100, "did not arrive");
         }
-        assert_eq!(u.pos, Pos::cell_centre(Cell::new(3, 0)));
+        assert_eq!(u.pos, Pos::cell_centre(Cell::new(3, 0), 256));
         assert_eq!(u.facing, Dir8::E);
         assert_eq!(ticks, 12, "3 cells at a quarter cell per tick");
-        assert_eq!(u.pos.cell(), Cell::new(3, 0));
+        assert_eq!(u.cell(), Cell::new(3, 0));
     }
 
     #[test]
     fn negative_positions_map_to_cells() {
-        assert_eq!(Pos { x: -1, y: -1 }.cell(), Cell::new(-1, -1));
-        assert_eq!(Pos { x: 255, y: 256 }.cell(), Cell::new(0, 1));
+        assert_eq!(Pos { x: -1, y: -1 }.cell(256), Cell::new(-1, -1));
+        assert_eq!(Pos { x: 255, y: 256 }.cell(256), Cell::new(0, 1));
     }
 }

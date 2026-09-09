@@ -1,0 +1,98 @@
+# The demo scene: a home island, a bridge to a battery islet, and an enemy
+# island with a geyser, a shooter, a priest, a Temple and a golem.
+#
+# Cells are (x, y) with y growing downwards. Structure and unit positions
+# are hotspot cells (the bottom-right cell of a footprint). Islands are
+# rectangles with optional cells removed.
+
+name = "Demo"
+# Storm Power every player starts with once the layout stands.
+start_power = 1500
+# Camera centre cell, unless ISLEFALL_CAMERA overrides it.
+camera = [7, 4]
+
+[[islands]]
+owner = 0
+theme = "sun"
+origin = [0, 0]
+size = [16, 10]
+remove = [[15, 0], [14, 0], [15, 1]]
+
+[[islands]]
+owner = 1
+theme = "sun"
+origin = [28, 4]
+size = [11, 11]
+
+# Bridge cells laid by the map; connections and tiles follow from adjacency.
+[[bridges]]
+owner = 0
+cells = [[16, 4], [17, 4], [18, 4], [19, 4], [20, 4], [20, 3], [20, 2], [18, 3], [18, 5], [18, 6], [21, 3], [19, 2], [17, 5], [19, 3]]
+
+[[structures]]
+owner = 0
+kind = "dais"
+at = [9, 7]
+
+[[structures]]
+owner = 0
+kind = "residence"
+at = [13, 6]
+
+[[structures]]
+owner = 0
+kind = "treetwo"
+at = [2, 3]
+
+[[structures]]
+owner = 0
+kind = "treetwo"
+at = [12, 8]
+
+# A battery in the sky off the bridge end at (21,3) makes its own island.
+[[structures]]
+owner = 0
+kind = "sunbattery"
+at = [24, 4]
+
+[[structures]]
+owner = 1
+kind = "geyser"
+at = [34, 9]
+
+[[structures]]
+owner = 1
+kind = "sunarcher"
+at = [31, 7]
+
+[[structures]]
+owner = 1
+kind = "residence"
+at = [35, 13]
+
+[[units]]
+owner = 0
+kind = "priest"
+at = [2, 8]
+move_to = [23, 3]
+
+[[units]]
+owner = 0
+kind = "sunwalker"
+at = [5, 8]
+move_to = [11, 6]
+
+[[units]]
+owner = 1
+kind = "priest"
+at = [30, 11]
+
+[[units]]
+owner = 1
+kind = "sunwalker"
+at = [36, 6]
+
+# Computer players: bridge towards a target cell, or the enemy altar when
+# `target` is omitted.
+[[opponents]]
+owner = 1

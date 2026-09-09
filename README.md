@@ -19,6 +19,8 @@ Status: early development. Nothing is playable yet.
 | `crates/islefall` | The game binary, built on Bevy. Currently draws a first island scene and doubles as a sprite viewer. |
 | `docs/FORMATS.md` | Reverse-engineered descriptions of the NetStorm file formats. |
 | `docs/RULES.md` | How the type flags are read as game rules, with confidence notes. |
+| `docs/MODDING.md` | The data directory: `rules.toml`, the Rhai hooks and map files. |
+| `data/` | The game's own rules, scripts and maps; nothing from NetStorm. |
 | `tools/shp_decode.py` | Python reference decoder used while working out the sprite format. |
 
 ## Building
@@ -46,7 +48,8 @@ and `netstorm.tarc`:
 NETSTORM_DIR=~/games/NetStorm cargo run --release
 ```
 
-By default this shows a first scene: a home island with the altar and the
+Rules, scripts and maps are loaded from `data/` (or `ISLEFALL_DATA`); see
+`docs/MODDING.md`. By default this shows the `demo` map: a home island with the altar and the
 Temple, a bridge to a battery on its own islet, an enemy island with a
 Storm Geyser, a Disc Thrower and the enemy High Priest, whose owner bridges
 towards your altar and drops shooters on the way, and two units walking

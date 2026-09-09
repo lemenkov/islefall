@@ -7,10 +7,7 @@
 //! boxes in sixteenths and elevenths. Sprites are anchored on the
 //! bottom-right pixel of the cell their hotspot occupies.
 
-/// Cell width in screen pixels.
-pub const CELL_W: i32 = 16;
-/// Cell height in screen pixels.
-pub const CELL_H: i32 = 11;
+use crate::config::Grid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Cell {
@@ -28,14 +25,19 @@ impl Cell {
     }
 
     /// Screen-space position (x right, y down) of the cell's top-left pixel.
-    pub const fn top_left_px(self) -> (i32, i32) {
-        (self.x * CELL_W, self.y * CELL_H)
+    pub const fn top_left_px(self, g: &Grid) -> (i32, i32) {
+        (self.x * g.cell_w, self.y * g.cell_h)
+    }
+
+    /// Screen-space position (x right, y down) of the cell's centre pixel.
+    pub const fn centre_px(self, g: &Grid) -> (i32, i32) {
+        (self.x * g.cell_w + g.cell_w / 2, self.y * g.cell_h + g.cell_h / 2)
     }
 
     /// Screen-space position (x right, y down) of the cell's bottom-right
     /// pixel, where sprites with a default hotspot are anchored.
-    pub const fn hotspot_px(self) -> (i32, i32) {
-        (self.x * CELL_W + CELL_W - 1, self.y * CELL_H + CELL_H - 1)
+    pub const fn hotspot_px(self, g: &Grid) -> (i32, i32) {
+        (self.x * g.cell_w + g.cell_w - 1, self.y * g.cell_h + g.cell_h - 1)
     }
 }
 
@@ -45,9 +47,10 @@ mod tests {
 
     #[test]
     fn pixel_positions() {
-        assert_eq!(Cell::new(0, 0).top_left_px(), (0, 0));
-        assert_eq!(Cell::new(0, 0).hotspot_px(), (15, 10));
-        assert_eq!(Cell::new(2, 3).hotspot_px(), (47, 43));
+        let g = Grid { cell_w: 16, cell_h: 11 };
+        assert_eq!(Cell::new(0, 0).top_left_px(&g), (0, 0));
+        assert_eq!(Cell::new(0, 0).hotspot_px(&g), (15, 10));
+        assert_eq!(Cell::new(2, 3).hotspot_px(&g), (47, 43));
         assert_eq!(Cell::new(1, 1).offset(-1, 2), Cell::new(0, 3));
     }
 }
