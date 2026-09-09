@@ -12,6 +12,7 @@
 
 pub mod bridge;
 pub mod col;
+pub mod gif;
 pub mod install;
 pub mod isle;
 pub mod shapes;
@@ -20,6 +21,7 @@ pub mod tarc;
 pub mod typefile;
 
 pub use col::Palette;
+pub use gif::{IndexedImage, Picture};
 pub use install::Installation;
 pub use shapes::ShapeRecords;
 pub use shp::{Frame, FrameHeader, ShapeFile, ShpError};

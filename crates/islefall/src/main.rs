@@ -42,13 +42,13 @@ use bevy::sprite::Anchor;
 use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
-use islefall_data::{Installation, TypeDef};
+use islefall_data::{Installation, Picture, TypeDef};
 use bevy::audio::{AudioPlayer, AudioSink, AudioSinkPlayback, AudioSource, GlobalVolume, PlaybackSettings, Volume};
 use islefall_sim::config::Grid;
 use islefall_sim::map::{self, MapDef};
 use islefall_sim::{Ai, AiMove, Cell, Config, Dir8, IslandMap, Piece, Scripts, TypeRules, Unit, World};
 use sprites::FrameInfo;
-use world::{BridgeTile, LoadedShape, ShapeLibrary, StructureSprite, TerrainTile, Z_SHADOW, Z_STRUCTURE, Z_UNIT};
+use world::{BridgeTile, LoadedShape, ShapeLibrary, StructureSprite, TerrainTile, Z_SHADOW, Z_SKY, Z_STRUCTURE, Z_UNIT};
 
 /// Row-based draw order: things lower on screen draw over things above them.
 fn depth_z(base: f32, row: f32) -> f32 {
@@ -78,6 +78,20 @@ struct GameData {
     scripts: Scripts,
     palette: String,
     map: MapDef,
+    /// Where rules, scripts, maps and a mod's own files live.
+    data_dir: PathBuf,
+}
+
+impl GameData {
+    /// A picture or sound by name: the data directory first, so a mod can
+    /// bring its own, then the installation's `d/` directory.
+    fn asset_path(&self, name: &str) -> Option<PathBuf> {
+        let own = self.data_dir.join(name);
+        if own.is_file() {
+            return Some(own);
+        }
+        find_file(&self.install.root.join("d"), name)
+    }
 }
 
 /// Sound files by lowercase name: the install's sound directory plus
@@ -96,6 +110,68 @@ fn file_gain_db(path: &Path) -> f32 {
     match stem.rsplit_once('-') {
         Some((_, digits)) if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) => -(digits.parse::<f32>().unwrap_or(0.0)) / 100.0,
         _ => 0.0,
+    }
+}
+
+/// One drifting cloud layer under the map.
+#[derive(Component)]
+struct SkyLayer {
+    speed: Vec2,
+    tile: Vec2,
+}
+
+/// A file in a directory by case-insensitive name.
+fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
+    std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.eq_ignore_ascii_case(name)))
+}
+
+/// Lay the sky's cloud layers out around the origin; `drift_sky` keeps
+/// them under the camera and moving.
+fn spawn_sky(commands: &mut Commands, data: &GameData, images: &mut Assets<Image>) {
+    for (i, layer) in data.cfg.sky.layers.iter().enumerate() {
+        let Some(path) = data.asset_path(&layer.image) else {
+            warn!("sky: {} is neither in the data directory nor in the installation's d/", layer.image);
+            continue;
+        };
+        let img = match Picture::load(&path) {
+            Ok(img) => img,
+            Err(e) => {
+                warn!("sky: {}: {e}", path.display());
+                continue;
+            }
+        };
+        let handle = images.add(Image::new(
+            bevy::render::render_resource::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 },
+            bevy::render::render_resource::TextureDimension::D2,
+            img.rgba,
+            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+            bevy::asset::RenderAssetUsages::RENDER_WORLD,
+        ));
+        let tile = Vec2::new(img.width as f32, img.height as f32);
+        let extent = tile * data.cfg.sky.extent_tiles as f32;
+        let mut sprite = Sprite::from_image(handle);
+        sprite.custom_size = Some(extent);
+        sprite.image_mode = SpriteImageMode::Tiled { tile_x: true, tile_y: true, stretch_value: 1.0 };
+        sprite.color = Color::srgba(1.0, 1.0, 1.0, layer.opacity);
+        commands.spawn((
+            sprite,
+            Transform::from_translation(Vec3::new(0.0, 0.0, Z_SKY + i as f32 * 0.1)),
+            SkyLayer { speed: Vec2::new(layer.speed[0], -layer.speed[1]), tile },
+        ));
+    }
+}
+
+/// Drift each cloud layer with time and keep it centred on the camera, in
+/// whole tiles so the texture never jumps.
+fn drift_sky(time: Res<Time>, cameras: Query<&Transform, (With<Camera2d>, Without<SkyLayer>)>, mut layers: Query<(&SkyLayer, &mut Transform)>) {
+    let Ok(cam) = cameras.single() else { return };
+    let t = time.elapsed_secs();
+    for (layer, mut tf) in layers.iter_mut() {
+        let offset = (layer.speed * t).rem_euclid(layer.tile);
+        let cam2 = cam.translation.truncate();
+        let centre = offset + ((cam2 - offset) / layer.tile).round() * layer.tile;
+        tf.translation.x = centre.x;
+        tf.translation.y = centre.y;
     }
 }
 
@@ -371,7 +447,7 @@ fn main() {
                 ..default()
             }),
     )
-    .insert_resource(GameData { install, cfg, scripts, palette, map })
+    .insert_resource(GameData { install, cfg, scripts, palette, map, data_dir: data.clone() })
     .insert_resource(GlobalVolume::new(Volume::Linear(volume)))
     .insert_resource(Sky {
         timer: Timer::from_seconds(sky_first, TimerMode::Once),
@@ -403,7 +479,7 @@ fn main() {
         (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
-    .add_systems(Update, (play_sounds.after(mouse_actions).after(bridge_keys), sync_loops, ambient).run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, (play_sounds.after(mouse_actions).after(bridge_keys), sync_loops, ambient, drift_sky.after(camera_keys)).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
         app.insert_resource(AutoScreenshot { path, delay: Timer::from_seconds(screenshot_at, TimerMode::Once) });
@@ -454,7 +530,10 @@ fn setup(
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
     match *mode {
-        Mode::Island => setup_map(&mut commands, &data, &mut sim, &mut lib, &mut images, &mut layouts),
+        Mode::Island => {
+            setup_map(&mut commands, &data, &mut sim, &mut lib, &mut images, &mut layouts);
+            spawn_sky(&mut commands, &data, &mut images);
+        }
         Mode::Viewer => {
             commands.spawn((Camera2d, zoomed_projection(data.cfg.controls.zoom)));
             spawn_viewer_shape(&mut commands, &data, &viewer, &mut lib, &mut images, &mut layouts);

@@ -8,6 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+gif = "0.13"
 
 [dev-dependencies]
 

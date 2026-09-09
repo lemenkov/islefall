@@ -23,6 +23,8 @@ pub struct StructureSprite;
 use crate::sprites::{self, FrameInfo};
 
 /// Draw order layers; units add a small y-sort offset on top.
+/// The cloud layers, under everything.
+pub const Z_SKY: f32 = -10.0;
 pub const Z_TERRAIN: f32 = 0.0;
 /// Bridges sit just above terrain; each row draws over the one above it.
 pub const Z_BRIDGE: f32 = 1.0;

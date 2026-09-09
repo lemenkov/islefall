@@ -26,6 +26,23 @@ pub struct Config {
     pub ai: AiConfig,
     pub controls: Controls,
     pub sounds: Sounds,
+    pub sky: Sky,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Sky {
+    pub extent_tiles: u32,
+    #[serde(default)]
+    pub layers: Vec<SkyLayer>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SkyLayer {
+    pub image: String,
+    pub speed: [f32; 2],
+    pub opacity: f32,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -331,6 +348,9 @@ impl Config {
         }
         if !(0.0..=1.0).contains(&self.sounds.volume) {
             return bad("sounds.volume must be 0.0..1.0");
+        }
+        if self.sky.extent_tiles == 0 || self.sky.layers.iter().any(|l| !(0.0..=1.0).contains(&l.opacity)) {
+            return bad("sky.extent_tiles must be positive and layer opacity 0.0..1.0");
         }
         let [least, most] = self.sounds.ambient.sky_seconds;
         if least <= 0.0 || most < least || self.sounds.attenuation.reference_zoom <= 0.0 {

@@ -128,6 +128,18 @@ shooter_reach = 3
 # Seed of the opponent's piece queue.
 queue_seed = 161
 
+# Cloud layers drifting under the islands, drawn bottom first. An image is
+# looked up in the data directory first (GIF or PNG, so a mod can bring its
+# own), then in the installation's d/. Speed is source pixels per second
+# along x and y; opacity lets the lower layers show through the upper
+# ones. Each layer is laid out `extent_tiles` tiles wide around the camera.
+[sky]
+extent_tiles = 16
+layers = [
+    { image = "Gifcloud.gif", speed = [6.0, 2.0], opacity = 1.0 },
+    { image = "Gifcloud2.GIF", speed = [-3.0, 4.0], opacity = 0.5 },
+]
+
 [controls]
 # Keys for the piece slots, as in the original Production window.
 slot_keys = ["Q", "W", "A", "S", "Z", "X"]

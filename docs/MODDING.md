@@ -85,6 +85,25 @@ play it as a loop while in view, nearest the centre first up to
 `max_loops`. `[sounds.ambient]` names a bed that never stops and sky
 noises played at random intervals; both ignore the camera.
 
+## Sky
+
+`[sky]` lists the cloud layers drawn under the islands: each names an
+image (the game's two 512-pixel cloud tiles by default), a drift speed in
+source pixels per second along x and y, and an opacity, bottom layer
+first. Layers follow the camera in whole tiles, so a mod can swap the
+textures or add a third layer without touching code.
+
+## Bringing your own files
+
+Every file the rules name is looked up in the data directory first and
+in the installation second, so a data set of your own grows one file at
+a time: put a `sky/mine.png` next to `rules.toml` and name it under
+`[sky]`; put a WAV under the data directory and name it in
+`[sounds.overrides]`. Pictures may be GIF or PNG; sounds are WAV unless
+the app is built with more of Bevy's decoders. Sprites still come only
+from the installation's sprite cache; remapping them is the next step of
+this layer.
+
 ## Maps
 
 Cells are `[x, y]` with y growing downwards. An island without an `owner`
