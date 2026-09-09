@@ -86,6 +86,10 @@ decibel, as the original engine read it. Objects whose type names a
 play it as a loop while in view, nearest the centre first up to
 `max_loops`. `[sounds.ambient]` names a bed that never stops and sky
 noises played at random intervals; both ignore the camera.
+`[sounds.footsteps]` ties a walker's steps to its walk animation: so many
+steps per cycle of the type's `moveSound`, cycling through the numbered
+siblings on disk (the five Golem steps); flyers and balloons play the
+same property as a loop while they move.
 
 ## Screen text
 

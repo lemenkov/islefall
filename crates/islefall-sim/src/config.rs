@@ -82,6 +82,7 @@ pub struct Sounds {
     pub events: SoundEvents,
     pub attenuation: Attenuation,
     pub ambient: Ambient,
+    pub footsteps: Footsteps,
     /// Shooter type stem to projectile type stem, consulted after the shooter.
     #[serde(default)]
     pub projectiles: BTreeMap<String, String>,
@@ -103,6 +104,18 @@ pub struct Attenuation {
     pub loop_property: String,
     #[serde(default)]
     pub building_loop: Option<String>,
+}
+
+/// Step sounds of walkers, tied to their walk animation.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Footsteps {
+    /// Type property naming the step (or, for flyers, the flight loop).
+    pub property: String,
+    /// Steps heard per walk cycle.
+    pub per_cycle: u32,
+    /// Cycle through sibling files that differ only by a number.
+    pub variants: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -401,6 +414,9 @@ impl Config {
         }
         if self.sky.extent_tiles == 0 || self.sky.layers.iter().any(|l| !(0.0..=1.0).contains(&l.opacity)) {
             return bad("sky.extent_tiles must be positive and layer opacity 0.0..1.0");
+        }
+        if self.sounds.footsteps.per_cycle == 0 {
+            return bad("sounds.footsteps.per_cycle must be positive");
         }
         let [least, most] = self.sounds.ambient.sky_seconds;
         if least <= 0.0 || most < least || self.sounds.attenuation.reference_zoom <= 0.0 {

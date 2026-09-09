@@ -101,6 +101,15 @@ struct SoundBank {
     files: HashMap<String, PathBuf>,
     /// Decoded sources with the base gain in decibels their file name carries.
     loaded: HashMap<String, Option<(Handle<AudioSource>, f32)>>,
+    /// Numbered siblings of a name (`golemMove1` to `golemMove5`), by lowercase name.
+    variants: HashMap<String, Vec<String>>,
+}
+
+/// A name without its extension and trailing digits: `golemmove1.wav` -> `golemmove`.
+fn sound_stem(name: &str) -> String {
+    let lower = name.to_lowercase();
+    let base = lower.rsplit_once('.').map(|(b, _)| b).unwrap_or(&lower);
+    base.trim_end_matches(|c: char| c.is_ascii_digit()).to_string()
 }
 
 /// The gain a NetStorm sound file name carries: `name-500.wav` is -5 dB,
@@ -275,7 +284,33 @@ impl SoundBank {
             files.insert(name.to_lowercase(), data_dir.join(path));
         }
         info!("{} sound files", files.len());
-        SoundBank { files, loaded: HashMap::new() }
+        SoundBank { files, loaded: HashMap::new(), variants: HashMap::new() }
+    }
+
+    /// The name and every file that differs from it only by a number, sorted.
+    fn variants(&mut self, name: &str) -> Vec<String> {
+        let key = name.to_lowercase();
+        if let Some(v) = self.variants.get(&key) {
+            return v.clone();
+        }
+        let stem = sound_stem(name);
+        let ext = key.rsplit_once('.').map(|(_, e)| e.to_string()).unwrap_or_default();
+        let mut out: Vec<String> = self
+            .files
+            .keys()
+            .filter(|k| k.rsplit_once('.').is_some_and(|(_, e)| e == ext) && sound_stem(k) == stem)
+            .filter(|k| {
+                let base = k.rsplit_once('.').map(|(b, _)| b).unwrap_or(k);
+                base.len() > stem.len() || *k == &key
+            })
+            .cloned()
+            .collect();
+        out.sort();
+        if out.is_empty() {
+            out.push(key.clone());
+        }
+        self.variants.insert(key, out.clone());
+        out
     }
 
     fn get_or_load(&mut self, name: &str, sources: &mut Assets<AudioSource>) -> Option<(Handle<AudioSource>, f32)> {
@@ -497,7 +532,7 @@ fn main() {
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(Update, tint_shells.after(sync_structures).run_if(resource_equals(Mode::Island)))
-    .add_systems(Update, (play_sounds.after(mouse_actions).after(bridge_keys), sync_loops, ambient, drift_sky.after(camera_keys)).run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, (play_sounds.after(mouse_actions).after(bridge_keys), sync_loops, ambient, footsteps.after(animate), drift_sky.after(camera_keys)).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
         app.insert_resource(AutoScreenshot { path, delay: Timer::from_seconds(screenshot_at, TimerMode::Once) });
@@ -818,11 +853,19 @@ fn sync_loops(
             wanted.push((LoopKey::Structure(s.kind.clone(), s.cell), name, pos, view.edge(pos)));
         }
     }
+    let fs = &data.cfg.sounds.footsteps;
     for (i, u) in world.units.iter().enumerate() {
         if !u.alive || u.carried_by.is_some() {
             continue;
         }
-        if let Some(name) = names(&u.kind) {
+        // A flyer on the move hums its move sound; anything standing, its active sound.
+        let moving_air = u.is_air && u.is_moving();
+        let name = if moving_air {
+            data.install.type_def(&u.kind).and_then(|d| d.get_str(&fs.property)).map(str::to_string).or_else(|| names(&u.kind))
+        } else {
+            names(&u.kind)
+        };
+        if let Some(name) = name {
             let pos = unit_to_world(u, g);
             wanted.push((LoopKey::Unit(i), name, pos, view.edge(pos)));
         }
@@ -847,6 +890,47 @@ fn sync_loops(
         let Some((handle, base_db)) = bank.get_or_load(&name, &mut sources) else { continue };
         let Some(gain) = gain_at(&view, pos, base_db, &data) else { continue };
         commands.spawn((AudioPlayer::new(handle), PlaybackSettings::LOOP.with_volume(gain), ObjectLoop(key, name)));
+    }
+}
+
+/// A walker's steps follow its walk animation: whenever the frame passes a
+/// step point, one of the type's numbered step sounds plays at the unit.
+#[allow(clippy::too_many_arguments)]
+fn footsteps(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    mut bank: ResMut<SoundBank>,
+    mut sources: ResMut<Assets<AudioSource>>,
+    cameras: Query<(&Camera, &GlobalTransform, &Projection), With<Camera2d>>,
+    layers: Query<(&UnitLayer, &ShapeSprite)>,
+    mut last: Local<HashMap<usize, (usize, usize)>>,
+) {
+    let Some(world) = sim.world.as_ref() else { return };
+    let Some(view) = View::of(&cameras) else { return };
+    let fs = &data.cfg.sounds.footsteps;
+    let g = data.grid();
+    for (layer, shape) in &layers {
+        if layer.shadow || !shape.playing || shape.sequence.is_empty() {
+            continue;
+        }
+        let Some(unit) = world.units.get(layer.unit).filter(|u| u.alive && !u.is_air) else { continue };
+        let entry = last.entry(layer.unit).or_insert((usize::MAX, 0));
+        if entry.0 == shape.step {
+            continue;
+        }
+        entry.0 = shape.step;
+        let stride = (shape.sequence.len() / fs.per_cycle as usize).max(1);
+        if shape.step % stride != 0 {
+            continue;
+        }
+        let Some(name) = data.install.type_def(&unit.kind).and_then(|d| d.get_str(&fs.property)).map(str::to_string) else { continue };
+        let names = if fs.variants { bank.variants(&name) } else { vec![name] };
+        let pick = names[entry.1 % names.len()].clone();
+        entry.1 += 1;
+        let Some((handle, base_db)) = bank.get_or_load(&pick, &mut sources) else { continue };
+        let Some(gain) = gain_at(&view, unit_to_world(unit, g), base_db, &data) else { continue };
+        commands.spawn((AudioPlayer::new(handle), PlaybackSettings::DESPAWN.with_volume(gain)));
     }
 }
 
