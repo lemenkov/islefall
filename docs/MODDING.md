@@ -24,6 +24,8 @@ game's manual.
 Changing a flag list under `[flags]` changes which types the simulation
 treats as walk-blocking, island-creating, geysers, Temples and so on.
 Adding a piece to `[bridges].pieces` puts it into every player's queue.
+`[production]` sets the slots per Workshop and the types a Temple provides
+without one.
 
 ## rules.rhai
 
@@ -43,6 +45,7 @@ Available hooks:
 - `salvage_refund(cost, hp, max_hp, refund_percent)` -> int
 - `knowledge_grant(known_bits, all_bits)` -> int or `()`
 - `target_priority(threat, distance, is_unit)` -> int, higher wins
+- `workshop_can_produce(workshop_theme, type_theme, type_level)` -> bool
 
 ## Maps
 
