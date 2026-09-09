@@ -46,7 +46,7 @@ use islefall_data::{Installation, Picture};
 use bevy::audio::{AudioPlayer, AudioSink, AudioSinkPlayback, AudioSource, GlobalVolume, PlaybackSettings, Volume};
 use islefall_sim::config::Grid;
 use islefall_sim::map::{self, MapDef};
-use islefall_sim::{Ai, AiMove, Cell, Config, Dir8, IslandMap, Piece, Scripts, TypeRules, Unit, World};
+use islefall_sim::{Ai, AiMove, Applied, Cell, Command, Config, Dir8, IslandMap, Replay, Scripts, TypeRules, Unit, World};
 use sprites::FrameInfo;
 use world::{BridgeTile, LoadedShape, ShapeLibrary, StructureSprite, TerrainTile, Z_SHADOW, Z_SKY, Z_STRUCTURE, Z_UNIT};
 
@@ -64,8 +64,8 @@ enum Mode {
 /// What a right-click does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Tool {
-    /// A bridge piece taken from queue slot `.0`, rotated as `.1`.
-    Bridge(usize, Piece),
+    /// A bridge piece taken from queue slot `.0`, turned `.1` quarter turns.
+    Bridge(usize, u8),
     Drop(String),
     Spawn(String),
 }
@@ -368,6 +368,38 @@ impl Sim {
     }
 }
 
+/// Commands recorded to a file as they are given, and a file being played back.
+#[derive(Resource, Default)]
+struct Recording {
+    record: Option<(PathBuf, Replay)>,
+    replay: Option<Replay>,
+}
+
+impl Recording {
+    /// Give a command for the local player: apply it, tell the status line,
+    /// and record it if recording.
+    fn issue(&mut self, w: &mut World, scripts: &Scripts, status: &mut Status, cmd: Command) -> Option<Applied> {
+        let tick = w.tick;
+        let result = w.apply(0, &cmd, scripts);
+        if let Some((path, replay)) = self.record.as_mut() {
+            replay.record(tick, 0, cmd, result.is_ok());
+            if let Err(e) = replay.save(&*path) {
+                warn!("cannot write {}: {e}", path.display());
+            }
+        }
+        match result {
+            Ok(a) => {
+                status.say(a.message.clone());
+                Some(a)
+            }
+            Err(e) => {
+                status.say(e);
+                None
+            }
+        }
+    }
+}
+
 /// The last thing the game had to say, shown on screen.
 #[derive(Resource, Default)]
 struct Status(String);
@@ -488,6 +520,18 @@ fn main() {
     let unit_tool = cfg.controls.unit_tools[0].clone();
     let volume = std::env::var("ISLEFALL_VOLUME").ok().and_then(|s| s.parse().ok()).unwrap_or(cfg.sounds.volume);
     let sky_first = cfg.sounds.ambient.sky_seconds[0];
+    let mut recording = Recording::default();
+    if let Some(path) = std::env::var_os("ISLEFALL_RECORD") {
+        recording.record = Some((PathBuf::from(path), Replay { map: map_name.clone(), commands: Vec::new() }));
+    }
+    if let Some(path) = std::env::var_os("ISLEFALL_REPLAY") {
+        let replay = Replay::load(&path).unwrap_or_else(|e| fail(format!("{}: {e}", PathBuf::from(&path).display())));
+        if replay.map != map_name {
+            warn!("replay was recorded on map {} but this is {map_name}", replay.map);
+        }
+        info!("replaying {} commands from {}", replay.commands.len(), PathBuf::from(&path).display());
+        recording.replay = Some(replay);
+    }
 
     let mut app = App::new();
     app.add_plugins(
@@ -509,6 +553,7 @@ fn main() {
     .init_resource::<ShapeLibrary>()
     .init_resource::<Sim>()
     .init_resource::<Status>()
+    .insert_resource(recording)
     .insert_resource(Player { tool: Tool::Spawn(unit_tool), selected: 0 })
     .insert_resource(Viewer {
         type_index: 0,
@@ -779,11 +824,21 @@ fn spawn_viewer_shape(
     spawn_animated(commands, shape, animation, Vec2::ZERO, Z_UNIT, true);
 }
 
-fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>) {
+fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>, rec: Res<Recording>) {
     if viewer.paused {
         return;
     }
     let Sim { world: Some(world), ais } = &mut *sim else { return };
+    if let Some(replay) = rec.replay.as_ref() {
+        let refused = replay.play_tick(world, &data.scripts);
+        if refused > 0 {
+            warn!("tick {}: {refused} replayed command(s) came out differently: the game has drifted from the recording", world.tick);
+        }
+    }
+    let every = if data.cfg.controls.hash_every_seconds > 0.0 { data.cfg.ticks(data.cfg.controls.hash_every_seconds) as u64 } else { 0 };
+    if every > 0 && world.tick % every == 0 {
+        info!("tick {} hash {:016x}", world.tick, world.hash());
+    }
     world.step(&data.scripts);
     let (shooter, generator) = (data.cfg.ai.shooter.clone(), data.cfg.ai.generator.clone());
     let kit = islefall_sim::ai::AiKit { shooter: (shooter.clone(), data.rules(&shooter)), generator: (generator.clone(), data.rules(&generator)) };
@@ -993,7 +1048,7 @@ fn title(sim: Res<Sim>, data: Res<GameData>, mut windows: Query<&mut Window, Wit
 fn hud(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, status: Res<Status>, mut texts: Query<&mut Text, With<Hud>>) {
     let w = sim.world();
     let tool = match &player.tool {
-        Tool::Bridge(slot, piece) => format!("bridge piece {} (slot {})", piece.name, slot + 1),
+        Tool::Bridge(slot, _) => format!("bridge piece {} (slot {})", w.queue.slots.get(*slot).map(|p| p.name.as_str()).unwrap_or("?"), slot + 1),
         Tool::Drop(stem) | Tool::Spawn(stem) => stem.clone(),
     };
     let opponents = w.players.iter().filter(|&&o| o != 0 && !w.out.contains(&o)).count();
@@ -1132,6 +1187,7 @@ fn mouse_actions(
     mut player: ResMut<Player>,
     mut sim: ResMut<Sim>,
     mut status: ResMut<Status>,
+    mut rec: ResMut<Recording>,
 ) {
     let left = buttons.just_pressed(MouseButton::Left);
     let right = buttons.just_pressed(MouseButton::Right);
@@ -1142,60 +1198,33 @@ fn mouse_actions(
     let w = sim.world_mut();
     if left {
         let sel = player.selected;
+        // Selecting is local; everything else is a command.
         if let Some(i) = w.units.iter().position(|u| u.alive && u.owner == 0 && u.carried_by.is_none() && u.cell() == cell) {
             player.selected = i;
-            info!("selected unit {i} ({})", w.units[i].kind);
-        } else if let Some(p) = w.units.iter().position(|u| u.alive && u.owner != 0 && u.is_priest && u.cell() == cell) {
-            if w.order_capture(sel, p) {
-                info!("unit {sel} sent to capture the priest");
-            } else {
-                info!("unit {sel} cannot capture: needs a Transport and a stunned priest");
-            }
-        } else if let Some(a) = w.structures.iter().position(|s| s.is_altar && s.owner == 0 && s.covers(cell)) {
-            if w.order_sacrifice(sel, a) {
-                info!("unit {sel} carries the priest to the altar");
-            } else if w.command_move(sel, cell) {
-                info!("unit {sel} ordered to {cell:?}");
-            }
-        } else if let Some(o) = w.structures.iter().position(|s| s.is_obelisk && s.covers(cell)) {
-            if w.order_read(sel, o) {
-                status.say(format!("unit {sel} goes to read the Obelisk"));
-            } else {
-                status.say(format!("unit {sel} cannot read it: needs a free Transport and an Obelisk with a Spell"));
-            }
-        } else if let Some(g) = w.structures.iter().position(|s| s.stock > 0 && s.covers(cell)) {
-            if w.order_harvest(sel, g) {
-                info!("unit {sel} harvesting geyser {g}");
-            } else {
-                info!("unit {sel} cannot harvest geyser {g}: needs a temple and a bridge connection");
-            }
-        } else if w.command_move(sel, cell) {
-            info!("unit {sel} ordered to {cell:?}");
-        } else {
-            info!("{cell:?} is unreachable");
+            status.say(format!("selected unit {i} ({})", w.units[i].kind));
+            return;
         }
+        let cmd = if let Some(p) = w.units.iter().position(|u| u.alive && u.owner != 0 && u.is_priest && u.cell() == cell) {
+            Command::Capture { unit: sel, priest: p }
+        } else if let Some(a) = w.structures.iter().position(|s| s.is_altar && s.owner == 0 && s.covers(cell)).filter(|_| w.units.get(sel).is_some_and(|u| u.carrying.is_some())) {
+            Command::Sacrifice { unit: sel, altar: a }
+        } else if let Some(o) = w.structures.iter().position(|s| s.is_obelisk && s.covers(cell)) {
+            Command::Read { unit: sel, obelisk: o }
+        } else if let Some(g) = w.structures.iter().position(|s| s.stock > 0 && s.covers(cell)) {
+            Command::Harvest { unit: sel, geyser: g }
+        } else {
+            Command::Move { unit: sel, to: cell }
+        };
+        rec.issue(w, &data.scripts, &mut status, cmd);
         return;
     }
-    match player.tool.clone() {
-        Tool::Bridge(slot, piece) => match w.place_piece(&piece.cells_at(cell)) {
-            Ok(()) => {
-                info!("{} piece placed at {cell:?}", piece.name);
-                w.queue.refill(slot);
-                player.tool = Tool::Bridge(slot, w.queue.slots[slot].clone());
-            }
-            Err(e) => status.say(format!("cannot place {}: {e}", piece.name)),
-        },
-        Tool::Drop(stem) => match w.drop_structure(&stem, &data.rules(&stem), cell) {
-            Ok(_) => status.say(format!("{stem} placed; a stream will build it")),
-            Err(e) => status.say(format!("cannot drop {stem}: {e}")),
-        },
-        Tool::Spawn(stem) => match w.place_unit_for(0, &stem, &data.rules(&stem), cell) {
-            Ok(i) => {
-                player.selected = i;
-                status.say(format!("{stem} placed as unit {i}"));
-            }
-            Err(e) => status.say(format!("cannot place {stem}: {e}")),
-        },
+    let cmd = match player.tool.clone() {
+        Tool::Bridge(slot, rotations) => Command::PlacePiece { slot, rotations, at: cell },
+        Tool::Drop(stem) => Command::Drop { kind: stem, at: cell },
+        Tool::Spawn(stem) => Command::PlaceUnit { kind: stem, at: cell },
+    };
+    if let Some(Applied { unit: Some(i), .. }) = rec.issue(w, &data.scripts, &mut status, cmd) {
+        player.selected = i;
     }
 }
 
@@ -1215,67 +1244,45 @@ fn key_code(name: &str) -> Option<KeyCode> {
 
 const DIGIT_KEYS: [KeyCode; 9] = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9];
 
-fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<GameData>, mut player: ResMut<Player>, mut status: ResMut<Status>) {
+fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<GameData>, mut player: ResMut<Player>, mut status: ResMut<Status>, mut rec: ResMut<Recording>) {
     if keys.just_pressed(KeyCode::KeyX) || keys.just_pressed(KeyCode::KeyY) {
         let sel = player.selected;
-        let w = sim.world_mut();
-        if keys.just_pressed(KeyCode::KeyX) {
-            match w.order_cast(sel) {
-                Ok(()) => status.say(format!("unit {sel} casts {}", w.units[sel].spell.as_deref().unwrap_or("?"))),
-                Err(islefall_sim::DropError::NotInProduction) => status.say(format!("unit {sel} knows no Spell; read an Obelisk or pray")),
-                Err(e) => status.say(format!("unit {sel} cannot cast: {e}")),
-            }
-        } else if w.order_pray(sel) {
-            status.say(format!("unit {sel} prays"));
-        } else {
-            status.say(format!("unit {sel} cannot pray: needs a free High Priest without a Spell"));
-        }
+        let cmd = if keys.just_pressed(KeyCode::KeyX) { Command::Cast { unit: sel } } else { Command::Pray { unit: sel } };
+        rec.issue(sim.world_mut(), &data.scripts, &mut status, cmd);
         return;
     }
-    let w = sim.world();
     if keys.just_pressed(KeyCode::KeyR) {
-        if let Tool::Bridge(slot, piece) = &player.tool {
-            player.tool = Tool::Bridge(*slot, piece.rotated());
+        if let Tool::Bridge(slot, rotations) = &player.tool {
+            player.tool = Tool::Bridge(*slot, (rotations + 1) % 4);
         }
         return;
     }
     let slot_keys: Vec<Option<KeyCode>> = data.cfg.controls.slot_keys.iter().map(|k| key_code(k)).collect();
-    if let Some(slot) = slot_keys.iter().position(|k| k.is_some_and(|k| keys.just_pressed(k))).filter(|&i| i < w.queue.slots.len()) {
-        player.tool = Tool::Bridge(slot, w.queue.slots[slot].clone());
-        info!("tool: bridge piece {} from slot {slot}", w.queue.slots[slot].name);
+    if let Some(slot) = slot_keys.iter().position(|k| k.is_some_and(|k| keys.just_pressed(k))).filter(|&i| i < sim.world().queue.slots.len()) {
+        player.tool = Tool::Bridge(slot, 0);
+        status.say(format!("tool: bridge piece {} from slot {}", sim.world().queue.slots[slot].name, slot + 1));
         return;
     }
     let unit_key = data.cfg.controls.unit_keys.iter().position(|k| key_code(k).is_some_and(|k| keys.just_pressed(k)));
-    if let Some(i) = unit_key {
-        let stem = data.cfg.controls.unit_tools[i].clone();
-        let rules = data.rules(&stem);
-        let w = sim.world_mut();
-        match w.put_into_production(0, &stem, &rules, &data.scripts) {
-            Ok(ws) => status.say(format!("{stem} in production at {} ({} of {} slots used)", w.structures[ws].kind, w.structures[ws].production.len(), w.structures[ws].slots)),
-            Err(islefall_sim::ProductionError::NotProducible) => {}
-            Err(e) => status.say(format!("{stem}: {e}")),
-        }
-        player.tool = Tool::Spawn(stem);
-    } else if let Some(i) = DIGIT_KEYS.iter().position(|k| keys.just_pressed(*k)).filter(|&i| i < data.cfg.controls.build_tools.len()) {
-        let stem = data.cfg.controls.build_tools[i].clone();
-        // Picking a Battle unit puts it into production at a Workshop, as the manual's menu would.
-        let rules = data.rules(&stem);
-        let w = sim.world_mut();
-        match w.put_into_production(0, &stem, &rules, &data.scripts) {
-            Ok(ws) => status.say(format!("{stem} in production at {} ({} of {} slots used)", w.structures[ws].kind, w.structures[ws].production.len(), w.structures[ws].slots)),
-            Err(islefall_sim::ProductionError::NotProducible) => {}
-            Err(e) => status.say(format!("{stem}: {e}")),
-        }
-        player.tool = Tool::Drop(stem);
-    } else {
-        return;
+    let build_key = DIGIT_KEYS.iter().position(|k| keys.just_pressed(*k)).filter(|&i| i < data.cfg.controls.build_tools.len());
+    let (stem, spawn) = match (unit_key, build_key) {
+        (Some(i), _) => (data.cfg.controls.unit_tools[i].clone(), true),
+        (None, Some(i)) => (data.cfg.controls.build_tools[i].clone(), false),
+        _ => return,
+    };
+    // Picking a Battle unit puts it into production at a Workshop, as the manual's menu would.
+    let rules = data.rules(&stem);
+    if rules.energy.is_some() && !sim.world().in_production(0, &stem) {
+        rec.issue(sim.world_mut(), &data.scripts, &mut status, Command::Produce { kind: stem.clone() });
     }
+    player.tool = if spawn { Tool::Spawn(stem) } else { Tool::Drop(stem) };
     info!("tool: {:?}", player.tool);
 }
 
 /// Crack, harden, destroy or salvage under the cursor.
 fn bridge_keys(
     mut status: ResMut<Status>,
+    mut rec: ResMut<Recording>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform)>,
@@ -1290,35 +1297,20 @@ fn bridge_keys(
     }
     let Some(cell) = cursor_cell(&windows, &cameras, data.grid()) else { return };
     let w = sim.world_mut();
-    if upgrade {
-        if let Some(i) = w.structures.iter().position(|s| s.owner == 0 && s.slots > 0 && s.covers(cell)) {
-            match w.upgrade_workshop(0, i) {
-                Ok(level) => status.say(format!("{} upgraded to level {level}: {} slots", w.structures[i].kind, w.structures[i].slots)),
-                Err(e) => status.say(format!("cannot upgrade {}: {e}", w.structures[i].kind)),
-            }
-        }
-        return;
-    }
-    if salvage {
-        if let Some(i) = w.structures.iter().position(|s| s.owner == 0 && s.covers(cell)) {
-            let kind = w.structures[i].kind.clone();
-            match w.salvage(i, &data.scripts) {
-                Some(refund) => status.say(format!("salvaged {kind} for {refund} Storm Power")),
-                None => status.say(format!("cannot salvage {kind}")),
-            }
-        }
-        return;
-    }
-    if crack {
-        info!("crack {cell:?}: {}", w.crack_bridge(cell));
+    let cmd = if upgrade {
+        let Some(i) = w.structures.iter().position(|s| s.owner == 0 && s.slots > 0 && s.covers(cell)) else { return };
+        Command::Upgrade { structure: i }
+    } else if salvage {
+        let Some(i) = w.structures.iter().position(|s| s.owner == 0 && s.covers(cell)) else { return };
+        Command::Salvage { structure: i }
+    } else if crack {
+        Command::CrackBridge { at: cell }
     } else if harden {
-        info!("harden {cell:?}: {}", w.harden_bridge(cell));
+        Command::HardenBridge { at: cell }
     } else {
-        let before = w.bridges.len();
-        if w.destroy_bridge(cell) {
-            info!("destroyed {cell:?}; {} bridge cells fell", before - 1 - w.bridges.len());
-        }
-    }
+        Command::DestroyBridge { at: cell }
+    };
+    rec.issue(w, &data.scripts, &mut status, cmd);
 }
 
 /// Show the current piece or footprint under the cursor, green when it can go there.
@@ -1338,7 +1330,11 @@ fn ghost(
     let Some(cell) = cursor_cell(&windows, &cameras, g) else { return };
     let w = sim.world();
     let (cells, ok) = match &player.tool {
-        Tool::Bridge(_, piece) => {
+        Tool::Bridge(slot, rotations) => {
+            let Some(mut piece) = w.queue.slots.get(*slot).cloned() else { return };
+            for _ in 0..(*rotations % 4) {
+                piece = piece.rotated();
+            }
             let cells = piece.cells_at(cell);
             let ok = w.can_place_piece_for(0, &cells).is_ok();
             (cells, ok)

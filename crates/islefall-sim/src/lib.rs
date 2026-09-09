@@ -6,6 +6,7 @@
 //! crate reads this state and draws it; it never drives it.
 
 pub mod ai;
+pub mod command;
 pub mod config;
 pub mod grid;
 pub mod map;
@@ -29,4 +30,5 @@ pub use pieces::{Piece, PieceQueue};
 pub use rules::{EnergyNeed, TypeRules, Walk};
 pub use structure::{Structure, Weapon};
 pub use unit::{Dir8, Pos, Task, Unit};
+pub use command::{Applied, Command, Entry, Replay};
 pub use world::{BridgeState, DropError, Event, EventKind, PieceError, ProductionError, World, speed_per_tick};

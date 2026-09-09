@@ -211,6 +211,8 @@ pub struct World {
     pub doomed: BTreeMap<Cell, u32>,
     /// The pieces on offer.
     pub queue: PieceQueue,
+    /// Other players' piece queues, made on first use.
+    pub queues: BTreeMap<u8, PieceQueue>,
     /// Storm Power reserve per owner (index = owner).
     pub powers: Vec<i32>,
     /// Knowledge bits (`techBit`) each owner holds.
@@ -258,6 +260,7 @@ impl World {
             units: Vec::new(),
             doomed: BTreeMap::new(),
             queue,
+            queues: BTreeMap::new(),
             powers: vec![0; players],
             known_tech: vec![BTreeSet::new(); players],
             last_shots: Vec::new(),

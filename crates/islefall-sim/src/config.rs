@@ -375,6 +375,8 @@ pub struct Controls {
     pub animation_fps: f32,
     pub screenshot_seconds: f32,
     pub palette: String,
+    /// Log the world's hash this often (0 for never), to compare runs.
+    pub hash_every_seconds: f64,
 }
 
 #[derive(Debug)]

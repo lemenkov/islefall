@@ -228,6 +228,9 @@ animation_fps = 10.0
 screenshot_seconds = 1.5
 # Palette file stem from d/ used for all sprites (the game's fixed palette).
 palette = "gifcloud"
+# Log the world's hash this often in seconds (0 never): two runs of one
+# replay must log the same hashes.
+hash_every_seconds = 10.0
 
 [sounds]
 # Directory of sound files inside the NetStorm installation.

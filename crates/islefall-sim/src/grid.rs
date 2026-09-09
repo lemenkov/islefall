@@ -9,7 +9,7 @@
 
 use crate::config::Grid;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct Cell {
     pub x: i32,
     pub y: i32,
