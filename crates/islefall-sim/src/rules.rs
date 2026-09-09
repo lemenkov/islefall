@@ -39,6 +39,12 @@ pub struct TypeRules {
     pub is_unit: bool,
     /// Cells per second for units.
     pub speed: f64,
+    /// Storm Power to build, from the `cost` property (0 when absent).
+    pub cost: i32,
+    /// A Storm Geyser: holds `cost` worth of crystals to harvest.
+    pub is_geyser: bool,
+    /// A Temple (`residence`): where crystals become Storm Power.
+    pub is_temple: bool,
 }
 
 impl TypeRules {
@@ -59,6 +65,9 @@ impl TypeRules {
             may_drop_on_rim: def.has_flag("mayDropOnRim"),
             is_unit: def.has_flag("walker") || def.has_flag("flyer") || def.has_flag("balloon"),
             speed: def.get_f64("speed").unwrap_or(1.0),
+            cost: def.get_i64("cost").unwrap_or(0).clamp(0, i32::MAX as i64) as i32,
+            is_geyser: def.has_flag("geyser"),
+            is_temple: def.has_flag("residence"),
         }
     }
 
@@ -73,6 +82,9 @@ impl TypeRules {
             may_drop_on_rim: false,
             is_unit: false,
             speed: 1.0,
+            cost: 0,
+            is_geyser: false,
+            is_temple: false,
         }
     }
 }
@@ -94,5 +106,8 @@ mod tests {
         assert!(r.is_unit);
         assert_eq!(r.speed, 1.8);
         assert_eq!(r.walk, Walk::Free);
+        let t = typefile::parse("typename g\ntypeflags geyser dropBlocking;\n{\n cost = 2000;\n}\nA00 : : \"a.gif\" #0;\n").unwrap();
+        let r = TypeRules::from_type(&t);
+        assert!(r.is_geyser && r.cost == 2000);
     }
 }

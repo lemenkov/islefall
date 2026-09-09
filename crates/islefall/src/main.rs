@@ -3,8 +3,9 @@
 //!
 //! Two modes, chosen with `ISLEFALL_MODE`:
 //! - `island` (default): an island with the altar and the High Priest,
-//!   driven by the simulation. Left-click selects a unit or sends the
-//!   selected unit somewhere; right-click acts with the current tool.
+//!   driven by the simulation. Left-click selects a unit, sends the selected
+//!   unit somewhere, or, on a Storm Geyser, sets it harvesting; right-click
+//!   acts with the current tool. The window title shows Storm Power.
 //!   Tools: `Q`, `W`, `A`, `S` pick a bridge piece from the four slots on
 //!   offer (`R` rotates it), `1`..`5` drop a building, `U` spawn a golem.
 //!   `Delete` destroys, `C` cracks and `H` hardens the bridge cell under the
@@ -53,6 +54,8 @@ const BUILD_TOOLS: [(KeyCode, &str); 5] = [
     (KeyCode::Digit5, "treetwo"),
 ];
 const UNIT_TOOL: &str = "sunwalker";
+/// Storm Power to start the demo with.
+const START_POWER: i32 = 1500;
 
 /// Row-based draw order: things lower on screen draw over things above them.
 fn depth_z(base: f32, row: f32) -> f32 {
@@ -197,7 +200,7 @@ fn main() {
     .add_systems(Update, (common_keys, animate, auto_screenshot))
     .add_systems(
         Update,
-        (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, sync_units, sync_bridges, sync_structures, sync_platforms)
+        (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, sync_units, sync_bridges, sync_structures, sync_platforms)
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
@@ -252,40 +255,47 @@ fn setup_island(
 ) {
     let install = &data.install;
     let palette = install.palette(&data.palette).expect("palette checked at start-up");
-    let (w, h) = (14, 10);
+    let (w, h) = (16, 10);
     let mut island = IslandMap::rect(Cell::new(0, 0), w, h);
     if std::env::var("ISLEFALL_ISLAND").as_deref() == Ok("cross") {
         // A cross has all four inside corners; used to check the terrain set.
-        for c in [(0, 0), (1, 0), (0, 1), (13, 0), (12, 0), (13, 1), (0, 9), (1, 9), (0, 8), (13, 9), (12, 9), (13, 8)] {
+        for c in [(0, 0), (1, 0), (0, 1), (15, 0), (14, 0), (15, 1), (0, 9), (1, 9), (0, 8), (15, 9), (14, 9), (15, 8)] {
             island.remove(Cell::new(c.0, c.1));
         }
     } else {
-        for c in [Cell::new(13, 0), Cell::new(12, 0), Cell::new(13, 1)] {
+        for c in [Cell::new(15, 0), Cell::new(14, 0), Cell::new(15, 1)] {
             island.remove(c);
         }
     }
     world::spawn_island(commands, install, lib, palette, images, layouts, &island, Theme::Sun, false);
     sim.world.islands.push(island);
+    // A small neutral island to the east with a Storm Geyser on it.
+    let geyser_isle = IslandMap::rect(Cell::new(28, 5), 7, 7);
+    world::spawn_island(commands, install, lib, palette, images, layouts, &geyser_isle, Theme::Sun, false);
+    sim.world.islands.push(geyser_isle);
 
     // The simulation owns everything else; sprites follow it through the sync systems.
-    for (stem, cell) in [("dais", Cell::new(9, 7)), ("treetwo", Cell::new(2, 3)), ("treetwo", Cell::new(12, 7))] {
+    // The starting layout is free; the reserve is set once it stands.
+    sim.world.storm_power = i32::MAX / 2;
+    for (stem, cell) in [("dais", Cell::new(9, 7)), ("residence", Cell::new(13, 6)), ("treetwo", Cell::new(2, 3)), ("treetwo", Cell::new(12, 8)), ("geyser", Cell::new(32, 9))] {
         if let Err(e) = sim.world.drop_structure(stem, &data.rules(stem), cell) {
             warn!("{stem} at {cell:?}: {e}");
         }
     }
     // A bridge off the east edge that uses straights, a cross, T pieces, corners and ends.
-    for (x, y) in [(14, 4), (15, 4), (16, 4), (17, 4), (18, 4), (18, 3), (18, 2), (16, 3), (16, 5), (16, 6), (19, 3), (17, 2), (15, 5), (17, 3)] {
+    for (x, y) in [(16, 4), (17, 4), (18, 4), (19, 4), (20, 4), (20, 3), (20, 2), (18, 3), (18, 5), (18, 6), (21, 3), (19, 2), (17, 5), (19, 3)] {
         sim.world.place_bridge(Cell::new(x, y));
     }
-    // A battery dropped in the sky off the bridge end at (19,3) makes its own island.
-    if let Err(e) = sim.world.drop_structure("sunbattery", &data.rules("sunbattery"), Cell::new(22, 4)) {
+    // A battery dropped in the sky off the bridge end at (21,3) makes its own island.
+    if let Err(e) = sim.world.drop_structure("sunbattery", &data.rules("sunbattery"), Cell::new(24, 4)) {
         warn!("sunbattery: {e}");
     }
+    sim.world.storm_power = START_POWER;
     if let Some(i) = sim.world.spawn_unit("priest", &data.rules("priest"), Cell::new(2, 8)) {
-        sim.world.order_move(i, Cell::new(21, 3));
+        sim.world.order_move(i, Cell::new(23, 3));
     }
     if let Some(i) = sim.world.spawn_unit(UNIT_TOOL, &data.rules(UNIT_TOOL), Cell::new(5, 8)) {
-        sim.world.order_move(i, Cell::new(11, 8));
+        sim.world.order_move(i, Cell::new(11, 6));
     }
 
     let mut centre = (world::cell_to_world(Cell::new(0, 0)) + world::cell_to_world(Cell::new(w - 1, h - 1))) / 2.0;
@@ -295,7 +305,7 @@ fn setup_island(
         }
     }
     commands.spawn((Camera2d, zoomed_projection(), Transform::from_translation(centre.extend(0.0))));
-    info!("island scene: {} cells, {} structures, {} bridge cells", sim.world.islands[0].len(), sim.world.structures.len(), sim.world.bridges.len());
+    info!("island scene: {} islands, {} structures, {} bridge cells, {} Storm Power", sim.world.islands.len(), sim.world.structures.len(), sim.world.bridges.len(), sim.world.storm_power);
 }
 
 /// World position of a unit's feet: cells to source pixels, y flipped.
@@ -385,6 +395,17 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>) {
     }
 }
 
+/// Keep the window title showing the Storm Power reserve.
+fn title(sim: Res<Sim>, mut windows: Query<&mut Window, With<PrimaryWindow>>, mut last: Local<Option<i32>>) {
+    if *last == Some(sim.world.storm_power) {
+        return;
+    }
+    *last = Some(sim.world.storm_power);
+    if let Ok(mut w) = windows.single_mut() {
+        w.title = format!("Islefall - Storm Power {}", sim.world.storm_power);
+    }
+}
+
 /// Give every simulation unit its sprites, then keep them at the simulated
 /// position with the facing animation; frozen when idle.
 #[allow(clippy::too_many_arguments)]
@@ -469,11 +490,18 @@ fn mouse_actions(
     }
     let Some(cell) = cursor_cell(&windows, &cameras) else { return };
     if left {
-        // Click on a unit selects it; otherwise move the selected unit.
+        // Click on a unit selects it; on a geyser, the selected unit harvests; otherwise it moves.
         if let Some(i) = sim.world.units.iter().position(|u| u.alive && u.pos.cell() == cell) {
             player.selected = i;
             info!("selected unit {i} ({})", sim.world.units[i].kind);
-        } else if sim.world.order_move(player.selected, cell) {
+        } else if let Some(g) = sim.world.structures.iter().position(|s| s.stock > 0 && s.covers(cell)) {
+            let sel = player.selected;
+            if sim.world.order_harvest(sel, g) {
+                info!("unit {sel} harvesting geyser {g}");
+            } else {
+                info!("unit {sel} cannot harvest geyser {g}: needs a temple and a bridge connection");
+            }
+        } else if sim.world.command_move(player.selected, cell) {
             info!("unit {} ordered to {cell:?}", player.selected);
         } else {
             info!("{cell:?} is unreachable");

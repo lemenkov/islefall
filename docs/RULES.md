@@ -87,17 +87,26 @@ influencing the space") are not modelled yet.
 - Facing uses the eight walk animations `A` to `H`: north, north-east, east,
   south-east, south, south-west, west, north-west.
 
-## Economy and combat, from the manual (not yet modelled)
+## Storm Power
 
-- Storm Power is the currency. Geysers hold 2000 units by default;
-  Transports (Golems, Air Ships) harvest Storm Crystals from a geyser and
-  bring them to the Temple. Ground Transports need a bridge connection.
-- Destroying an enemy unit rewards 25% of its Storm Power value.
-- Units cost Storm Power and need the right Energy (from Temples and
-  Generators) at the placement site; Workshops put Knowledge into
-  production.
-- Capturing a stunned enemy High Priest with a Transport and sacrificing
-  him on an Altar grants Knowledge.
+Storm Power is the currency (the manual). Islefall models:
+
+- A Storm Geyser (`geyser`, flag `geyser`) holds its `cost`, 2000, in
+  crystals. Geysers are placed by the map and cost nothing.
+- A Storm Crystal (`nugget`) is worth its `cost`, 200, so a Transport carries
+  200 per trip. Harvesting takes one second next to the geyser, delivering
+  one second next to the Temple; the unit repeats until the geyser is empty,
+  when it becomes an `emptygeyser`.
+- The Temple is read as the `residence` type (flag `residence`); crystals
+  handed in there become Storm Power.
+- Dropping a structure costs its `cost` property; bridge pieces and golems
+  are free, as in the manual ("the Temple gives you the power to create
+  bridges and Golems").
+
+Not yet modelled: harvesting by aerial Transports without bridges, the 25%
+refund for destroying enemy units, Energy requirements from Temples and
+Generators, Workshops putting Knowledge into production, and capturing and
+sacrificing enemy High Priests.
 
 ## Open questions
 

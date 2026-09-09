@@ -46,11 +46,14 @@ and `netstorm.tarc`:
 NETSTORM_DIR=~/games/NetStorm cargo run --release
 ```
 
-By default this shows a first scene: an island assembled from the terrain
-tiles, the altar, trees, a bridge, a battery on its own island at the
-bridge end, and two units walking under the simulation's control.
+By default this shows a first scene: a home island with the altar and the
+Temple, a bridge to a battery on its own islet, a neutral island with a
+Storm Geyser to connect to, and two units walking under the simulation's
+control.
 Left-click on a unit selects it, left-click elsewhere sends the selected unit
-there along a path around obstacles. Right-click acts with the current tool:
+there along a path around obstacles, and left-click on a Storm Geyser sets it
+harvesting crystals to the Temple. The window title shows the Storm Power
+reserve; drops cost their type's price. Right-click acts with the current tool:
 `Q`, `W`, `A`, `S` pick one of the four bridge pieces on offer (`R` rotates
 it), `1` to `5` drop a sun cannon, archer, battery, factory or tree, `U`
 spawns a golem. `Delete` destroys the bridge cell under the cursor, `C`

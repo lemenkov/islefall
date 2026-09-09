@@ -9,7 +9,7 @@ use crate::path::find_path_costed;
 use crate::pieces::PieceQueue;
 use crate::rules::{AVOID_COST, TypeRules, Walk};
 use crate::structure::Structure;
-use crate::unit::{Pos, Unit};
+use crate::unit::{Pos, Task, Unit};
 
 /// Simulation ticks per second. Rendering interpolates or samples; the
 /// simulation never sees wall-clock time.
@@ -18,6 +18,10 @@ pub const TICK_HZ: u32 = 30;
 pub const CRUMBLE_TICKS: u32 = 4 * TICK_HZ;
 /// Bridge pieces offered at once.
 pub const PIECE_SLOTS: usize = 4;
+/// Storm Power carried per trip: the `cost` of a Storm Crystal (`nugget`).
+pub const NUGGET_POWER: i32 = 200;
+/// Ticks a unit spends taking a crystal or handing it in.
+pub const WORK_TICKS: u32 = TICK_HZ;
 
 /// Condition of a bridge cell.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -63,6 +67,8 @@ pub enum DropError {
     OnRim(Cell),
     /// A unit stands on a footprint cell.
     UnitInTheWay(Cell),
+    /// The player cannot afford the type.
+    NotEnoughPower { cost: i32, have: i32 },
 }
 
 impl std::fmt::Display for DropError {
@@ -74,6 +80,7 @@ impl std::fmt::Display for DropError {
             DropError::Occupied(c) => write!(f, "{c:?} is occupied"),
             DropError::OnRim(c) => write!(f, "{c:?} is an island rim"),
             DropError::UnitInTheWay(c) => write!(f, "a unit stands on {c:?}"),
+            DropError::NotEnoughPower { cost, have } => write!(f, "costs {cost} Storm Power, have {have}"),
         }
     }
 }
@@ -99,6 +106,8 @@ pub struct World {
     pub doomed: BTreeMap<Cell, u32>,
     /// The pieces on offer.
     pub queue: PieceQueue,
+    /// The player's Storm Power reserve.
+    pub storm_power: i32,
 }
 
 impl Default for World {
@@ -115,6 +124,7 @@ impl Default for World {
             units: Vec::new(),
             doomed: BTreeMap::new(),
             queue: PieceQueue::new(PIECE_SLOTS, 0x5eed),
+            storm_power: 0,
         }
     }
 }
@@ -409,8 +419,16 @@ impl World {
     /// becomes platform ground.
     pub fn drop_structure(&mut self, kind: &str, rules: &TypeRules, cell: Cell) -> Result<usize, DropError> {
         self.can_drop(rules, cell)?;
+        // Geysers are placed by the map, not bought; everything else costs its type's price.
+        let price = if rules.is_geyser { 0 } else { rules.cost };
+        if price > self.storm_power {
+            return Err(DropError::NotEnoughPower { cost: price, have: self.storm_power });
+        }
+        self.storm_power -= price;
         let mut s = Structure::new(kind, cell, rules.foot_x, rules.foot_y, rules.walk);
         s.drop_blocking = rules.drop_blocking;
+        s.stock = if rules.is_geyser { rules.cost } else { 0 };
+        s.is_temple = rules.is_temple;
         if rules.creates_island {
             let mut changed = false;
             for c in s.cells() {
@@ -439,6 +457,102 @@ impl World {
         Some(self.units.len() - 1)
     }
 
+    /// Order a unit to harvest from the geyser at `geyser` and deliver to the
+    /// nearest temple. Fails if there is no temple, the geyser is empty, or the
+    /// geyser cannot be reached.
+    pub fn order_harvest(&mut self, unit: usize, geyser: usize) -> bool {
+        let Some(g) = self.structures.get(geyser) else { return false };
+        if g.stock <= 0 {
+            return false;
+        }
+        let Some(u) = self.units.get(unit).filter(|u| u.alive) else { return false };
+        let from = u.pos.cell();
+        let Some(temple) = self
+            .structures
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.is_temple)
+            .min_by_key(|(_, s)| (s.cell.x - from.x).abs() + (s.cell.y - from.y).abs())
+            .map(|(i, _)| i)
+        else {
+            return false;
+        };
+        if !self.walk_to_adjacent(unit, geyser) {
+            return false;
+        }
+        self.units[unit].task = Task::Harvest { geyser, temple, carrying: 0, work: 0 };
+        true
+    }
+
+    /// Path a unit to the nearest reachable cell next to a structure.
+    fn walk_to_adjacent(&mut self, unit: usize, structure: usize) -> bool {
+        let Some(from) = self.units.get(unit).map(|u| u.pos.cell()) else { return false };
+        let Some(s) = self.structures.get(structure) else { return false };
+        if s.is_adjacent(from) {
+            self.units[unit].path.clear();
+            return true;
+        }
+        let mut targets: Vec<Cell> = s.adjacent_cells().into_iter().filter(|&c| self.is_walkable(c)).collect();
+        targets.sort_by_key(|c| (c.x - from.x).abs() + (c.y - from.y).abs());
+        for t in targets {
+            if self.order_move(unit, t) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Advance standing tasks for units that are not walking.
+    fn run_tasks(&mut self) {
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            if !u.alive || u.is_moving() {
+                continue;
+            }
+            let Task::Harvest { geyser, temple, carrying, work } = u.task else { continue };
+            let at = u.pos.cell();
+            let (Some(g), Some(t)) = (self.structures.get(geyser), self.structures.get(temple)) else {
+                self.units[i].task = Task::Idle;
+                continue;
+            };
+            if carrying == 0 {
+                if g.stock <= 0 {
+                    self.units[i].task = Task::Idle;
+                } else if g.is_adjacent(at) {
+                    if work + 1 < WORK_TICKS {
+                        self.units[i].task = Task::Harvest { geyser, temple, carrying, work: work + 1 };
+                    } else {
+                        let take = NUGGET_POWER.min(g.stock);
+                        self.structures[geyser].stock -= take;
+                        if self.structures[geyser].stock == 0 {
+                            self.structures[geyser].kind = "emptygeyser".into();
+                            self.structure_version += 1;
+                        }
+                        self.units[i].task = Task::Harvest { geyser, temple, carrying: take, work: 0 };
+                        if !self.walk_to_adjacent(i, temple) {
+                            self.units[i].task = Task::Idle;
+                        }
+                    }
+                } else if !self.walk_to_adjacent(i, geyser) {
+                    self.units[i].task = Task::Idle;
+                }
+            } else if t.is_adjacent(at) {
+                if work + 1 < WORK_TICKS {
+                    self.units[i].task = Task::Harvest { geyser, temple, carrying, work: work + 1 };
+                } else {
+                    self.storm_power += carrying;
+                    let more = self.structures[geyser].stock > 0;
+                    self.units[i].task = if more { Task::Harvest { geyser, temple, carrying: 0, work: 0 } } else { Task::Idle };
+                    if more && !self.walk_to_adjacent(i, geyser) {
+                        self.units[i].task = Task::Idle;
+                    }
+                }
+            } else if !self.walk_to_adjacent(i, temple) {
+                self.units[i].task = Task::Idle;
+            }
+        }
+    }
+
     /// Order a unit to walk to `cell` along the cheapest walkable path.
     /// Returns `false` if the cell is unreachable.
     pub fn order_move(&mut self, unit: usize, cell: Cell) -> bool {
@@ -453,11 +567,20 @@ impl World {
         true
     }
 
+    /// A player's move order: cancels any standing task first.
+    pub fn command_move(&mut self, unit: usize, cell: Cell) -> bool {
+        if let Some(u) = self.units.get_mut(unit) {
+            u.task = Task::Idle;
+        }
+        self.order_move(unit, cell)
+    }
+
     /// Advance the simulation by one tick.
     pub fn step(&mut self) {
         for u in &mut self.units {
             u.step();
         }
+        self.run_tasks();
         self.crumble();
         self.tick += 1;
     }
@@ -654,6 +777,39 @@ mod tests {
         }
         w.queue.refill(0);
         assert_eq!(w.queue.slots.len(), PIECE_SLOTS);
+    }
+
+    #[test]
+    fn golems_harvest_a_geyser_into_the_temple() {
+        let mut w = world();
+        w.islands.push(IslandMap::rect(Cell::new(10, 0), 6, 6));
+        for x in 8..10 {
+            w.place_bridge(Cell::new(x, 1));
+        }
+        let geyser = TypeRules { foot_x: 3, foot_y: 3, cost: 500, is_geyser: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, cost: 100, ..TypeRules::plain() };
+        let g = w.drop_structure("geyser", &geyser, Cell::new(14, 4)).unwrap();
+        assert_eq!(w.storm_power, 0, "geysers are free");
+        assert_eq!(w.drop_structure("residence", &temple, Cell::new(2, 2)), Err(DropError::NotEnoughPower { cost: 100, have: 0 }));
+        w.storm_power = 100;
+        let t = w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        assert_eq!(w.storm_power, 0);
+        let golem = TypeRules { is_unit: true, speed: 3.0, ..TypeRules::plain() };
+        let u = w.spawn_unit("sunwalker", &golem, Cell::new(4, 1)).unwrap();
+        assert!(w.order_harvest(u, g));
+        assert!(matches!(w.units[u].task, Task::Harvest { .. }));
+        for _ in 0..6000 {
+            w.step();
+            if w.units[u].task == Task::Idle {
+                break;
+            }
+        }
+        assert_eq!(w.units[u].task, Task::Idle, "finished after the geyser ran dry");
+        assert_eq!(w.storm_power, 500, "all crystals delivered in trips of at most {NUGGET_POWER}");
+        assert_eq!(w.structures[g].stock, 0);
+        assert_eq!(w.structures[g].kind, "emptygeyser");
+        assert!(!w.order_harvest(u, g), "nothing left to harvest");
+        let _ = t;
     }
 
     #[test]

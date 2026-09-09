@@ -80,6 +80,14 @@ impl Pos {
     }
 }
 
+/// A standing order that outlives a single move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Task {
+    Idle,
+    /// Carry crystals from `geyser` to `temple` until the geyser is empty.
+    Harvest { geyser: usize, temple: usize, carrying: i32, work: u32 },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unit {
     /// Type file stem, e.g. `priest`.
@@ -92,11 +100,12 @@ pub struct Unit {
     pub speed: i32,
     /// Dead units stay in the list so indices remain stable.
     pub alive: bool,
+    pub task: Task,
 }
 
 impl Unit {
     pub fn new(kind: impl Into<String>, cell: Cell, speed: i32) -> Unit {
-        Unit { kind: kind.into(), pos: Pos::cell_centre(cell), facing: Dir8::S, path: VecDeque::new(), speed, alive: true }
+        Unit { kind: kind.into(), pos: Pos::cell_centre(cell), facing: Dir8::S, path: VecDeque::new(), speed, alive: true, task: Task::Idle }
     }
 
     pub fn is_moving(&self) -> bool {
