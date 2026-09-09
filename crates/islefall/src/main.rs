@@ -9,7 +9,8 @@
 //!   carried priest; right-click acts with the current tool. The window
 //!   title shows Storm Power and Knowledge.
 //!   Tools: `Q`, `W`, `A`, `S` pick a bridge piece from the four slots on
-//!   offer (`R` rotates it), `1`..`5` drop a building, `U` spawn a golem.
+//!   offer (`R` rotates it), `1`..`6` drop a building (`6`, the Wind
+//!   Generator, needs Knowledge from a sacrifice), `U` spawn a golem.
 //!   `Delete` destroys, `C` cracks and `H` hardens the bridge cell under the
 //!   cursor; `V` salvages the player's structure under the cursor. Arrow keys or WASD pan the camera, `-` and `=` zoom.
 //! - `viewer`: animates one object type at a time. `[` and `]` step
@@ -49,12 +50,13 @@ const DEFAULT_PALETTE: &str = "gifcloud";
 /// Camera pan speed in source pixels per second.
 const PAN_SPEED: f32 = 120.0;
 /// Buildings on the number keys.
-const BUILD_TOOLS: [(KeyCode, &str); 5] = [
+const BUILD_TOOLS: [(KeyCode, &str); 6] = [
     (KeyCode::Digit1, "suncannon"),
     (KeyCode::Digit2, "sunarcher"),
     (KeyCode::Digit3, "sunbattery"),
     (KeyCode::Digit4, "sunfactory"),
     (KeyCode::Digit5, "treetwo"),
+    (KeyCode::Digit6, "windbattery"),
 ];
 const UNIT_TOOL: &str = "sunwalker";
 /// Storm Power to start the demo with.
@@ -268,7 +270,7 @@ fn main() {
     .add_systems(Update, (common_keys, animate, auto_screenshot))
     .add_systems(
         Update,
-        (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
+        (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
@@ -336,13 +338,13 @@ fn setup_island(
     world::spawn_island(commands, install, lib, palette, images, layouts, &island, Theme::Sun, false);
     sim.world.push_island(island, 0);
     // The enemy island to the east with a Storm Geyser on it.
-    let geyser_isle = IslandMap::rect(Cell::new(28, 4), 9, 9);
+    let geyser_isle = IslandMap::rect(Cell::new(28, 4), 11, 11);
     world::spawn_island(commands, install, lib, palette, images, layouts, &geyser_isle, Theme::Sun, false);
     sim.world.push_island(geyser_isle, 1);
 
     // The simulation owns everything else; sprites follow it through the sync systems.
     // The starting layout is free and needs no Energy; both apply once it stands.
-    sim.world.storm_power = i32::MAX / 2;
+    sim.world.powers = [i32::MAX / 2; islefall_sim::world::MAX_PLAYERS];
     sim.world.energy_enforced = false;
     for (stem, cell) in [("dais", Cell::new(9, 7)), ("residence", Cell::new(13, 6)), ("treetwo", Cell::new(2, 3)), ("treetwo", Cell::new(12, 8)), ("geyser", Cell::new(34, 9))] {
         if let Err(e) = sim.world.drop_structure(stem, &data.rules(stem), cell) {
@@ -362,10 +364,15 @@ fn setup_island(
         warn!("enemy sunarcher: {e}");
     }
     // The enemy High Priest lives on the geyser island: stun, capture and sacrifice him.
-    if sim.world.spawn_unit_for(1, "priest", &data.rules("priest"), Cell::new(33, 11)).is_none() {
+    if sim.world.spawn_unit_for(1, "priest", &data.rules("priest"), Cell::new(30, 11)).is_none() {
         warn!("enemy priest could not be placed");
     }
-    sim.world.storm_power = START_POWER;
+    // The opponent's Temple and a golem, so it harvests its own geyser.
+    if let Err(e) = sim.world.drop_structure_for(1, "residence", &data.rules("residence"), Cell::new(35, 13)) {
+        warn!("enemy residence: {e}");
+    }
+    sim.world.spawn_unit_for(1, UNIT_TOOL, &data.rules(UNIT_TOOL), Cell::new(36, 6));
+    sim.world.powers = [START_POWER; islefall_sim::world::MAX_PLAYERS];
     sim.world.energy_enforced = true;
     // The opponent bridges towards our altar and drops shooters on the way.
     let altar = sim.world.structures.iter().find(|s| s.is_altar && s.owner == 0).map(|s| s.centre()).unwrap_or(Cell::new(6, 4));
@@ -384,7 +391,7 @@ fn setup_island(
         }
     }
     commands.spawn((Camera2d, zoomed_projection(), Transform::from_translation(centre.extend(0.0))));
-    info!("island scene: {} islands, {} structures, {} bridge cells, {} Storm Power", sim.world.islands.len(), sim.world.structures.len(), sim.world.bridges.len(), sim.world.storm_power);
+    info!("island scene: {} islands, {} structures, {} bridge cells, {} Storm Power", sim.world.islands.len(), sim.world.structures.len(), sim.world.bridges.len(), sim.world.storm_power());
 }
 
 /// World position of a unit's feet: cells to source pixels, y flipped.
@@ -485,14 +492,38 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>) {
 }
 
 /// Keep the window title showing the Storm Power reserve and Knowledge.
-fn title(sim: Res<Sim>, mut windows: Query<&mut Window, With<PrimaryWindow>>, mut last: Local<Option<(i32, u32)>>) {
-    let now = (sim.world.storm_power, sim.world.knowledge);
+fn title(sim: Res<Sim>, mut windows: Query<&mut Window, With<PrimaryWindow>>, mut last: Local<Option<(i32, u32, usize)>>) {
+    let now = (sim.world.storm_power(), sim.world.knowledge, sim.world.known_tech[0].len());
     if *last == Some(now) {
         return;
     }
     *last = Some(now);
     if let Ok(mut w) = windows.single_mut() {
-        w.title = format!("Islefall - Storm Power {} - Knowledge {}", now.0, now.1);
+        w.title = format!("Islefall - Storm Power {} - Knowledge {} ({} techs)", now.0, now.1, now.2);
+    }
+}
+
+/// Turn each sacrifice into the lowest Knowledge bit the owner lacks.
+fn grant_knowledge(mut sim: ResMut<Sim>, data: Res<GameData>) {
+    if sim.world.pending_knowledge.is_empty() {
+        return;
+    }
+    let mut bits: Vec<u8> = data.install.types.values().filter_map(|t| TypeRules::from_type(t).tech_bit).collect();
+    bits.sort_unstable();
+    bits.dedup();
+    let pending = std::mem::take(&mut sim.world.pending_knowledge);
+    for owner in pending {
+        if let Some(&bit) = bits.iter().find(|&&b| !sim.world.knows_tech(owner, b)) {
+            sim.world.grant_tech(owner, bit);
+            let unlocked: Vec<&str> = data
+                .install
+                .types
+                .iter()
+                .filter(|(_, t)| TypeRules::from_type(t).tech_bit == Some(bit))
+                .map(|(k, _)| k.as_str())
+                .collect();
+            info!("owner {owner} gains Knowledge {bit}: {unlocked:?}");
+        }
     }
 }
 
@@ -712,13 +743,16 @@ fn ghost(
     let (cells, ok) = match &player.tool {
         Tool::Bridge(_, piece) => {
             let cells = piece.cells_at(cell);
-            let ok = sim.world.can_place_piece(&cells).is_ok();
+            let ok = sim.world.can_place_piece_for(0, &cells).is_ok();
             (cells, ok)
         }
         Tool::Drop(stem) => {
             let rules = data.rules(stem);
             let probe = islefall_sim::Structure::new(*stem, cell, rules.foot_x, rules.foot_y, islefall_sim::Walk::Free);
-            let ok = sim.world.can_drop(&rules, cell).is_ok() && sim.world.check_energy(0, &rules, cell).is_ok();
+            let ok = sim.world.can_drop(&rules, cell).is_ok()
+                && sim.world.check_ownership(0, &rules, cell).is_ok()
+                && rules.tech_bit.is_none_or(|b| sim.world.knows_tech(0, b))
+                && sim.world.check_energy(0, &rules, cell).is_ok();
             (probe.cells().collect(), ok)
         }
         Tool::Spawn(_) => (vec![cell], sim.world.is_walkable(cell)),

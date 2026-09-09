@@ -84,6 +84,8 @@ pub struct TypeRules {
     pub energy: Option<EnergyNeed>,
     /// Energy produced (Generators and Temples).
     pub produces: Option<Theme>,
+    /// `techBit`: Knowledge needed before the type can be built, if any.
+    pub tech_bit: Option<u8>,
 }
 
 impl TypeRules {
@@ -119,6 +121,7 @@ impl TypeRules {
             is_altar: def.has_flag("dais"),
             energy: energy_need(def),
             produces: energy_produced(def),
+            tech_bit: def.get_i64("techBit").filter(|b| (0..=255).contains(b)).map(|b| b as u8),
         }
     }
 
@@ -152,6 +155,7 @@ impl TypeRules {
             is_altar: false,
             energy: None,
             produces: None,
+            tech_bit: None,
         }
     }
 }

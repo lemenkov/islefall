@@ -182,10 +182,25 @@ A first computer player, in `crates/islefall-sim/src/ai.rs`, moves every
 few seconds: it lays the piece and rotation from its own random queue that
 brings a bridge closest to the player's altar, attaching only to its own
 island edges and open bridge ends, and every third move drops a Sun Disc
-Thrower in the sky at the open end nearest the target. It pays nothing and
-needs no Energy. Islands and bridge cells now carry an owner; the manual's
-rule that you may connect to enemy open ends but not build off them is not
-enforced yet.
+Thrower in the sky at the open end nearest the target. It pays its own Storm
+Power and sends idle Transports to harvest, but needs no Energy yet.
+
+## Ownership
+
+Islands, platforms and bridge cells carry an owner. Following the manual:
+a piece must touch the builder's own island edge or open bridge end, and
+may also touch other players' ground, which is how you connect to an enemy
+island or enemy open end without being able to build off them. A drop on
+land needs every footprint cell to be the dropper's; a drop in the sky needs
+the touched open end to be the dropper's. Neutral islands and the Outpost
+rule for building off them are not modelled yet.
+
+## Knowledge
+
+Types with a `techBit` need that Knowledge before their owner can build
+them; types without one are known from the start. Each sacrifice grants the
+lowest bit the owner lacks among the shipped types, which is Islefall's
+ordering, not the game's: the manual only says the Furies grant Knowledge.
 
 ## Open questions
 

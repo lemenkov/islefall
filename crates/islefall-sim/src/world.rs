@@ -20,6 +20,8 @@ pub const TICK_HZ: u32 = 30;
 pub const CRUMBLE_TICKS: u32 = 4 * TICK_HZ;
 /// Bridge pieces offered at once.
 pub const PIECE_SLOTS: usize = 4;
+/// Players the world keeps reserves for.
+pub const MAX_PLAYERS: usize = 4;
 /// Storm Power carried per trip: the `cost` of a Storm Crystal (`nugget`).
 pub const NUGGET_POWER: i32 = 200;
 /// Ticks a unit spends taking a crystal or handing it in.
@@ -63,6 +65,8 @@ pub enum PieceError {
     NotSky(Cell),
     /// No piece cell touches an island edge or an open bridge end.
     NoAttachment,
+    /// The piece touches only ground belonging to someone else.
+    NotOwnGround,
 }
 
 impl std::fmt::Display for PieceError {
@@ -70,6 +74,7 @@ impl std::fmt::Display for PieceError {
         match self {
             PieceError::NotSky(c) => write!(f, "{c:?} is not sky"),
             PieceError::NoAttachment => write!(f, "must attach to an island edge or an open bridge end"),
+            PieceError::NotOwnGround => write!(f, "may only be built off your own island or your own bridge end"),
         }
     }
 }
@@ -91,6 +96,10 @@ pub enum DropError {
     UnitInTheWay(Cell),
     /// The player cannot afford the type.
     NotEnoughPower { cost: i32, have: i32 },
+    /// The owner lacks the Knowledge for the type.
+    UnknownTech(u8),
+    /// A drop must touch the dropper's own ground or open bridge end.
+    NotOwnGround,
     /// Not enough Energy of the right kind reaches the site.
     NotEnoughEnergy { need: crate::rules::EnergyNeed, themed: u8, any: u8 },
 }
@@ -105,6 +114,8 @@ impl std::fmt::Display for DropError {
             DropError::OnRim(c) => write!(f, "{c:?} is an island rim"),
             DropError::UnitInTheWay(c) => write!(f, "a unit stands on {c:?}"),
             DropError::NotEnoughPower { cost, have } => write!(f, "costs {cost} Storm Power, have {have}"),
+            DropError::UnknownTech(b) => write!(f, "needs Knowledge {b}"),
+            DropError::NotOwnGround => write!(f, "must be built on your own island or off your own bridge end"),
             DropError::NotEnoughEnergy { need, themed, any } => write!(
                 f,
                 "needs {} {:?} and {} any Energy here; {themed} {:?} and {any} other reach the site",
@@ -123,6 +134,8 @@ pub struct World {
     pub island_owners: Vec<u8>,
     /// Platforms created under `createsisland` structures dropped on bridges.
     pub platforms: IslandMap,
+    /// Owner of each platform cell.
+    pub platform_owners: BTreeMap<Cell, u8>,
     /// Incremented whenever islands or platforms change.
     pub terrain_version: u64,
     /// Cells carrying a bridge tile and their condition. Bridges are one cell wide.
@@ -139,12 +152,16 @@ pub struct World {
     pub doomed: BTreeMap<Cell, u32>,
     /// The pieces on offer.
     pub queue: PieceQueue,
-    /// The player's Storm Power reserve.
-    pub storm_power: i32,
+    /// Storm Power reserve per owner (index = owner).
+    pub powers: [i32; MAX_PLAYERS],
+    /// Knowledge bits (`techBit`) each owner holds.
+    pub known_tech: [BTreeSet<u8>; MAX_PLAYERS],
     /// Shots fired during the last tick, for effects and logging.
     pub last_shots: Vec<(usize, Target)>,
     /// Knowledge granted to the player by sacrifices.
     pub knowledge: u32,
+    /// Owners whose sacrifice has not been turned into a tech bit yet.
+    pub pending_knowledge: Vec<u8>,
     /// Whether the player's drops need Energy; off while a map is laid out.
     pub energy_enforced: bool,
 }
@@ -156,6 +173,7 @@ impl Default for World {
             islands: Vec::new(),
             island_owners: Vec::new(),
             platforms: IslandMap::new(),
+            platform_owners: BTreeMap::new(),
             terrain_version: 0,
             bridges: BTreeMap::new(),
             bridge_owners: BTreeMap::new(),
@@ -165,9 +183,11 @@ impl Default for World {
             units: Vec::new(),
             doomed: BTreeMap::new(),
             queue: PieceQueue::new(PIECE_SLOTS, 0x5eed),
-            storm_power: 0,
+            powers: [0; MAX_PLAYERS],
+            known_tech: Default::default(),
             last_shots: Vec::new(),
             knowledge: 0,
+            pending_knowledge: Vec::new(),
             energy_enforced: true,
         }
     }
@@ -176,6 +196,22 @@ impl Default for World {
 impl World {
     pub fn new() -> World {
         World::default()
+    }
+
+    /// Storm Power of the local player.
+    pub fn storm_power(&self) -> i32 {
+        self.powers[0]
+    }
+
+    /// Owner of the ground at `cell`: a natural island, a platform or a bridge.
+    pub fn ground_owner(&self, cell: Cell) -> Option<u8> {
+        if let Some(i) = self.islands.iter().position(|i| i.contains(cell)) {
+            return Some(self.island_owners.get(i).copied().unwrap_or(0));
+        }
+        if let Some(&o) = self.platform_owners.get(&cell) {
+            return Some(o);
+        }
+        self.bridge_owners.get(&cell).copied()
     }
 
     /// Add a natural island with its owner.
@@ -248,6 +284,7 @@ impl World {
             return false;
         }
         self.bridges.insert(cell, BridgeState::Normal);
+        self.bridge_owners.insert(cell, 0);
         self.bridge_version += 1;
         true
     }
@@ -273,8 +310,30 @@ impl World {
         self.place_piece_for(0, cells)
     }
 
-    pub fn place_piece_for(&mut self, owner: u8, cells: &[Cell]) -> Result<(), PieceError> {
+    /// Bridge cells placed by the map, owned by nobody in particular.
+    pub fn place_map_bridge(&mut self, owner: u8, cell: Cell) -> bool {
+        if !self.place_bridge(cell) {
+            return false;
+        }
+        self.bridge_owners.insert(cell, owner);
+        true
+    }
+
+    /// The tutorial's rule plus ownership: a piece must touch the owner's own
+    /// island edge or open bridge end; it may also touch other players' ground.
+    pub fn can_place_piece_for(&self, owner: u8, cells: &[Cell]) -> Result<(), PieceError> {
         self.can_place_piece(cells)?;
+        let own = cells.iter().any(|&c| {
+            [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().any(|&(dx, dy)| {
+                let n = c.offset(dx, dy);
+                (self.is_land(n) || self.is_open_end(n)) && self.ground_owner(n) == Some(owner)
+            })
+        });
+        if own { Ok(()) } else { Err(PieceError::NotOwnGround) }
+    }
+
+    pub fn place_piece_for(&mut self, owner: u8, cells: &[Cell]) -> Result<(), PieceError> {
+        self.can_place_piece_for(owner, cells)?;
         for &c in cells {
             self.bridges.insert(c, BridgeState::Normal);
             self.bridge_owners.insert(c, owner);
@@ -375,6 +434,7 @@ impl World {
         }
         for c in &falling {
             self.platforms.remove(*c);
+            self.platform_owners.remove(c);
         }
         self.terrain_version += 1;
         self.remove_unsupported_things(&reached);
@@ -522,18 +582,46 @@ impl World {
         }
     }
 
-    /// Drop for a given owner; only the local player (owner 0) pays and needs Energy.
+    /// Ownership for drops: on land, every footprint cell must be the owner's;
+    /// in the sky, the touched open end must be the owner's.
+    pub fn check_ownership(&self, owner: u8, rules: &TypeRules, cell: Cell) -> Result<(), DropError> {
+        let probe = Structure::new("", cell, rules.foot_x, rules.foot_y, Walk::Free);
+        let cells: Vec<Cell> = probe.cells().collect();
+        if cells.iter().any(|&c| self.is_land(c)) {
+            if cells.iter().all(|&c| self.ground_owner(c) == Some(owner)) { Ok(()) } else { Err(DropError::NotOwnGround) }
+        } else {
+            let own_end = cells.iter().any(|&c| {
+                [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().any(|&(dx, dy)| {
+                    let n = c.offset(dx, dy);
+                    self.is_open_end(n) && self.bridge_owners.get(&n) == Some(&owner)
+                })
+            });
+            if own_end { Ok(()) } else { Err(DropError::NotOwnGround) }
+        }
+    }
+
+    /// Drop for a given owner. Geysers and map layout aside, the owner pays
+    /// the cost, needs the Knowledge, and (for the local player) the Energy.
     pub fn drop_structure_for(&mut self, owner: u8, kind: &str, rules: &TypeRules, cell: Cell) -> Result<usize, DropError> {
         self.can_drop(rules, cell)?;
-        if owner == 0 && self.energy_enforced {
-            self.check_energy(owner, rules, cell)?;
+        if self.energy_enforced {
+            self.check_ownership(owner, rules, cell)?;
+            if let Some(bit) = rules.tech_bit {
+                if !self.known_tech[owner as usize % MAX_PLAYERS].contains(&bit) {
+                    return Err(DropError::UnknownTech(bit));
+                }
+            }
+            if owner == 0 {
+                self.check_energy(owner, rules, cell)?;
+            }
         }
         // Geysers are placed by the map, not bought; everything else costs its type's price.
-        let price = if rules.is_geyser || owner != 0 { 0 } else { rules.cost };
-        if price > self.storm_power {
-            return Err(DropError::NotEnoughPower { cost: price, have: self.storm_power });
+        let slot = owner as usize % MAX_PLAYERS;
+        let price = if rules.is_geyser { 0 } else { rules.cost };
+        if price > self.powers[slot] {
+            return Err(DropError::NotEnoughPower { cost: price, have: self.powers[slot] });
         }
-        self.storm_power -= price;
+        self.powers[slot] -= price;
         let mut s = Structure::new(kind, cell, rules.foot_x, rules.foot_y, rules.walk);
         s.drop_blocking = rules.drop_blocking;
         s.stock = if rules.is_geyser { rules.cost } else { 0 };
@@ -558,6 +646,7 @@ impl World {
             for c in s.cells() {
                 if !self.is_land(c) {
                     self.platforms.insert(c);
+                    self.platform_owners.insert(c, owner);
                     changed = true;
                 }
             }
@@ -590,6 +679,15 @@ impl World {
         u.is_transport = rules.is_transport;
         self.units.push(u);
         Some(self.units.len() - 1)
+    }
+
+    /// Grant a Knowledge bit to an owner.
+    pub fn grant_tech(&mut self, owner: u8, bit: u8) -> bool {
+        self.known_tech[owner as usize % MAX_PLAYERS].insert(bit)
+    }
+
+    pub fn knows_tech(&self, owner: u8, bit: u8) -> bool {
+        self.known_tech[owner as usize % MAX_PLAYERS].contains(&bit)
     }
 
     /// Order a Transport to capture a stunned enemy priest.
@@ -674,13 +772,17 @@ impl World {
     /// scaled by its remaining health, and nearby bridges take the shock of
     /// its removal but nothing else is damaged.
     pub fn salvage(&mut self, index: usize) -> Option<i32> {
+        self.salvage_for(0, index)
+    }
+
+    pub fn salvage_for(&mut self, owner: u8, index: usize) -> Option<i32> {
         let s = self.structures.get(index)?;
-        if s.owner != 0 {
+        if s.owner != owner {
             return None;
         }
         let health = if s.max_hp > 0 { s.hp.max(0) as i64 * 100 / s.max_hp as i64 } else { 100 };
         let refund = (s.cost as i64 * SALVAGE_REFUND_PERCENT as i64 * health / 10_000) as i32;
-        self.storm_power += refund;
+        self.powers[owner as usize % MAX_PLAYERS] += refund;
         let centre = s.centre();
         self.remove_structure(index);
         self.shock_bridges(centre);
@@ -846,11 +948,12 @@ impl World {
         }
         let Some(u) = self.units.get(unit).filter(|u| u.alive) else { return false };
         let from = u.pos.cell();
+        let owner = u.owner;
         let Some(temple) = self
             .structures
             .iter()
             .enumerate()
-            .filter(|(_, s)| s.is_temple)
+            .filter(|(_, s)| s.is_temple && s.owner == owner)
             .min_by_key(|(_, s)| (s.cell.x - from.x).abs() + (s.cell.y - from.y).abs())
             .map(|(i, _)| i)
         else {
@@ -925,6 +1028,7 @@ impl World {
                         if owner == 0 {
                             self.knowledge += 1;
                         }
+                        self.pending_knowledge.push(owner);
                     } else if !self.order_move(i, centre) {
                         self.units[i].task = Task::Idle;
                     }
@@ -962,7 +1066,7 @@ impl World {
                 if work + 1 < WORK_TICKS {
                     self.units[i].task = Task::Harvest { geyser, temple, carrying, work: work + 1 };
                 } else {
-                    self.storm_power += carrying;
+                    self.powers[self.units[i].owner as usize % MAX_PLAYERS] += carrying;
                     let more = self.structures[geyser].stock > 0;
                     self.units[i].task = if more { Task::Harvest { geyser, temple, carrying: 0, work: 0 } } else { Task::Idle };
                     if more && !self.walk_to_adjacent(i, geyser) {
@@ -1214,11 +1318,11 @@ mod tests {
         let geyser = TypeRules { foot_x: 3, foot_y: 3, cost: 500, is_geyser: true, may_drop_on_rim: true, ..TypeRules::plain() };
         let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, cost: 100, ..TypeRules::plain() };
         let g = w.drop_structure("geyser", &geyser, Cell::new(14, 4)).unwrap();
-        assert_eq!(w.storm_power, 0, "geysers are free");
+        assert_eq!(w.powers[0], 0, "geysers are free");
         assert_eq!(w.drop_structure("residence", &temple, Cell::new(2, 2)), Err(DropError::NotEnoughPower { cost: 100, have: 0 }));
-        w.storm_power = 100;
+        w.powers[0] = 100;
         let t = w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
-        assert_eq!(w.storm_power, 0);
+        assert_eq!(w.powers[0], 0);
         let golem = TypeRules { is_unit: true, speed: 3.0, ..TypeRules::plain() };
         let u = w.spawn_unit("sunwalker", &golem, Cell::new(4, 1)).unwrap();
         assert!(w.order_harvest(u, g));
@@ -1230,7 +1334,7 @@ mod tests {
             }
         }
         assert_eq!(w.units[u].task, Task::Idle, "finished after the geyser ran dry");
-        assert_eq!(w.storm_power, 500, "all crystals delivered in trips of at most {NUGGET_POWER}");
+        assert_eq!(w.powers[0], 500, "all crystals delivered in trips of at most {NUGGET_POWER}");
         assert_eq!(w.structures[g].stock, 0);
         assert_eq!(w.structures[g].kind, "emptygeyser");
         assert!(!w.order_harvest(u, g), "nothing left to harvest");
@@ -1258,12 +1362,15 @@ mod tests {
     fn cannons_fire_straight_at_enemies_in_range() {
         let mut w = world();
         w.islands.push(IslandMap::rect(Cell::new(0, 4), 12, 8));
-        w.storm_power = 1000;
+        w.powers[0] = 1000;
         let mine = w.drop_structure("suncannon", &cannon(), Cell::new(3, 6)).unwrap();
-        assert_eq!(w.storm_power, 600);
+        assert_eq!(w.powers[0], 600);
         // Enemy cannon in the same rows, 4 cells east: both in range and in line.
+        w.island_owners = vec![0, 0];
+        w.energy_enforced = false; // the enemy has no ground of its own here
+        w.powers[1] = 1000;
         let theirs = w.drop_structure_for(1, "suncannon", &cannon(), Cell::new(9, 6)).unwrap();
-        assert_eq!(w.storm_power, 600, "enemies do not spend our power");
+        assert_eq!(w.powers[0], 600, "enemies do not spend our power");
         w.step();
         assert_eq!(w.structures[mine].hp, 520, "took one 80-point shot");
         assert_eq!(w.structures[theirs].hp, 520);
@@ -1292,7 +1399,7 @@ mod tests {
             w.place_bridge(Cell::new(x, 1));
         }
         let battery = TypeRules { foot_x: 3, foot_y: 3, creates_island: true, max_hit_points: 100, cost: 300, ..TypeRules::plain() };
-        w.storm_power = 300;
+        w.powers[0] = 300;
         // In the sky off the open end at (13,1): footprint (14..16, 0..2).
         let b = w.drop_structure("sunbattery", &battery, Cell::new(16, 2)).unwrap_or_else(|e| panic!("{e}"));
         w.crack_bridge(Cell::new(13, 1));
@@ -1306,15 +1413,17 @@ mod tests {
     #[test]
     fn salvage_refunds_a_quarter_scaled_by_health() {
         let mut w = world();
-        w.storm_power = 1000;
+        w.powers[0] = 1000;
         let r = TypeRules { foot_x: 2, foot_y: 2, cost: 400, max_hit_points: 100, ..TypeRules::plain() };
         let i = w.drop_structure("thing", &r, Cell::new(3, 2)).unwrap();
-        assert_eq!(w.storm_power, 600);
+        assert_eq!(w.powers[0], 600);
         assert_eq!(w.salvage(i), Some(100));
-        assert_eq!(w.storm_power, 700);
+        assert_eq!(w.powers[0], 700);
         let i = w.drop_structure("thing", &r, Cell::new(3, 2)).unwrap();
         w.damage_structure(i, 50);
         assert_eq!(w.salvage(i), Some(50), "half health, half refund");
+        w.energy_enforced = false;
+        w.powers[1] = 1000;
         let e = w.drop_structure_for(1, "thing", &r, Cell::new(3, 2)).unwrap();
         assert_eq!(w.salvage(e), None, "cannot salvage enemy property");
     }
@@ -1323,12 +1432,13 @@ mod tests {
     fn stunned_priest_is_captured_and_sacrificed() {
         let mut w = world();
         w.islands.push(IslandMap::rect(Cell::new(0, 4), 12, 8));
-        w.storm_power = 1000;
+        w.powers[0] = 1000;
         let altar = TypeRules { foot_x: 3, foot_y: 3, is_altar: true, may_drop_on_rim: true, cost: 500, ..TypeRules::plain() };
         let a = w.drop_structure("dais", &altar, Cell::new(5, 9)).unwrap();
         let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, threat: 25, speed: 1.8, ..TypeRules::plain() };
         let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
         let p = w.spawn_unit_for(1, "priest", &priest, Cell::new(9, 7)).unwrap();
+        w.island_owners = vec![0, 0];
         let g = w.spawn_unit("sunwalker", &golem, Cell::new(1, 6)).unwrap();
         assert!(!w.order_capture(g, p), "a healthy priest cannot be captured");
         w.damage_unit(p, 50);
@@ -1378,7 +1488,7 @@ mod tests {
         use crate::rules::EnergyNeed;
         let mut w = world();
         w.islands.push(IslandMap::rect(Cell::new(0, 4), 40, 8));
-        w.storm_power = 5000;
+        w.powers[0] = 5000;
         let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, produces: Some(Theme::Sun), ..TypeRules::plain() };
         w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
         let thrower = TypeRules { foot_x: 1, foot_y: 1, energy: Some(EnergyNeed { theme: Theme::Sun, themed: 0, any: 1 }), ..TypeRules::plain() };
@@ -1392,9 +1502,34 @@ mod tests {
         let windarcher = TypeRules { foot_x: 1, foot_y: 1, energy: Some(EnergyNeed { theme: Theme::Wind, themed: 1, any: 1 }), ..TypeRules::plain() };
         assert!(w.drop_structure("windarcher", &windarcher, Cell::new(6, 7)).is_ok(), "temple plus generator overlap");
         assert!(matches!(w.drop_structure("windarcher", &windarcher, Cell::new(14, 7)), Err(DropError::NotEnoughEnergy { .. })), "only the generator reaches");
-        // Enemies place without energy checks and other owners' sources do not count.
+        // Other owners' sources do not count; enemies need their own ground.
         assert_eq!(w.energy_at(1, Cell::new(3, 3), Theme::Sun), (0, 0));
-        assert!(w.drop_structure_for(1, "sunarcher", &thrower, Cell::new(36, 6)).is_ok());
+        assert_eq!(w.drop_structure_for(1, "sunarcher", &thrower, Cell::new(36, 6)), Err(DropError::NotOwnGround));
+    }
+
+    #[test]
+    fn ownership_and_knowledge_gate_building() {
+        let mut w = World::new();
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 8, 6), 0);
+        w.push_island(IslandMap::rect(Cell::new(20, 0), 8, 6), 1);
+        w.powers = [1000, 1000, 0, 0];
+        let piece = [Cell::new(8, 2), Cell::new(9, 2)];
+        assert_eq!(w.can_place_piece_for(1, &piece), Err(PieceError::NotOwnGround), "off our island, not theirs");
+        assert!(w.place_piece_for(0, &piece).is_ok());
+        assert_eq!(w.place_piece_for(1, &[Cell::new(10, 2)]), Err(PieceError::NotOwnGround), "off our open end");
+        // The enemy builds west from its own island and may connect to our open end.
+        for x in (10..20).rev() {
+            assert!(w.place_piece_for(1, &[Cell::new(x, 2)]).is_ok(), "{x}");
+        }
+        assert_eq!(w.ground_owner(Cell::new(10, 2)), Some(1));
+        let thrower = TypeRules { foot_x: 1, foot_y: 1, cost: 250, ..TypeRules::plain() };
+        assert_eq!(w.drop_structure_for(1, "sunarcher", &thrower, Cell::new(2, 2)), Err(DropError::NotOwnGround));
+        assert!(w.drop_structure_for(1, "sunarcher", &thrower, Cell::new(22, 2)).is_ok());
+        assert_eq!(w.powers[1], 750, "the opponent pays too");
+        let gated = TypeRules { foot_x: 1, foot_y: 1, tech_bit: Some(4), ..TypeRules::plain() };
+        assert_eq!(w.drop_structure("windbattery", &gated, Cell::new(3, 3)), Err(DropError::UnknownTech(4)));
+        assert!(w.grant_tech(0, 4));
+        assert!(w.drop_structure("windbattery", &gated, Cell::new(3, 3)).is_ok());
     }
 
     #[test]

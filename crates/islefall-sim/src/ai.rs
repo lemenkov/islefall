@@ -6,6 +6,7 @@
 use crate::grid::Cell;
 use crate::pieces::{Piece, PieceQueue};
 use crate::rules::TypeRules;
+use crate::unit::Task;
 use crate::world::{PIECE_SLOTS, World};
 
 /// How far from an open end a shooter's hotspot may be tried.
@@ -45,11 +46,37 @@ impl Ai {
         }
         self.ticks = 0;
         self.moves += 1;
+        self.send_idle_transports_harvesting(world);
         let m = if self.moves % self.shooter_every == 0 { self.drop_shooter(world, shooter) } else { AiMove::Nothing };
         if m != AiMove::Nothing {
             return Some(m);
         }
         Some(self.extend_bridge(world))
+    }
+
+    /// Idle Transports of the opponent go and harvest the nearest geyser with stock.
+    fn send_idle_transports_harvesting(&self, world: &mut World) {
+        let has_temple = world.structures.iter().any(|s| s.is_temple && s.owner == self.owner);
+        if !has_temple {
+            return;
+        }
+        let idle: Vec<usize> = world
+            .units
+            .iter()
+            .enumerate()
+            .filter(|(_, u)| u.alive && u.owner == self.owner && u.is_transport && u.task == Task::Idle && !u.is_moving())
+            .map(|(i, _)| i)
+            .collect();
+        for u in idle {
+            let at = world.units[u].pos.cell();
+            let mut geysers: Vec<usize> = (0..world.structures.len()).filter(|&i| world.structures[i].stock > 0).collect();
+            geysers.sort_by_key(|&i| Self::distance(world.structures[i].cell, at));
+            for g in geysers {
+                if world.order_harvest(u, g) {
+                    break;
+                }
+            }
+        }
     }
 
     fn distance(a: Cell, b: Cell) -> i32 {
@@ -152,6 +179,7 @@ mod tests {
         w.push_island(IslandMap::rect(Cell::new(0, 0), 6, 6), 0);
         w.push_island(IslandMap::rect(Cell::new(20, 0), 6, 6), 1);
         let mut ai = Ai::new(1, Cell::new(2, 2), 10, 7);
+        w.powers[1] = 5000;
         let thrower = TypeRules { foot_x: 3, foot_y: 3, creates_island: true, may_drop_on_rim: true, max_hit_points: 400, range: 8, hp_per_sec: 12, ..TypeRules::plain() };
         let mut pieces = 0;
         let mut shooters = 0;
