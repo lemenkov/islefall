@@ -2,8 +2,9 @@
 //! Islefall entry point.
 //!
 //! Two modes, chosen with `ISLEFALL_MODE`:
-//! - `island` (default): a first scene with an island, an altar and the
-//!   High Priest, drawn from the simulation's grid.
+//! - `island` (default): an island with the altar and the High Priest,
+//!   driven by the simulation. Left-click on land sends the priest there.
+//!   Arrow keys or WASD pan the camera, `-` and `=` zoom.
 //! - `viewer`: animates one object type at a time. `[` and `]` step
 //!   through types, `,` and `.` through animations.
 //!
@@ -11,6 +12,7 @@
 //! - `NETSTORM_DIR`: directory containing the game's `d/` and `netstorm.tarc`.
 //! - `ISLEFALL_PALETTE`: palette file stem from `d/` (default `gifcloud`, the game palette).
 //! - `ISLEFALL_SCREENSHOT=file.png`: save a screenshot shortly after start-up.
+//! - `ISLEFALL_ISLAND=cross`: use a cross-shaped test island in the island scene.
 //!
 //! Keys in both modes: `Space` pauses animation, `P` saves a screenshot.
 
@@ -22,18 +24,21 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::sprite::Anchor;
+use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
 use islefall_data::{Installation, TypeDef};
-use islefall_sim::{Cell, IslandMap};
+use islefall_sim::{CELL_H, CELL_W, Cell, Dir8, IslandMap, TICK_HZ, Unit, World, speed_per_tick};
 use sprites::FrameInfo;
 use world::{LoadedShape, ShapeLibrary, Z_SHADOW, Z_STRUCTURE, Z_UNIT};
 
 const START_TYPE: &str = "priest";
 const FRAME_SECONDS: f32 = 0.1;
-const ZOOM: f32 = 3.0;
+const ZOOM: f32 = 4.0;
 const AUTO_SCREENSHOT_SECONDS: f32 = 1.5;
 const DEFAULT_PALETTE: &str = "gifcloud";
+/// Camera pan speed in source pixels per second.
+const PAN_SPEED: f32 = 120.0;
 
 #[derive(Resource, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -46,6 +51,12 @@ enum Mode {
 struct GameData {
     install: Installation,
     palette: String,
+}
+
+/// The simulation state; stepped on the fixed schedule only.
+#[derive(Resource, Default)]
+struct Sim {
+    world: World,
 }
 
 #[derive(Resource)]
@@ -72,11 +83,19 @@ struct ShapeSprite {
     sequence: Vec<usize>,
     frames: Vec<FrameInfo>,
     step: usize,
+    playing: bool,
 }
 
 /// Marks entities spawned by the viewer so they can be replaced.
 #[derive(Component)]
 struct ViewerEntity;
+
+/// A sprite layer that follows a simulation unit.
+#[derive(Component)]
+struct UnitLayer {
+    unit: usize,
+    facing: Dir8,
+}
 
 fn main() {
     let dir = match std::env::var_os("NETSTORM_DIR") {
@@ -114,7 +133,9 @@ fn main() {
     )
     .insert_resource(GameData { install, palette })
     .insert_resource(mode)
+    .insert_resource(Time::<Fixed>::from_hz(TICK_HZ as f64))
     .init_resource::<ShapeLibrary>()
+    .init_resource::<Sim>()
     .insert_resource(Viewer {
         type_index: SHAPE_ORDER.iter().position(|s| *s == START_TYPE).unwrap_or(0),
         animation: 0,
@@ -122,7 +143,9 @@ fn main() {
         paused: false,
     })
     .add_systems(Startup, setup)
+    .add_systems(FixedUpdate, sim_step.run_if(resource_equals(Mode::Island)))
     .add_systems(Update, (common_keys, animate, auto_screenshot))
+    .add_systems(Update, (camera_keys, click_to_move, sync_units).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
         app.insert_resource(AutoScreenshot {
@@ -146,12 +169,13 @@ fn setup(
     mode: Res<Mode>,
     data: Res<GameData>,
     viewer: Res<Viewer>,
+    mut sim: ResMut<Sim>,
     mut lib: ResMut<ShapeLibrary>,
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
     match *mode {
-        Mode::Island => setup_island(&mut commands, &data, &mut lib, &mut images, &mut layouts),
+        Mode::Island => setup_island(&mut commands, &data, &mut sim, &mut lib, &mut images, &mut layouts),
         Mode::Viewer => {
             commands.spawn((Camera2d, zoomed_projection()));
             spawn_viewer_shape(&mut commands, &data, &viewer, &mut lib, &mut images, &mut layouts);
@@ -167,6 +191,7 @@ fn zoomed_projection() -> Projection {
 fn setup_island(
     commands: &mut Commands,
     data: &GameData,
+    sim: &mut Sim,
     lib: &mut ShapeLibrary,
     images: &mut Assets<Image>,
     layouts: &mut Assets<TextureAtlasLayout>,
@@ -175,8 +200,15 @@ fn setup_island(
     let palette = install.palette(&data.palette).expect("palette checked at start-up");
     let (w, h) = (14, 10);
     let mut island = IslandMap::rect(Cell::new(0, 0), w, h);
-    for c in [Cell::new(13, 0), Cell::new(12, 0), Cell::new(13, 1)] {
-        island.remove(c);
+    if std::env::var("ISLEFALL_ISLAND").as_deref() == Ok("cross") {
+        // A cross has all four inside corners; used to check the terrain set.
+        for c in [(0, 0), (1, 0), (0, 1), (13, 0), (12, 0), (13, 1), (0, 9), (1, 9), (0, 8), (13, 9), (12, 9), (13, 8)] {
+            island.remove(Cell::new(c.0, c.1));
+        }
+    } else {
+        for c in [Cell::new(13, 0), Cell::new(12, 0), Cell::new(13, 1)] {
+            island.remove(c);
+        }
     }
     world::spawn_island(commands, install, lib, palette, images, layouts, &island, Theme::Sun);
 
@@ -188,18 +220,37 @@ fn setup_island(
         }
     }
 
+    // The simulation owns the island and the priest; sprites follow it.
+    sim.world.islands.push(island);
     if let Some(def) = install.type_def("priest") {
+        let speed = speed_per_tick(def.get_f64("speed").unwrap_or(1.0));
+        sim.world.units.push(Unit::new("priest", Cell::new(2, 8), speed));
+        sim.world.order_move(0, Cell::new(11, 2));
         if let Some(shape) = lib.get_or_load(install, palette, "priest", images, layouts) {
-            spawn_animated(commands, shape, def, "A", world::cell_to_world(Cell::new(2, 8)), Z_UNIT, false);
+            let unit = &sim.world.units[0];
+            for e in spawn_animated(commands, shape, def, unit.facing.animation(), unit_to_world(unit), Z_UNIT, false) {
+                commands.entity(e).insert(UnitLayer { unit: 0, facing: unit.facing });
+            }
         }
     }
 
     let centre = (world::cell_to_world(Cell::new(0, 0)) + world::cell_to_world(Cell::new(w - 1, h - 1))) / 2.0;
     commands.spawn((Camera2d, zoomed_projection(), Transform::from_translation(centre.extend(0.0))));
-    info!("island scene: {} cells, altar and priest", island.len());
+    info!("island scene: {} cells, altar and priest", sim.world.islands[0].len());
 }
 
-/// Spawn image and shadow layers of one animation, looping.
+/// World position of a unit's feet: cells to source pixels, y flipped.
+fn unit_to_world(unit: &Unit) -> Vec2 {
+    let (x, y) = unit.pos.to_f32();
+    Vec2::new(x * CELL_W as f32, -(y * CELL_H as f32))
+}
+
+/// Cell under a world position.
+fn world_to_cell(p: Vec2) -> Cell {
+    Cell::new((p.x / CELL_W as f32).floor() as i32, (-p.y / CELL_H as f32).floor() as i32)
+}
+
+/// Spawn image and shadow layers of one animation, looping. Returns the entities.
 fn spawn_animated(
     commands: &mut Commands,
     shape: &LoadedShape,
@@ -208,16 +259,11 @@ fn spawn_animated(
     pos: Vec2,
     z: f32,
     viewer: bool,
-) {
-    let sequence: Vec<usize> = def
-        .frames
-        .iter()
-        .enumerate()
-        .filter(|(_, f)| f.animation.eq_ignore_ascii_case(animation))
-        .map(|(i, _)| i)
-        .collect();
+) -> Vec<Entity> {
+    let sequence = animation_sequence(def, animation);
+    let mut out = Vec::new();
     if sequence.is_empty() {
-        return;
+        return out;
     }
     let first = sequence[0];
     let mut layers = vec![(shape.image.clone(), shape.layout.clone(), shape.frames.clone(), z, Color::WHITE)];
@@ -232,12 +278,19 @@ fn spawn_animated(
             sprite,
             frames[first].anchor(),
             Transform::from_translation(pos.extend(z)),
-            ShapeSprite { sequence: sequence.clone(), frames, step: 0 },
+            ShapeSprite { sequence: sequence.clone(), frames, step: 0, playing: true },
         ));
         if viewer {
             e.insert(ViewerEntity);
         }
+        out.push(e.id());
     }
+    out
+}
+
+/// Frame indices of one animation label, in file order.
+fn animation_sequence(def: &TypeDef, animation: &str) -> Vec<usize> {
+    def.frames.iter().enumerate().filter(|(_, f)| f.animation.eq_ignore_ascii_case(animation)).map(|(i, _)| i).collect()
 }
 
 fn spawn_viewer_shape(
@@ -267,6 +320,99 @@ fn spawn_viewer_shape(
     spawn_animated(commands, shape, def, animation, Vec2::ZERO, Z_UNIT, true);
 }
 
+fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>) {
+    if !viewer.paused {
+        sim.world.step();
+    }
+}
+
+/// Move unit sprites to their simulated position and pick the facing animation.
+fn sync_units(
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    mut layers: Query<(&mut Transform, &mut Sprite, &mut Anchor, &mut ShapeSprite, &mut UnitLayer)>,
+) {
+    for (mut tf, mut sprite, mut anchor, mut shape, mut layer) in &mut layers {
+        let Some(unit) = sim.world.units.get(layer.unit) else { continue };
+        let pos = unit_to_world(unit);
+        tf.translation.x = pos.x;
+        tf.translation.y = pos.y;
+        if unit.facing != layer.facing {
+            if let Some(def) = data.install.type_def(&unit.kind) {
+                let seq = animation_sequence(def, unit.facing.animation());
+                if !seq.is_empty() {
+                    shape.sequence = seq;
+                    shape.step = 0;
+                }
+            }
+            layer.facing = unit.facing;
+        }
+        shape.playing = unit.is_moving();
+        if !shape.playing && shape.step != 0 {
+            shape.step = 0;
+            let frame = shape.sequence[0];
+            if let Some(atlas) = sprite.texture_atlas.as_mut() {
+                atlas.index = frame;
+            }
+            *anchor = shape.frames[frame].anchor();
+        }
+    }
+}
+
+fn click_to_move(
+    buttons: Res<ButtonInput<MouseButton>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    cameras: Query<(&Camera, &GlobalTransform)>,
+    mut sim: ResMut<Sim>,
+) {
+    if !buttons.just_pressed(MouseButton::Left) {
+        return;
+    }
+    let (Ok(window), Ok((camera, cam_tf))) = (windows.single(), cameras.single()) else { return };
+    let Some(cursor) = window.cursor_position() else { return };
+    let Ok(world_pos) = camera.viewport_to_world_2d(cam_tf, cursor) else { return };
+    let cell = world_to_cell(world_pos);
+    if sim.world.order_move(0, cell) {
+        info!("priest ordered to {cell:?}");
+    } else {
+        info!("{cell:?} is not land");
+    }
+}
+
+fn camera_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut cameras: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
+) {
+    let Ok((mut tf, mut proj)) = cameras.single_mut() else { return };
+    let mut d = Vec2::ZERO;
+    if keys.any_pressed([KeyCode::ArrowLeft, KeyCode::KeyA]) {
+        d.x -= 1.0;
+    }
+    if keys.any_pressed([KeyCode::ArrowRight, KeyCode::KeyD]) {
+        d.x += 1.0;
+    }
+    if keys.any_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) {
+        d.y += 1.0;
+    }
+    if keys.any_pressed([KeyCode::ArrowDown, KeyCode::KeyS]) {
+        d.y -= 1.0;
+    }
+    if d != Vec2::ZERO {
+        let step = d.normalize() * PAN_SPEED * time.delta_secs();
+        tf.translation.x += step.x;
+        tf.translation.y += step.y;
+    }
+    if let Projection::Orthographic(o) = &mut *proj {
+        if keys.just_pressed(KeyCode::Equal) {
+            o.scale = (o.scale / 1.25).max(1.0 / 16.0);
+        }
+        if keys.just_pressed(KeyCode::Minus) {
+            o.scale = (o.scale * 1.25).min(2.0);
+        }
+    }
+}
+
 fn animate(
     time: Res<Time>,
     mut viewer: ResMut<Viewer>,
@@ -276,6 +422,9 @@ fn animate(
         return;
     }
     for (mut sprite, mut anchor, mut shape) in &mut sprites {
+        if !shape.playing {
+            continue;
+        }
         let Some(atlas) = sprite.texture_atlas.as_mut() else { continue };
         shape.step = (shape.step + 1) % shape.sequence.len().max(1);
         let frame = shape.sequence[shape.step];

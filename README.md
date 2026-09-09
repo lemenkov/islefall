@@ -46,7 +46,9 @@ NETSTORM_DIR=~/games/NetStorm cargo run --release
 ```
 
 By default this shows a first scene: an island assembled from the terrain
-tiles, the altar, and the High Priest. `ISLEFALL_MODE=viewer` instead
+tiles, the altar, and the High Priest walking under the simulation's control.
+Left-click on land to send the priest there; arrow keys or WASD pan the
+camera and `-` / `=` zoom. `ISLEFALL_MODE=viewer` instead
 animates one object type at a time: `[` and `]` step through types, `,` and
 `.` through its animations. In both modes `Space` pauses and `P` saves a
 screenshot; `ISLEFALL_SCREENSHOT=file.png` saves one automatically after

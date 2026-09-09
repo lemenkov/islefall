@@ -7,6 +7,10 @@
 
 pub mod grid;
 pub mod island;
+pub mod unit;
+pub mod world;
 
 pub use grid::{CELL_H, CELL_W, Cell};
 pub use island::IslandMap;
+pub use unit::{Dir8, Pos, SUBCELL, Unit};
+pub use world::{TICK_HZ, World, speed_per_tick};
