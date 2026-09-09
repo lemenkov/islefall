@@ -683,7 +683,7 @@ fn key_code(name: &str) -> Option<KeyCode> {
 
 const DIGIT_KEYS: [KeyCode; 9] = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9];
 
-fn tool_keys(keys: Res<ButtonInput<KeyCode>>, sim: Res<Sim>, data: Res<GameData>, mut player: ResMut<Player>) {
+fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<GameData>, mut player: ResMut<Player>) {
     let w = sim.world();
     if keys.just_pressed(KeyCode::KeyR) {
         if let Tool::Bridge(slot, piece) = &player.tool {
@@ -700,7 +700,16 @@ fn tool_keys(keys: Res<ButtonInput<KeyCode>>, sim: Res<Sim>, data: Res<GameData>
     if keys.just_pressed(KeyCode::KeyU) {
         player.tool = Tool::Spawn(data.cfg.controls.unit_tool.clone());
     } else if let Some(i) = DIGIT_KEYS.iter().position(|k| keys.just_pressed(*k)).filter(|&i| i < data.cfg.controls.build_tools.len()) {
-        player.tool = Tool::Drop(data.cfg.controls.build_tools[i].clone());
+        let stem = data.cfg.controls.build_tools[i].clone();
+        // Picking a Battle unit puts it into production at a Workshop, as the manual's menu would.
+        let rules = data.rules(&stem);
+        let w = sim.world_mut();
+        match w.put_into_production(0, &stem, &rules, &data.scripts) {
+            Ok(ws) => info!("{stem} in production at {} ({} of {} slots used)", w.structures[ws].kind, w.structures[ws].production.len(), w.structures[ws].slots),
+            Err(islefall_sim::ProductionError::NotProducible) => {}
+            Err(e) => info!("{stem}: {e}"),
+        }
+        player.tool = Tool::Drop(stem);
     } else {
         return;
     }
@@ -772,7 +781,8 @@ fn ghost(
             let ok = w.can_drop(&rules, cell).is_ok()
                 && w.check_ownership(0, &rules, cell).is_ok()
                 && rules.tech_bit.is_none_or(|b| w.knows_tech(0, b))
-                && w.check_energy(0, &rules, cell).is_ok();
+                && w.check_energy(0, &rules, cell).is_ok()
+                && w.check_production(0, stem, &rules).is_ok();
             (probe.cells().collect(), ok)
         }
         Tool::Spawn(_) => (vec![cell], w.is_walkable(cell)),

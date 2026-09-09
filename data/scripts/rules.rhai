@@ -69,3 +69,10 @@ fn knowledge_grant(known, all) {
 fn target_priority(threat, distance, is_unit) {
     threat * 1000 - distance
 }
+
+// Whether a Workshop of `workshop_theme` may put a type of `type_theme` and
+// `type_level` into production. The tutorial has a Sun Workshop producing
+// a Wind Generator, so alignment is only demanded of higher-level units.
+fn workshop_can_produce(workshop_theme, type_theme, type_level) {
+    type_theme == "sun" || workshop_theme == type_theme || type_level <= 1
+}

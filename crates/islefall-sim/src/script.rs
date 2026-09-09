@@ -103,6 +103,12 @@ impl Scripts {
         v.as_int().map(|i| Some(i.clamp(0, 255) as u8)).map_err(|t| ScriptError::Call { hook: "knowledge_grant", message: format!("expected int or (), got {t}") })
     }
 
+    pub fn workshop_can_produce(&self, workshop: Theme, kind: Theme, level: i64) -> Result<bool, ScriptError> {
+        self.call("workshop_can_produce", (theme_name(workshop).to_string(), theme_name(kind).to_string(), level))?
+            .as_bool()
+            .map_err(|t| ScriptError::Call { hook: "workshop_can_produce", message: format!("expected bool, got {t}") })
+    }
+
     pub fn target_priority(&self, threat: i64, distance: i64, is_unit: bool) -> Result<i64, ScriptError> {
         let v = self.call("target_priority", (threat, distance, is_unit))?;
         v.as_int().map_err(|t| ScriptError::Call { hook: "target_priority", message: format!("expected int, got {t}") })
@@ -134,6 +140,9 @@ mod tests {
         assert_eq!(s.knowledge_grant(&[0, 2], &[0, 2, 3, 4]).unwrap(), Some(3));
         assert_eq!(s.knowledge_grant(&[0], &[0]).unwrap(), None);
         assert!(s.target_priority(25, 3, true).unwrap() > s.target_priority(5, 1, false).unwrap());
+        assert!(s.workshop_can_produce(Theme::Sun, Theme::Wind, 1).unwrap(), "a Sun Workshop builds a Wind Generator");
+        assert!(!s.workshop_can_produce(Theme::Sun, Theme::Wind, 2).unwrap());
+        assert!(s.workshop_can_produce(Theme::Wind, Theme::Wind, 3).unwrap());
     }
 
     #[test]

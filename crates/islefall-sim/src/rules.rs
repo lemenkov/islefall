@@ -88,6 +88,12 @@ pub struct TypeRules {
     pub produces: Option<Theme>,
     /// `techBit`: Knowledge needed before the type can be built, if any.
     pub tech_bit: Option<u8>,
+    /// A Workshop: holds production slots.
+    pub is_workshop: bool,
+    /// The type's alignment.
+    pub theme: Theme,
+    /// The type's `level` (0 when absent).
+    pub level: i64,
 }
 
 impl TypeRules {
@@ -142,6 +148,9 @@ impl TypeRules {
             energy,
             produces,
             tech_bit: def.get_i64("techBit").filter(|b| (0..=255).contains(b)).map(|b| b as u8),
+            is_workshop: has(&f.workshop),
+            theme,
+            level,
         })
     }
 
@@ -172,6 +181,9 @@ impl TypeRules {
             energy: None,
             produces: None,
             tech_bit: None,
+            is_workshop: false,
+            theme: Theme::Sun,
+            level: 0,
         }
     }
 }

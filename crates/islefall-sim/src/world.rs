@@ -77,6 +77,31 @@ pub enum DropError {
     NotOwnGround,
     /// Not enough Energy of the right kind reaches the site.
     NotEnoughEnergy { need: crate::rules::EnergyNeed, themed: u8, any: u8 },
+    /// The type is not in production at any of the owner's Workshops.
+    NotInProduction,
+    /// The owner has no Temple, needed for Temple-provided types.
+    NoTemple,
+}
+
+/// Why a type could not be put into production.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProductionError {
+    /// The owner has no Workshop able to produce the type.
+    NoWorkshop,
+    /// Every able Workshop's slots are full.
+    NoFreeSlot,
+    /// The type is not built at a Workshop.
+    NotProducible,
+}
+
+impl std::fmt::Display for ProductionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProductionError::NoWorkshop => write!(f, "no Workshop can produce it"),
+            ProductionError::NoFreeSlot => write!(f, "every able Workshop's production slots are full"),
+            ProductionError::NotProducible => write!(f, "not something a Workshop produces"),
+        }
+    }
 }
 
 impl std::fmt::Display for DropError {
@@ -91,6 +116,8 @@ impl std::fmt::Display for DropError {
             DropError::NotEnoughPower { cost, have } => write!(f, "costs {cost} Storm Power, have {have}"),
             DropError::UnknownTech(b) => write!(f, "needs Knowledge {b}"),
             DropError::NotOwnGround => write!(f, "must be built on your own island or off your own bridge end"),
+            DropError::NotInProduction => write!(f, "not in production at any Workshop"),
+            DropError::NoTemple => write!(f, "needs a Temple"),
             DropError::NotEnoughEnergy { need, themed, any } => write!(
                 f,
                 "needs {} {:?} and {} any Energy here; {themed} {:?} and {any} other reach the site",
@@ -599,6 +626,7 @@ impl World {
             }
             if owner == 0 {
                 self.check_energy(owner, rules, cell)?;
+                self.check_production(owner, kind, rules)?;
             }
         }
         // Geysers are placed by the map, not bought; everything else costs its type's price.
@@ -619,6 +647,10 @@ impl World {
         s.threat = rules.threat;
         s.is_altar = rules.is_altar;
         s.produces = rules.produces;
+        s.theme = rules.theme;
+        if rules.is_workshop {
+            s.slots = self.cfg.production.workshop_slots;
+        }
         if rules.range > 0 && rules.hp_per_sec > 0 {
             s.weapon = Some(Weapon {
                 range: rules.range,
@@ -665,6 +697,66 @@ impl World {
         u.is_transport = rules.is_transport;
         self.units.push(u);
         Some(self.units.len() - 1)
+    }
+
+    /// Battle units (types that need Energy) must come from a Workshop that
+    /// has them in production, except Temple-provided types, which need a Temple.
+    pub fn check_production(&self, owner: u8, kind: &str, rules: &TypeRules) -> Result<(), DropError> {
+        if self.is_temple_type(kind) {
+            return if self.structures.iter().any(|s| s.is_temple && s.owner == owner) { Ok(()) } else { Err(DropError::NoTemple) };
+        }
+        if rules.energy.is_none() {
+            return Ok(());
+        }
+        if self.in_production(owner, kind) { Ok(()) } else { Err(DropError::NotInProduction) }
+    }
+
+    fn is_temple_type(&self, kind: &str) -> bool {
+        self.cfg.production.temple_types.iter().any(|t| t.eq_ignore_ascii_case(kind))
+    }
+
+    pub fn in_production(&self, owner: u8, kind: &str) -> bool {
+        self.structures.iter().any(|s| s.owner == owner && s.production.iter().any(|k| k.eq_ignore_ascii_case(kind)))
+    }
+
+    /// Put `kind` into a free slot of one of the owner's Workshops able to
+    /// produce it, choosing the first in structure order. Idempotent.
+    pub fn put_into_production(&mut self, owner: u8, kind: &str, rules: &TypeRules, scripts: &Scripts) -> Result<usize, ProductionError> {
+        if rules.energy.is_none() || self.is_temple_type(kind) {
+            return Err(ProductionError::NotProducible);
+        }
+        if let Some(i) = self.structures.iter().position(|s| s.owner == owner && s.production.iter().any(|k| k.eq_ignore_ascii_case(kind))) {
+            return Ok(i);
+        }
+        let mut able = false;
+        for (i, s) in self.structures.iter().enumerate() {
+            if s.owner != owner || s.slots == 0 {
+                continue;
+            }
+            if !scripts.workshop_can_produce(s.theme, rules.theme, rules.level).unwrap_or(false) {
+                continue;
+            }
+            able = true;
+            if s.production.len() < s.slots {
+                self.structures[i].production.push(kind.to_string());
+                self.structure_version += 1;
+                return Ok(i);
+            }
+        }
+        Err(if able { ProductionError::NoFreeSlot } else { ProductionError::NoWorkshop })
+    }
+
+    /// Clear a Workshop's production slot.
+    pub fn take_out_of_production(&mut self, workshop: usize, kind: &str) -> bool {
+        let Some(s) = self.structures.get_mut(workshop) else { return false };
+        let before = s.production.len();
+        s.production.retain(|k| !k.eq_ignore_ascii_case(kind));
+        if s.production.len() != before {
+            self.structure_version += 1;
+            true
+        } else {
+            false
+        }
     }
 
     /// Grant a Knowledge bit to an owner.
@@ -1496,15 +1588,23 @@ mod tests {
         w.powers[0] = 5000;
         let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, produces: Some(Theme::Sun), ..TypeRules::plain() };
         w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        // A Workshop with room for everything this test builds.
+        w.cfg.production.workshop_slots = 4;
+        let workshop = TypeRules { foot_x: 2, foot_y: 2, is_workshop: true, theme: Theme::Wind, may_drop_on_rim: true, ..TypeRules::plain() };
+        w.drop_structure("windfactory", &workshop, Cell::new(2, 10)).unwrap();
+        let scripts = test_scripts();
         let thrower = TypeRules { foot_x: 1, foot_y: 1, energy: Some(EnergyNeed { theme: Theme::Sun, themed: 0, any: 1 }), ..TypeRules::plain() };
+        w.put_into_production(0, "sunarcher", &thrower, &scripts).unwrap();
         assert!(w.drop_structure("sunarcher", &thrower, Cell::new(5, 6)).is_ok(), "next to the temple");
         // 128 px is 8 cells east; (2,2) centre to (30,6) is far outside.
         assert!(matches!(w.drop_structure("sunarcher", &thrower, Cell::new(30, 6)), Err(DropError::NotEnoughEnergy { .. })));
         // A Wind Generator there extends the reach, but wind units need wind.
         let generator = TypeRules { foot_x: 1, foot_y: 1, produces: Some(Theme::Wind), energy: Some(EnergyNeed { theme: Theme::Sun, themed: 0, any: 1 }), ..TypeRules::plain() };
+        w.put_into_production(0, "windbattery", &generator, &scripts).unwrap();
         assert!(w.drop_structure("windbattery", &generator, Cell::new(8, 6)).is_ok());
         assert!(w.drop_structure("sunarcher", &thrower, Cell::new(14, 6)).is_ok(), "fed by the generator's Sun-compatible energy");
-        let windarcher = TypeRules { foot_x: 1, foot_y: 1, energy: Some(EnergyNeed { theme: Theme::Wind, themed: 1, any: 1 }), ..TypeRules::plain() };
+        let windarcher = TypeRules { foot_x: 1, foot_y: 1, energy: Some(EnergyNeed { theme: Theme::Wind, themed: 1, any: 1 }), theme: Theme::Wind, level: 2, ..TypeRules::plain() };
+        w.put_into_production(0, "windarcher", &windarcher, &scripts).unwrap();
         assert!(w.drop_structure("windarcher", &windarcher, Cell::new(6, 7)).is_ok(), "temple plus generator overlap");
         assert!(matches!(w.drop_structure("windarcher", &windarcher, Cell::new(14, 7)), Err(DropError::NotEnoughEnergy { .. })), "only the generator reaches");
         // Other owners' sources do not count; enemies need their own ground.
@@ -1535,6 +1635,41 @@ mod tests {
         assert_eq!(w.drop_structure("windbattery", &gated, Cell::new(3, 3)), Err(DropError::UnknownTech(4)));
         assert!(w.grant_tech(0, 4));
         assert!(w.drop_structure("windbattery", &gated, Cell::new(3, 3)).is_ok());
+    }
+
+    #[test]
+    fn battle_units_need_a_workshop_in_production() {
+        use crate::rules::EnergyNeed;
+        let scripts = test_scripts();
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 30, 12), 0);
+        w.powers = vec![9000; 4];
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, produces: Some(Theme::Sun), ..TypeRules::plain() };
+        let thrower = TypeRules { foot_x: 1, foot_y: 1, energy: Some(EnergyNeed { theme: Theme::Sun, themed: 0, any: 1 }), level: 1, ..TypeRules::plain() };
+        let wind_cannon = TypeRules { foot_x: 1, foot_y: 1, energy: Some(EnergyNeed { theme: Theme::Wind, themed: 1, any: 1 }), theme: Theme::Wind, level: 2, ..TypeRules::plain() };
+        let golem = TypeRules { foot_x: 1, foot_y: 1, is_unit: true, ..TypeRules::plain() };
+        // A golem needs a Temple; a thrower needs a Workshop with it in production.
+        assert_eq!(w.check_production(0, "sunwalker", &golem), Err(DropError::NoTemple));
+        w.drop_structure("residence", &temple, Cell::new(3, 3)).unwrap();
+        assert_eq!(w.check_production(0, "sunwalker", &golem), Ok(()));
+        assert_eq!(w.drop_structure("sunarcher", &thrower, Cell::new(5, 5)), Err(DropError::NotInProduction));
+        assert_eq!(w.put_into_production(0, "sunarcher", &thrower, &scripts), Err(ProductionError::NoWorkshop));
+        let workshop = TypeRules { foot_x: 3, foot_y: 3, is_workshop: true, theme: Theme::Sun, ..TypeRules::plain() };
+        let ws = w.drop_structure("sunfactory", &workshop, Cell::new(8, 8)).unwrap();
+        assert_eq!(w.structures[ws].slots, 2);
+        assert_eq!(w.put_into_production(0, "sunarcher", &thrower, &scripts), Ok(ws));
+        assert_eq!(w.put_into_production(0, "sunarcher", &thrower, &scripts), Ok(ws), "idempotent");
+        assert!(w.drop_structure("sunarcher", &thrower, Cell::new(5, 5)).is_ok());
+        // A Sun Workshop refuses a Level Two Wind unit; slots fill up.
+        assert_eq!(w.put_into_production(0, "windcannon", &wind_cannon, &scripts), Err(ProductionError::NoWorkshop));
+        assert_eq!(w.put_into_production(0, "suncannon", &TypeRules { theme: Theme::Sun, ..thrower.clone() }, &scripts), Ok(ws));
+        assert_eq!(w.put_into_production(0, "sunbattery", &TypeRules { theme: Theme::Sun, ..thrower.clone() }, &scripts), Err(ProductionError::NoFreeSlot));
+        assert!(w.take_out_of_production(ws, "suncannon"));
+        assert!(!w.in_production(0, "suncannon"));
+        // Losing the Workshop loses its production.
+        w.destroy_structure(ws);
+        assert!(!w.in_production(0, "sunarcher"));
+        assert_eq!(w.drop_structure("sunarcher", &thrower, Cell::new(6, 5)), Err(DropError::NotInProduction));
     }
 
     #[test]

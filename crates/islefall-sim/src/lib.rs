@@ -29,4 +29,4 @@ pub use pieces::{Piece, PieceQueue};
 pub use rules::{EnergyNeed, TypeRules, Walk};
 pub use structure::{Structure, Weapon};
 pub use unit::{Dir8, Pos, Task, Unit};
-pub use world::{BridgeState, DropError, PieceError, World, speed_per_tick};
+pub use world::{BridgeState, DropError, PieceError, ProductionError, World, speed_per_tick};

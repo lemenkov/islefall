@@ -177,6 +177,24 @@ Not yet modelled: `airrange` and `airdamage` against flyers, stunning and
 capturing priests, unit-versus-unit combat (no unit shoots yet), Energy
 requirements, and enemy AI beyond static shooters.
 
+## Workshops and production
+
+The manual: Workshops build the units of battle; a Level One Workshop has
+two production slots; to create a unit other than a Golem or a bridge piece
+you put its Knowledge into production at a Workshop; units must be aligned
+with the Workshop; a destroyed Workshop loses what it was producing; the
+Temple gives the power to create bridges and Golems.
+
+Islefall: types with the `factory` flag are Workshops with
+`production.workshop_slots` slots. Placing a Battle unit (any type that
+needs Energy) requires it to be in production at one of the owner's
+Workshops; Temple-provided types (`production.temple_types`, the Golem)
+need an own Temple instead. The `workshop_can_produce` hook decides
+alignment: the tutorial's Sun Workshop produces a Wind Generator, so only
+units above level one must match the Workshop's theme. Picking a building
+tool puts the type into the first able Workshop with a free slot. Build
+time (`constructionRate`) and the Storm Power Stream are not modelled.
+
 ## The opponent
 
 A first computer player, in `crates/islefall-sim/src/ai.rs`, moves every

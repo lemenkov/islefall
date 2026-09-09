@@ -34,8 +34,15 @@ priest = ["priest"]
 geyser = ["geyser"]
 temple = ["residence"]
 altar = ["dais"]
+workshop = ["factory"]
 # Type classes (the `class` property) that produce Energy of their theme.
 energy_source_classes = ["Source of Energy"]
+
+[production]
+# Production slots per Workshop (the manual: two for a Level One Workshop).
+workshop_slots = 2
+# Types any Temple provides without a Workshop (the manual: bridges and Golems).
+temple_types = ["sunwalker"]
 
 [bridges]
 # Seconds an unsupported bridge cell stays cracked before it crumbles.

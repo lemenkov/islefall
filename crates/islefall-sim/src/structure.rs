@@ -37,6 +37,10 @@ pub struct Structure {
     pub is_altar: bool,
     /// Energy this structure radiates, for Generators and Temples.
     pub produces: Option<Theme>,
+    /// Workshop production slots: type stems in production, at most `slots`.
+    pub production: Vec<String>,
+    pub slots: usize,
+    pub theme: Theme,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,6 +72,9 @@ impl Structure {
             threat: 0,
             is_altar: false,
             produces: None,
+            production: Vec::new(),
+            slots: 0,
+            theme: Theme::Sun,
         }
     }
 

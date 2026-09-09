@@ -18,8 +18,16 @@ pub struct Config {
     pub combat: Combat,
     pub priest: Priest,
     pub energy: Energy,
+    pub production: Production,
     pub ai: AiConfig,
     pub controls: Controls,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Production {
+    pub workshop_slots: usize,
+    pub temple_types: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -56,6 +64,7 @@ pub struct Flags {
     pub geyser: Vec<String>,
     pub temple: Vec<String>,
     pub altar: Vec<String>,
+    pub workshop: Vec<String>,
     pub energy_source_classes: Vec<String>,
 }
 

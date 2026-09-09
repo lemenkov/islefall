@@ -49,7 +49,8 @@ NETSTORM_DIR=~/games/NetStorm cargo run --release
 ```
 
 Rules, scripts and maps are loaded from `data/` (or `ISLEFALL_DATA`); see
-`docs/MODDING.md`. By default this shows the `demo` map: a home island with the altar and the
+`docs/MODDING.md`. By default this shows the `demo` map, whose home island now has a Sun
+Workshop; picking a building tool puts that unit into production there: a home island with the altar and the
 Temple, a bridge to a battery on its own islet, an enemy island with a
 Storm Geyser, a Disc Thrower and the enemy High Priest, whose owner bridges
 towards your altar and drops shooters on the way, and two units walking
