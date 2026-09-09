@@ -44,6 +44,15 @@ pub enum Walk {
     Blocked,
 }
 
+/// What a shooting type can hit: flyers within `air_range` for `air_damage`
+/// per second, and the ground when `ground`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AirAttack {
+    pub air_range: i32,
+    pub air_damage: i32,
+    pub ground: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TypeRules {
     pub foot_x: i32,
@@ -90,6 +99,16 @@ pub struct TypeRules {
     pub tech_bit: Option<u8>,
     /// A Workshop: holds production slots.
     pub is_workshop: bool,
+    /// An aerial attacker (`flyer` flag): launched by a base, never a Transport.
+    pub is_flyer: bool,
+    /// Flies: an attacker or an Aerial Transport; needs no ground and never falls.
+    pub is_air: bool,
+    /// What the type can shoot at, when it shoots.
+    pub air_attack: Option<AirAttack>,
+    /// Damage of one shot at a flyer, from `airdamage` and the delay.
+    pub air_damage_per_shot: i32,
+    /// A base launching the attacker named here.
+    pub launches: Option<String>,
     /// The type's alignment.
     pub theme: Theme,
     /// The type's `level` (0 when absent).
@@ -111,6 +130,11 @@ impl TypeRules {
         };
         let is_priest = has(&f.priest);
         let is_unit = has(&f.unit);
+        let is_flyer = has(&f.flyer);
+        let is_air = is_flyer || has(&f.balloon);
+        let class = def.get_str("class").unwrap_or("");
+        let is_air_base = cfg.air.base_classes.iter().any(|c| c.eq_ignore_ascii_case(class));
+        let launches = if is_air_base { cfg.air.launches.get(&def.name.to_lowercase()).cloned() } else { None };
         let hp_per_sec = def.get_i64("hpPerSec").unwrap_or(0).max(0);
         let delay = def.get_f64("delayBetweenShots").unwrap_or(cfg.combat.default_delay_between_shots).max(0.1);
         let theme = def.get_str("theme").and_then(Theme::parse).unwrap_or(Theme::Sun);
@@ -122,6 +146,18 @@ impl TypeRules {
             Some(theme)
         } else {
             None
+        };
+        let air_attack = scripts.air_attack(
+            class,
+            def.get_i64("useairdamage").unwrap_or(0),
+            def.get_i64("airrange").unwrap_or(0),
+            def.get_i64("airdamage").unwrap_or(0),
+            def.get_i64("range").unwrap_or(0),
+            hp_per_sec,
+        )?;
+        let air_damage_per_shot = match air_attack {
+            Some(a) if a.air_damage > 0 => scripts.damage_per_shot(a.air_damage as i64, delay)?,
+            _ => 0,
         };
         Ok(TypeRules {
             foot_x: def.get_i64("foot_x").unwrap_or(1).max(1) as i32,
@@ -136,19 +172,24 @@ impl TypeRules {
             is_geyser: has(&f.geyser),
             is_temple: has(&f.temple),
             max_hit_points: def.get_i64("maxHitPoints").unwrap_or(0).clamp(0, i32::MAX as i64) as i32,
-            range: if hp_per_sec > 0 { def.get_i64("range").unwrap_or(0) as i32 } else { 0 },
+            range: if air_attack.is_some() { def.get_i64("range").unwrap_or(0) as i32 } else { 0 },
             hp_per_sec: hp_per_sec as i32,
             delay_between_shots: delay,
             damage_per_shot: scripts.damage_per_shot(hp_per_sec, delay)?,
             cardinal_only: scripts.fires_straight(&def.name, &def.flags)?,
             threat: def.get_i64("threat").unwrap_or(0) as i32,
             is_priest,
-            is_transport: !is_priest && is_unit,
+            is_transport: !is_priest && is_unit && !is_flyer,
             is_altar: has(&f.altar),
             energy,
             produces,
             tech_bit: def.get_i64("techBit").filter(|b| (0..=255).contains(b)).map(|b| b as u8),
             is_workshop: has(&f.workshop),
+            is_flyer,
+            is_air,
+            air_attack,
+            air_damage_per_shot,
+            launches,
             theme,
             level,
         })
@@ -182,6 +223,11 @@ impl TypeRules {
             produces: None,
             tech_bit: None,
             is_workshop: false,
+            is_flyer: false,
+            is_air: false,
+            air_attack: None,
+            air_damage_per_shot: 0,
+            launches: None,
             theme: Theme::Sun,
             level: 0,
         }

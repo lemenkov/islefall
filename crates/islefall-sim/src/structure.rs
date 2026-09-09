@@ -41,6 +41,12 @@ pub struct Structure {
     pub production: Vec<String>,
     pub slots: usize,
     pub theme: Theme,
+    /// The aerial attacker type this base launches, if it is one.
+    pub launches: Option<String>,
+    /// Index of the attacker in the air, if alive.
+    pub flyer: Option<usize>,
+    /// Ticks until the base launches again.
+    pub respawn: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +56,11 @@ pub struct Weapon {
     /// Ticks between shots.
     pub delay: u32,
     pub cardinal_only: bool,
+    /// Whether ground targets can be hit at all (the Vander Tower cannot).
+    pub ground: bool,
+    /// Reach and damage per shot against flyers; 0 when they cannot be hit.
+    pub air_range: i32,
+    pub air_damage: i32,
 }
 
 impl Structure {
@@ -75,6 +86,9 @@ impl Structure {
             production: Vec::new(),
             slots: 0,
             theme: Theme::Sun,
+            launches: None,
+            flyer: None,
+            respawn: 0,
         }
     }
 

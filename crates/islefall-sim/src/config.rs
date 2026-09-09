@@ -21,6 +21,7 @@ pub struct Config {
     pub combat: Combat,
     pub priest: Priest,
     pub energy: Energy,
+    pub air: Air,
     pub production: Production,
     pub ai: AiConfig,
     pub controls: Controls,
@@ -72,6 +73,7 @@ pub struct SoundEvents {
     pub bridge_fell: SoundCue,
     pub island_fell: SoundCue,
     pub unit_lost: SoundCue,
+    pub launched: SoundCue,
 }
 
 impl SoundEvents {
@@ -91,8 +93,29 @@ impl SoundEvents {
             EventKind::BridgeFell => &self.bridge_fell,
             EventKind::IslandFell => &self.island_fell,
             EventKind::UnitLost => &self.unit_lost,
+            EventKind::Launched => &self.launched,
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Air {
+    pub base_classes: Vec<String>,
+    pub launches: BTreeMap<String, String>,
+    pub respawn_seconds: f64,
+    pub strike_range: i32,
+    pub attackers: BTreeMap<String, Attacker>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Attacker {
+    pub life_seconds: f64,
+    pub refuels: bool,
+    pub hunts_transports: bool,
+    pub cracks_bridges: bool,
+    pub kill_extends_life: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -132,6 +155,8 @@ pub struct Flags {
     pub creates_island: Vec<String>,
     pub may_drop_on_rim: Vec<String>,
     pub unit: Vec<String>,
+    pub flyer: Vec<String>,
+    pub balloon: Vec<String>,
     pub priest: Vec<String>,
     pub geyser: Vec<String>,
     pub temple: Vec<String>,
@@ -201,7 +226,8 @@ pub struct AiConfig {
 pub struct Controls {
     pub slot_keys: Vec<String>,
     pub build_tools: Vec<String>,
-    pub unit_tool: String,
+    pub unit_keys: Vec<String>,
+    pub unit_tools: Vec<String>,
     pub pan_speed: f32,
     pub zoom: f32,
     pub animation_fps: f32,
@@ -268,6 +294,15 @@ impl Config {
         }
         if self.ai.move_seconds <= 0.0 || self.ai.shooter_every == 0 {
             return bad("ai.move_seconds and ai.shooter_every must be positive");
+        }
+        if self.air.respawn_seconds <= 0.0 || self.air.strike_range < 0 {
+            return bad("air timings must be positive");
+        }
+        if self.air.attackers.values().any(|a| a.life_seconds <= 0.0) {
+            return bad("air.attackers life_seconds must be positive");
+        }
+        if self.controls.unit_keys.len() != self.controls.unit_tools.len() || self.controls.unit_tools.is_empty() {
+            return bad("controls.unit_keys and unit_tools must pair up");
         }
         if !(0.0..=1.0).contains(&self.sounds.volume) {
             return bad("sounds.volume must be 0.0..1.0");

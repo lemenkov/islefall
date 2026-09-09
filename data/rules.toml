@@ -30,6 +30,10 @@ drop_blocking = ["dropBlocking"]
 creates_island = ["createsisland"]
 may_drop_on_rim = ["mayDropOnRim"]
 unit = ["walker", "flyer", "balloon"]
+# Aerial attackers, launched by a base and never a Transport.
+flyer = ["flyer"]
+# Aerial Transports: fly anywhere, harvest and capture.
+balloon = ["balloon"]
 priest = ["priest"]
 geyser = ["geyser"]
 temple = ["residence"]
@@ -43,6 +47,24 @@ energy_source_classes = ["Source of Energy"]
 workshop_slots = 2
 # Types any Temple provides without a Workshop (the manual: bridges and Golems).
 temple_types = ["sunwalker"]
+
+[air]
+# Type classes of structures that launch an aerial attacker.
+base_classes = ["Air Attack Base"]
+# The attacker each base launches; nothing in the data names it.
+launches = { sunaviary = "sunflyer", windaviary = "windflyer", rainaviary = "rainflyer" }
+# Seconds a base waits after losing its attacker before launching another
+# (manual: the Devil Maker regenerates one every twenty seconds).
+respawn_seconds = 20.0
+# Cells within which an aerial attacker strikes (guess); each strike is one
+# shot of its `hpPerSec` x `delayBetweenShots`.
+strike_range = 1
+# Seconds an attacker flies before it must refuel or fall (manual: Whirligig
+# once a minute, Dust Devil ten seconds, Man o'War one minute).
+[air.attackers]
+sunflyer = { life_seconds = 60.0, refuels = true, hunts_transports = false, cracks_bridges = false, kill_extends_life = false }
+windflyer = { life_seconds = 10.0, refuels = false, hunts_transports = true, cracks_bridges = true, kill_extends_life = false }
+rainflyer = { life_seconds = 60.0, refuels = false, hunts_transports = true, cracks_bridges = false, kill_extends_life = true }
 
 [bridges]
 # Seconds an unsupported bridge cell stays cracked before it crumbles.
@@ -109,8 +131,9 @@ queue_seed = 161
 slot_keys = ["Q", "W", "A", "S", "Z", "X"]
 # Buildings on the number keys.
 build_tools = ["suncannon", "sunarcher", "sunbattery", "sunfactory", "treetwo", "windbattery"]
-# What `U` spawns.
-unit_tool = "sunwalker"
+# Units on letter keys: the Golem and the Balloon.
+unit_keys = ["U", "I"]
+unit_tools = ["sunwalker", "sunballoon"]
 # Camera pan speed in source pixels per second, and the starting zoom.
 pan_speed = 120.0
 zoom = 4.0
@@ -146,6 +169,7 @@ bridge_cracked = { file = "bridgecrack.wav" }
 bridge_fell = { file = "bridgeFall.WAV" }
 island_fell = { file = "islandFall.wav" }
 unit_lost = { file = "unitLost.wav" }
+launched = { property = "activeSound" }
 
 # The projectile type of each shooter. The type files hold fire and impact
 # sounds on the projectile, but nothing in the data links the two, so the

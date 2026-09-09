@@ -271,7 +271,7 @@ fn main() {
     let tick_hz = cfg.sim.tick_hz;
     let frame_seconds = 1.0 / cfg.controls.animation_fps.max(0.1);
     let screenshot_at = std::env::var("ISLEFALL_SCREENSHOT_AT").ok().and_then(|s| s.parse().ok()).unwrap_or(cfg.controls.screenshot_seconds);
-    let unit_tool = cfg.controls.unit_tool.clone();
+    let unit_tool = cfg.controls.unit_tools[0].clone();
     let volume = std::env::var("ISLEFALL_VOLUME").ok().and_then(|s| s.parse().ok()).unwrap_or(cfg.sounds.volume);
 
     let mut app = App::new();
@@ -387,6 +387,11 @@ fn setup_map(
     let install = &data.install;
     let palette = install.palette(&data.palette).expect("palette checked at start-up");
     let mut w = World::new(data.cfg.clone());
+    for (stem, def) in &data.install.types {
+        if let Ok(rules) = TypeRules::from_type(def, &data.cfg, &data.scripts) {
+            w.register_type(stem, rules);
+        }
+    }
     w.powers = vec![i32::MAX / 2; data.cfg.sim.max_players];
     w.energy_enforced = false;
 
@@ -504,7 +509,12 @@ fn spawn_animated(
 
 /// Frame indices of one animation label, in file order.
 fn animation_sequence(def: &TypeDef, animation: &str) -> Vec<usize> {
-    def.frames.iter().enumerate().filter(|(_, f)| f.animation.eq_ignore_ascii_case(animation)).map(|(i, _)| i).collect()
+    let seq: Vec<usize> = def.frames.iter().enumerate().filter(|(_, f)| f.animation.eq_ignore_ascii_case(animation)).map(|(i, _)| i).collect();
+    if !seq.is_empty() || animation.eq_ignore_ascii_case("A") {
+        return seq;
+    }
+    // Types without per-facing animations (flyers spin, balloons drift) use their first one.
+    def.frames.iter().enumerate().filter(|(_, f)| f.animation.eq_ignore_ascii_case("A")).map(|(i, _)| i).collect()
 }
 
 fn spawn_viewer_shape(
@@ -664,7 +674,14 @@ fn sync_units(
         tf.translation.x = pos.x;
         tf.translation.y = pos.y;
         let (_, row) = unit.pos_f32();
-        tf.translation.z = if layer.shadow { Z_SHADOW } else { depth_z(Z_STRUCTURE, row) + 0.005 };
+        tf.translation.z = if layer.shadow {
+            Z_SHADOW
+        } else if unit.is_air {
+            // Flyers pass over everything on the ground.
+            Z_UNIT
+        } else {
+            depth_z(Z_STRUCTURE, row) + 0.005
+        };
         if unit.facing != layer.facing {
             if let Some(def) = data.install.type_def(&unit.kind) {
                 let seq = animation_sequence(def, unit.facing.animation());
@@ -753,12 +770,12 @@ fn mouse_actions(
             Ok(_) => info!("{stem} dropped at {cell:?}"),
             Err(e) => info!("cannot drop {stem}: {e}"),
         },
-        Tool::Spawn(stem) => match w.spawn_unit(&stem, &data.rules(&stem), cell) {
-            Some(i) => {
+        Tool::Spawn(stem) => match w.place_unit_for(0, &stem, &data.rules(&stem), cell) {
+            Ok(i) => {
                 player.selected = i;
-                info!("{stem} spawned at {cell:?} as unit {i}");
+                info!("{stem} placed at {cell:?} as unit {i}");
             }
-            None => info!("cannot spawn {stem} at {cell:?}"),
+            Err(e) => info!("cannot place {stem}: {e}"),
         },
     }
 }
@@ -793,8 +810,17 @@ fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<Ga
         info!("tool: bridge piece {} from slot {slot}", w.queue.slots[slot].name);
         return;
     }
-    if keys.just_pressed(KeyCode::KeyU) {
-        player.tool = Tool::Spawn(data.cfg.controls.unit_tool.clone());
+    let unit_key = data.cfg.controls.unit_keys.iter().position(|k| key_code(k).is_some_and(|k| keys.just_pressed(k)));
+    if let Some(i) = unit_key {
+        let stem = data.cfg.controls.unit_tools[i].clone();
+        let rules = data.rules(&stem);
+        let w = sim.world_mut();
+        match w.put_into_production(0, &stem, &rules, &data.scripts) {
+            Ok(ws) => info!("{stem} in production at {} ({} of {} slots used)", w.structures[ws].kind, w.structures[ws].production.len(), w.structures[ws].slots),
+            Err(islefall_sim::ProductionError::NotProducible) => {}
+            Err(e) => info!("{stem}: {e}"),
+        }
+        player.tool = Tool::Spawn(stem);
     } else if let Some(i) = DIGIT_KEYS.iter().position(|k| keys.just_pressed(*k)).filter(|&i| i < data.cfg.controls.build_tools.len()) {
         let stem = data.cfg.controls.build_tools[i].clone();
         // Picking a Battle unit puts it into production at a Workshop, as the manual's menu would.
@@ -881,7 +907,14 @@ fn ghost(
                 && w.check_production(0, stem, &rules).is_ok();
             (probe.cells().collect(), ok)
         }
-        Tool::Spawn(_) => (vec![cell], w.is_walkable(cell)),
+        Tool::Spawn(stem) => {
+            let rules = data.rules(stem);
+            let ok = (rules.is_air || w.is_walkable(cell))
+                && rules.tech_bit.is_none_or(|b| w.knows_tech(0, b))
+                && w.check_energy(0, &rules, cell).is_ok()
+                && w.check_production(0, stem, &rules).is_ok();
+            (vec![cell], ok)
+        }
     };
     let color = if ok { Color::srgba(0.2, 1.0, 0.2, 0.35) } else { Color::srgba(1.0, 0.2, 0.2, 0.35) };
     for c in cells {

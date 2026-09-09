@@ -76,3 +76,32 @@ fn target_priority(threat, distance, is_unit) {
 fn workshop_can_produce(workshop_theme, type_theme, type_level) {
     type_theme == "sun" || workshop_theme == type_theme || type_level <= 1
 }
+
+// What a structure can shoot at, from its class and the `useairdamage`,
+// `airrange`, `airdamage`, `range` and `hpPerSec` properties. Returns
+// #{ air_range, air_damage, ground } or () for a type that never fires.
+// The Vander Tower ("Anti-Air") shoots only at flyers; a Shooter with air
+// damage shoots both; anything else only at the ground.
+fn air_attack(class, use_air_damage, air_range, air_damage, range, hp_per_sec) {
+    if class == "Anti-Air" {
+        return #{ air_range: air_range, air_damage: air_damage, ground: false };
+    }
+    if hp_per_sec <= 0 {
+        return ();
+    }
+    if air_damage > 0 && air_range > 0 {
+        return #{ air_range: air_range, air_damage: air_damage, ground: true };
+    }
+    #{ air_range: 0, air_damage: 0, ground: true }
+}
+
+// Targeting priority of an aerial attacker: higher wins, () means never.
+// The manual: attackers take the closest target; a Whirligig never targets
+// a Transport; a Man o'War prefers Ground Transports.
+fn air_target_priority(distance, is_unit, is_transport, hunts_transports) {
+    if is_transport && !hunts_transports {
+        return ();
+    }
+    let bonus = if is_transport { 1000 } else { 0 };
+    bonus - distance
+}

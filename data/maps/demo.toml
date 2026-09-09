@@ -1,6 +1,6 @@
-# The demo scene: a home island with the altar, Temple and a Sun Workshop, a
-# bridge to a battery islet, and an enemy island with a geyser, a shooter, a
-# priest, a Temple and a golem.
+# The demo scene: a home island with the altar, Temple, a Sun Workshop and
+# a Disc Thrower, a bridge to a battery islet, and an enemy island with a
+# geyser, a shooter, a Whirlibase, a priest, a Temple and a golem.
 #
 # Cells are (x, y) with y growing downwards. Structure and unit positions
 # are hotspot cells (the bottom-right cell of a footprint). Islands are
@@ -75,6 +75,18 @@ at = [39, 7]
 owner = 1
 kind = "residence"
 at = [43, 13]
+
+# A Whirlibase: its Whirligig hunts anything within 35 cells.
+[[structures]]
+owner = 1
+kind = "sunaviary"
+at = [45, 9]
+
+# A Sun Disc Thrower guards the Workshop against the Whirligig.
+[[structures]]
+owner = 0
+kind = "sunarcher"
+at = [16, 3]
 
 [[units]]
 owner = 0

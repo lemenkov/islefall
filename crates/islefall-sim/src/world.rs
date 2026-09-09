@@ -10,7 +10,7 @@ use crate::grid::Cell;
 use crate::island::IslandMap;
 use crate::path::find_path_costed;
 use crate::pieces::PieceQueue;
-use crate::rules::{TypeRules, Walk};
+use crate::rules::{AirAttack, TypeRules, Walk};
 use crate::script::Scripts;
 use crate::structure::{Structure, Weapon};
 use crate::unit::{Pos, Task, Unit};
@@ -116,6 +116,8 @@ pub enum EventKind {
     BridgeFell,
     IslandFell,
     UnitLost,
+    /// A base sent an aerial attacker up; `kind` is the attacker.
+    Launched,
 }
 
 /// Why a type could not be put into production.
@@ -199,6 +201,9 @@ pub struct World {
     pub last_shots: Vec<(usize, Target)>,
     /// Happenings since the last [`World::take_events`].
     pub events: Vec<Event>,
+    /// Rules of every known type, for things the world creates itself
+    /// (aerial attackers); the app registers them at start-up.
+    pub types: BTreeMap<String, TypeRules>,
     /// Knowledge granted to the player by sacrifices.
     pub knowledge: u32,
     /// Owners whose sacrifice has not been turned into a tech bit yet.
@@ -232,6 +237,7 @@ impl World {
             known_tech: vec![BTreeSet::new(); players],
             last_shots: Vec::new(),
             events: Vec::new(),
+            types: BTreeMap::new(),
             knowledge: 0,
             pending_knowledge: Vec::new(),
             energy_enforced: true,
@@ -320,6 +326,17 @@ impl World {
 
     pub fn is_walkable(&self, cell: Cell) -> bool {
         self.walk_cost(cell).is_some()
+    }
+
+    /// Whether `unit` may occupy `cell`: flyers go anywhere, walkers need ground.
+    pub fn can_stand(&self, unit: usize, cell: Cell) -> bool {
+        self.units.get(unit).is_some_and(|u| u.is_air) || self.is_walkable(cell)
+    }
+
+    /// Make a type's rules available to the world, for the units it
+    /// creates itself (a base's aerial attackers).
+    pub fn register_type(&mut self, stem: &str, rules: TypeRules) {
+        self.types.insert(stem.to_lowercase(), rules);
     }
 
     /// A bridge cell may be placed on empty sky next to existing ground.
@@ -510,7 +527,7 @@ impl World {
         }
         let mut lost = Vec::new();
         for u in &mut self.units {
-            if u.alive && !reached.contains(&u.cell()) {
+            if u.alive && !u.is_air && !reached.contains(&u.cell()) {
                 u.alive = false;
                 u.path.clear();
                 lost.push((u.kind.clone(), u.cell(), u.owner));
@@ -701,14 +718,23 @@ impl World {
         if rules.is_workshop {
             s.slots = self.cfg.production.workshop_slots;
         }
-        if rules.range > 0 && rules.hp_per_sec > 0 {
-            s.weapon = Some(Weapon {
-                range: rules.range,
-                damage: rules.damage_per_shot,
-                delay: self.cfg.ticks(rules.delay_between_shots),
-                cardinal_only: rules.cardinal_only,
-            });
+        // Rules built without the hook (tests, plain types) shoot at the ground.
+        let a = rules.air_attack.unwrap_or(AirAttack { air_range: 0, air_damage: 0, ground: true });
+        {
+            let ground = a.ground && rules.range > 0 && rules.hp_per_sec > 0;
+            if ground || a.air_range > 0 {
+                s.weapon = Some(Weapon {
+                    range: rules.range,
+                    damage: rules.damage_per_shot,
+                    delay: self.cfg.ticks(rules.delay_between_shots),
+                    cardinal_only: rules.cardinal_only,
+                    ground,
+                    air_range: a.air_range,
+                    air_damage: rules.air_damage_per_shot,
+                });
+            }
         }
+        s.launches = rules.launches.clone();
         if rules.creates_island {
             let mut changed = false;
             for c in s.cells() {
@@ -737,7 +763,7 @@ impl World {
     }
 
     pub fn spawn_unit_for(&mut self, owner: u8, kind: &str, rules: &TypeRules, cell: Cell) -> Option<usize> {
-        if !self.is_walkable(cell) {
+        if !rules.is_air && !self.is_walkable(cell) {
             return None;
         }
         let mut u = Unit::new(kind, cell, speed_per_tick(&self.cfg, rules.speed), self.subcell());
@@ -747,8 +773,47 @@ impl World {
         u.threat = rules.threat;
         u.is_priest = rules.is_priest;
         u.is_transport = rules.is_transport;
+        u.is_air = rules.is_air;
+        u.is_flyer = rules.is_flyer;
+        u.strike = rules.damage_per_shot;
+        u.range = rules.range;
+        u.delay = self.cfg.ticks(rules.delay_between_shots);
+        u.life = self.attacker_life(kind);
         self.units.push(u);
         Some(self.units.len() - 1)
+    }
+
+    /// A player's unit: pays the cost and, under the rules, needs the
+    /// Energy, Knowledge and production a building would.
+    pub fn place_unit_for(&mut self, owner: u8, kind: &str, rules: &TypeRules, cell: Cell) -> Result<usize, DropError> {
+        if !rules.is_air && !self.is_walkable(cell) {
+            return Err(DropError::NotGround(cell));
+        }
+        if self.energy_enforced {
+            if let Some(bit) = rules.tech_bit {
+                if !self.known_tech[self.slot(owner)].contains(&bit) {
+                    return Err(DropError::UnknownTech(bit));
+                }
+            }
+            if owner == 0 {
+                self.check_energy(owner, rules, cell)?;
+                self.check_production(owner, kind, rules)?;
+            }
+        }
+        let slot = self.slot(owner);
+        if rules.cost > self.powers[slot] {
+            return Err(DropError::NotEnoughPower { cost: rules.cost, have: self.powers[slot] });
+        }
+        self.powers[slot] -= rules.cost;
+        let i = self.spawn_unit_for(owner, kind, rules, cell).ok_or(DropError::NotGround(cell))?;
+        self.emit(EventKind::Built, kind, cell, owner);
+        Ok(i)
+    }
+
+    /// Ticks an aerial attacker of `kind` flies before refuelling or falling;
+    /// unlimited for kinds the rules do not list.
+    fn attacker_life(&self, kind: &str) -> u32 {
+        self.cfg.air.attackers.get(kind).map(|a| self.cfg.ticks(a.life_seconds)).unwrap_or(u32::MAX)
     }
 
     /// Battle units (types that need Energy) must come from a Workshop that
@@ -859,7 +924,7 @@ impl World {
             self.units[unit].path.clear();
             return true;
         }
-        let mut targets: Vec<Cell> = [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().map(|&(dx, dy)| target.offset(dx, dy)).filter(|&c| self.is_walkable(c)).collect();
+        let mut targets: Vec<Cell> = [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().map(|&(dx, dy)| target.offset(dx, dy)).filter(|&c| self.can_stand(unit, c)).collect();
         targets.sort_by_key(|c| (c.x - from.x).abs() + (c.y - from.y).abs());
         for t in targets {
             if self.order_move(unit, t) {
@@ -930,6 +995,15 @@ impl World {
         self.structures.remove(index);
         self.structure_version += 1;
         for u in &mut self.units {
+            if let Some(b) = u.base {
+                u.base = if b == index {
+                    None
+                } else if b > index {
+                    Some(b - 1)
+                } else {
+                    Some(b)
+                };
+            }
             if let Task::Harvest { geyser, temple, .. } = u.task {
                 if geyser == index || temple == index {
                     u.task = Task::Idle;
@@ -994,7 +1068,8 @@ impl World {
             self.damage_structure(i, damage);
         }
         for i in 0..self.units.len() {
-            if self.units[i].alive && near(self.units[i].cell()) {
+            // Flyers are above the blast.
+            if self.units[i].alive && !self.units[i].is_air && near(self.units[i].cell()) {
                 self.damage_unit(i, damage);
             }
         }
@@ -1044,7 +1119,7 @@ impl World {
             let in_range = |c: Cell| s.distance_to(c) <= w.range && (!w.cardinal_only || s.in_line(c));
             let mut best: Option<(i64, Target)> = None;
             for (j, t) in self.structures.iter().enumerate() {
-                if t.owner == s.owner || t.max_hp == 0 || !in_range(t.centre()) {
+                if !w.ground || t.owner == s.owner || t.max_hp == 0 || !in_range(t.centre()) {
                     continue;
                 }
                 let key = scripts.target_priority(t.threat as i64, s.distance_to(t.centre()) as i64, false).unwrap_or(0);
@@ -1053,7 +1128,12 @@ impl World {
                 }
             }
             for (j, u) in self.units.iter().enumerate() {
-                if !u.alive || u.owner == s.owner || u.carried_by.is_some() || !in_range(u.cell()) {
+                if !u.alive || u.owner == s.owner || u.carried_by.is_some() {
+                    continue;
+                }
+                // Flyers are hit only by air weapons within their own reach.
+                let reachable = if u.is_air { w.air_range > 0 && s.distance_to(u.cell()) <= w.air_range } else { w.ground && in_range(u.cell()) };
+                if !reachable {
                     continue;
                 }
                 let key = scripts.target_priority(u.threat as i64, s.distance_to(u.cell()) as i64, true).unwrap_or(0);
@@ -1081,7 +1161,10 @@ impl World {
             }
             match target {
                 Target::Structure(j) => self.damage_structure(j, w.damage),
-                Target::Unit(j) => self.damage_unit(j, w.damage),
+                Target::Unit(j) => {
+                    let dmg = if self.units[j].is_air { w.air_damage } else { w.damage };
+                    self.damage_unit(j, dmg);
+                }
             }
         }
         for s in &mut self.structures {
@@ -1125,7 +1208,7 @@ impl World {
             self.units[unit].path.clear();
             return true;
         }
-        let mut targets: Vec<Cell> = s.adjacent_cells().into_iter().filter(|&c| self.is_walkable(c)).collect();
+        let mut targets: Vec<Cell> = s.adjacent_cells().into_iter().filter(|&c| self.can_stand(unit, c)).collect();
         targets.sort_by_key(|c| (c.x - from.x).abs() + (c.y - from.y).abs());
         for t in targets {
             if self.order_move(unit, t) {
@@ -1241,6 +1324,14 @@ impl World {
     /// Returns `false` if the cell is unreachable.
     pub fn order_move(&mut self, unit: usize, cell: Cell) -> bool {
         let Some(from) = self.units.get(unit).filter(|u| u.alive && !u.stunned && u.carried_by.is_none()).map(|u| u.cell()) else { return false };
+        if self.units[unit].is_air {
+            // Flyers cross the sky in a straight line.
+            let sub = self.subcell();
+            let u = &mut self.units[unit];
+            u.path.clear();
+            u.path.push_back(Pos::cell_centre(cell, sub));
+            return true;
+        }
         let Some(path) = find_path_costed(from, cell, |c| self.walk_cost(c)) else { return false };
         let sub = self.subcell();
         let u = &mut self.units[unit];
@@ -1281,10 +1372,141 @@ impl World {
         }
         self.run_priests();
         self.run_tasks();
+        self.run_air_bases();
+        self.run_flyers(scripts);
         self.last_shots.clear();
         self.run_combat(scripts);
         self.crumble();
         self.tick += 1;
+    }
+
+    /// Bases launch an aerial attacker when theirs is gone and the respawn
+    /// wait is over (the manual: each time one is destroyed the base makes
+    /// a new one).
+    fn run_air_bases(&mut self) {
+        let respawn = self.cfg.ticks(self.cfg.air.respawn_seconds);
+        for i in 0..self.structures.len() {
+            let Some(kind) = self.structures[i].launches.clone() else { continue };
+            if self.structures[i].flyer.is_some_and(|f| self.units.get(f).is_some_and(|u| u.alive)) {
+                continue;
+            }
+            if self.structures[i].respawn > 0 {
+                self.structures[i].respawn -= 1;
+                continue;
+            }
+            let Some(rules) = self.types.get(&kind).cloned() else { continue };
+            let (centre, owner) = (self.structures[i].centre(), self.structures[i].owner);
+            if let Some(u) = self.spawn_unit_for(owner, &kind, &rules, centre) {
+                self.units[u].base = Some(i);
+                self.structures[i].flyer = Some(u);
+                self.structures[i].respawn = respawn;
+                self.emit(EventKind::Launched, &kind, centre, owner);
+            }
+        }
+    }
+
+    /// Aerial attackers hunt the nearest enemy within their base's range,
+    /// strike when close, fly home to refuel when their time runs out (or
+    /// fall when they cannot), and crack the bridges they cross if their
+    /// kind does.
+    fn run_flyers(&mut self, scripts: &Scripts) {
+        let strike_range = self.cfg.air.strike_range;
+        let near = |a: Cell, b: Cell| (a.x - b.x).abs().max((a.y - b.y).abs());
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            if !u.alive || !u.is_flyer {
+                continue;
+            }
+            let attacker = self.cfg.air.attackers.get(&u.kind).cloned();
+            let (at, owner, kind) = (u.cell(), u.owner, u.kind.clone());
+            let base = u.base.filter(|&b| self.structures.get(b).is_some_and(|s| s.flyer == Some(i)));
+            let refuels = attacker.as_ref().is_some_and(|a| a.refuels);
+            if self.units[i].cooldown > 0 {
+                self.units[i].cooldown -= 1;
+            }
+            if self.units[i].life > 0 && self.units[i].life != u32::MAX {
+                self.units[i].life -= 1;
+            }
+            if self.units[i].life == 0 && !self.units[i].returning {
+                if refuels && base.is_some() {
+                    self.units[i].returning = true;
+                } else {
+                    let hp = self.units[i].hp;
+                    self.damage_unit(i, hp);
+                    continue;
+                }
+            }
+            if self.units[i].returning {
+                let Some(b) = base else {
+                    let hp = self.units[i].hp;
+                    self.damage_unit(i, hp);
+                    continue;
+                };
+                let home = self.structures[b].centre();
+                if near(at, home) <= strike_range {
+                    self.units[i].life = self.attacker_life(&kind);
+                    self.units[i].returning = false;
+                } else {
+                    self.order_move(i, home);
+                }
+                continue;
+            }
+            if attacker.as_ref().is_some_and(|a| a.cracks_bridges) && self.bridge_state(at) == Some(BridgeState::Normal) {
+                self.crack_bridge(at);
+            }
+            let origin = base.map(|b| self.structures[b].centre()).unwrap_or(at);
+            let range = self.units[i].range;
+            let hunts = attacker.as_ref().is_some_and(|a| a.hunts_transports);
+            let mut best: Option<(i64, Target, Cell)> = None;
+            for (j, t) in self.structures.iter().enumerate() {
+                if t.owner == owner || t.max_hp == 0 || t.distance_to(origin) > range {
+                    continue;
+                }
+                let Ok(Some(key)) = scripts.air_target_priority(t.distance_to(at) as i64, false, false, hunts) else { continue };
+                if best.as_ref().is_none_or(|b| b.0 < key) {
+                    best = Some((key, Target::Structure(j), t.centre()));
+                }
+            }
+            for (j, v) in self.units.iter().enumerate() {
+                if !v.alive || v.owner == owner || v.is_air || v.carried_by.is_some() || near(v.cell(), origin) > range {
+                    continue;
+                }
+                let Ok(Some(key)) = scripts.air_target_priority(near(v.cell(), at) as i64, true, v.is_transport, hunts) else { continue };
+                if best.as_ref().is_none_or(|b| b.0 < key) {
+                    best = Some((key, Target::Unit(j), v.cell()));
+                }
+            }
+            let Some((_, target, cell)) = best else {
+                self.units[i].path.clear();
+                continue;
+            };
+            if near(at, cell) > strike_range {
+                self.order_move(i, cell);
+                continue;
+            }
+            self.units[i].path.clear();
+            if self.units[i].cooldown > 0 {
+                continue;
+            }
+            let strike = self.units[i].strike;
+            self.units[i].cooldown = self.units[i].delay;
+            self.emit(EventKind::Fired, &kind, at, owner);
+            self.emit(EventKind::Hit, &kind, cell, owner);
+            let killed = match target {
+                Target::Structure(j) => {
+                    let before = self.structure_version;
+                    self.damage_structure(j, strike);
+                    self.structure_version != before
+                }
+                Target::Unit(j) => {
+                    self.damage_unit(j, strike);
+                    !self.units[j].alive
+                }
+            };
+            if killed && attacker.as_ref().is_some_and(|a| a.kill_extends_life) {
+                self.units[i].life = self.attacker_life(&kind);
+            }
+        }
     }
 }
 
@@ -1616,6 +1838,62 @@ mod tests {
         assert_eq!(events[1].at, Cell::new(5, 1), "the hit lands on the target");
         assert_eq!(events[2].kind, "treetwo");
         assert_eq!(events[2].owner, 1);
+    }
+
+    #[test]
+    fn a_base_launches_an_attacker_that_strikes_and_is_shot_down() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 6, 4), 0);
+        w.push_island(IslandMap::rect(Cell::new(10, 0), 6, 4), 1);
+        w.powers[0] = 10_000;
+        w.powers[1] = 10_000;
+        let scripts = test_scripts();
+        let air = AirAttack { air_range: 0, air_damage: 0, ground: true };
+        let flyer = TypeRules { is_unit: true, is_flyer: true, is_air: true, max_hit_points: 50, speed: 8.0, range: 30, hp_per_sec: 15, damage_per_shot: 15, delay_between_shots: 1.0, air_attack: Some(air), ..TypeRules::plain() };
+        w.register_type("sunflyer", flyer);
+        let base = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 400, launches: Some("sunflyer".into()), ..TypeRules::plain() };
+        let tree = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 30, ..TypeRules::plain() };
+        w.drop_structure_for(1, "sunaviary", &base, Cell::new(12, 1)).unwrap();
+        w.drop_structure("treetwo", &tree, Cell::new(2, 1)).unwrap();
+        w.step(&scripts);
+        let launched: Vec<&Event> = w.events.iter().filter(|e| e.what == EventKind::Launched).collect();
+        assert_eq!(launched.len(), 1, "the base launches at once");
+        let f = w.units.iter().position(|u| u.is_flyer).unwrap();
+        assert_eq!(w.units[f].owner, 1);
+        for _ in 0..200 {
+            w.step(&scripts);
+        }
+        assert!(w.structures.iter().all(|s| s.kind != "treetwo"), "the attacker crossed the sky and destroyed the tree");
+        assert!(w.units[f].alive);
+        // A Disc Thrower with air damage brings it down; a plain shooter cannot.
+        let thrower = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 400, range: 8, hp_per_sec: 12, damage_per_shot: 12, delay_between_shots: 1.0, air_attack: Some(AirAttack { air_range: 12, air_damage: 24, ground: true }), air_damage_per_shot: 24, ..TypeRules::plain() };
+        w.drop_structure("sunarcher", &thrower, Cell::new(3, 2)).unwrap();
+        for _ in 0..200 {
+            w.step(&scripts);
+        }
+        assert!(!w.units[f].alive, "shot down");
+        // After the respawn wait the base sends another.
+        for _ in 0..w.cfg.ticks(w.cfg.air.respawn_seconds) + 2 {
+            w.step(&scripts);
+        }
+        assert!(w.units.iter().filter(|u| u.is_flyer).count() >= 2, "a new attacker took off (and may already be down again)");
+    }
+
+    #[test]
+    fn balloons_fly_over_the_sky_and_walkers_do_not() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 4), 0);
+        w.push_island(IslandMap::rect(Cell::new(10, 0), 4, 4), 0);
+        w.powers[0] = 1000;
+        let balloon = TypeRules { is_unit: true, is_air: true, is_transport: true, max_hit_points: 150, speed: 2.0, cost: 600, ..TypeRules::plain() };
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 2.0, ..TypeRules::plain() };
+        let b = w.place_unit_for(0, "sunballoon", &balloon, Cell::new(1, 1)).unwrap();
+        assert_eq!(w.powers[0], 400, "a balloon costs its price");
+        let g = w.spawn_unit("sunwalker", &golem, Cell::new(2, 1)).unwrap();
+        assert!(w.command_move(b, Cell::new(11, 1)), "the balloon crosses the sky");
+        assert!(!w.command_move(g, Cell::new(11, 1)), "the golem has no bridge");
+        assert!(w.spawn_unit("sunballoon", &balloon, Cell::new(6, 6)).is_some(), "a balloon may hang in the sky");
+        assert!(w.spawn_unit("sunwalker", &golem, Cell::new(6, 6)).is_none());
     }
 
     #[test]

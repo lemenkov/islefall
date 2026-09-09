@@ -7,7 +7,7 @@ use std::path::Path;
 use islefall_data::isle::Theme;
 use rhai::{AST, Array, Dynamic, Engine, Map, Scope};
 
-use crate::rules::EnergyNeed;
+use crate::rules::{AirAttack, EnergyNeed};
 
 pub struct Scripts {
     engine: Engine,
@@ -109,6 +109,27 @@ impl Scripts {
             .map_err(|t| ScriptError::Call { hook: "workshop_can_produce", message: format!("expected bool, got {t}") })
     }
 
+    /// `air_attack(class, use_air_damage, air_range, air_damage, range, hp_per_sec)` -> map or unit.
+    pub fn air_attack(&self, class: &str, use_air_damage: i64, air_range: i64, air_damage: i64, range: i64, hp_per_sec: i64) -> Result<Option<AirAttack>, ScriptError> {
+        let r = self.call("air_attack", (class.to_string(), use_air_damage, air_range, air_damage, range, hp_per_sec))?;
+        if r.is_unit() {
+            return Ok(None);
+        }
+        let map: Map = r.try_cast().ok_or(ScriptError::Call { hook: "air_attack", message: "expected a map or ()".into() })?;
+        let get = |k: &str| map.get(k).and_then(|v| v.as_int().ok()).unwrap_or(0).clamp(0, i32::MAX as i64) as i32;
+        let ground = map.get("ground").and_then(|v| v.as_bool().ok()).unwrap_or(true);
+        Ok(Some(AirAttack { air_range: get("air_range"), air_damage: get("air_damage"), ground }))
+    }
+
+    /// `air_target_priority(distance, is_unit, is_transport, hunts_transports)` -> int or unit.
+    pub fn air_target_priority(&self, distance: i64, is_unit: bool, is_transport: bool, hunts_transports: bool) -> Result<Option<i64>, ScriptError> {
+        let v = self.call("air_target_priority", (distance, is_unit, is_transport, hunts_transports))?;
+        if v.is_unit() {
+            return Ok(None);
+        }
+        v.as_int().map(Some).map_err(|t| ScriptError::Call { hook: "air_target_priority", message: format!("expected int or (), got {t}") })
+    }
+
     pub fn target_priority(&self, threat: i64, distance: i64, is_unit: bool) -> Result<i64, ScriptError> {
         let v = self.call("target_priority", (threat, distance, is_unit))?;
         v.as_int().map_err(|t| ScriptError::Call { hook: "target_priority", message: format!("expected int, got {t}") })
@@ -143,6 +164,12 @@ mod tests {
         assert!(s.workshop_can_produce(Theme::Sun, Theme::Wind, 1).unwrap(), "a Sun Workshop builds a Wind Generator");
         assert!(!s.workshop_can_produce(Theme::Sun, Theme::Wind, 2).unwrap());
         assert!(s.workshop_can_produce(Theme::Wind, Theme::Wind, 3).unwrap());
+        assert_eq!(s.air_attack("Anti-Air", 0, 18, 35, 18, 35).unwrap(), Some(AirAttack { air_range: 18, air_damage: 35, ground: false }));
+        assert_eq!(s.air_attack("Shooter", 1, 12, 24, 8, 12).unwrap(), Some(AirAttack { air_range: 12, air_damage: 24, ground: true }));
+        assert_eq!(s.air_attack("Shooter", 0, 0, 0, 22, 16).unwrap(), Some(AirAttack { air_range: 0, air_damage: 0, ground: true }));
+        assert_eq!(s.air_attack("Defense", 0, 0, 0, 0, 0).unwrap(), None);
+        assert_eq!(s.air_target_priority(3, true, true, false).unwrap(), None, "a Whirligig never targets a Transport");
+        assert!(s.air_target_priority(3, true, true, true).unwrap() > s.air_target_priority(1, false, false, true).unwrap(), "a Man o'War prefers Transports");
     }
 
     #[test]

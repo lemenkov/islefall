@@ -116,11 +116,26 @@ pub struct Unit {
     pub carrying: Option<usize>,
     /// Index of the unit carrying this one.
     pub carried_by: Option<usize>,
+    /// Flies: needs no ground, never falls, is hit only by air weapons.
+    pub is_air: bool,
+    /// An aerial attacker launched by `base`.
+    pub is_flyer: bool,
+    pub base: Option<usize>,
+    /// Ticks of flight left before the attacker must refuel or fall.
+    pub life: u32,
+    /// Flying home to refuel.
+    pub returning: bool,
+    /// Damage per strike and detection range of an attacker.
+    pub strike: i32,
+    pub range: i32,
+    /// Ticks between strikes, and ticks until the next one.
+    pub delay: u32,
+    pub cooldown: u32,
 }
 
 impl Unit {
     pub fn new(kind: impl Into<String>, cell: Cell, speed: i32, subcell: i32) -> Unit {
-        Unit { kind: kind.into(), pos: Pos::cell_centre(cell, subcell), facing: Dir8::S, path: VecDeque::new(), speed, subcell, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1, threat: 0, is_priest: false, is_transport: false, stunned: false, carrying: None, carried_by: None }
+        Unit { kind: kind.into(), pos: Pos::cell_centre(cell, subcell), facing: Dir8::S, path: VecDeque::new(), speed, subcell, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1, threat: 0, is_priest: false, is_transport: false, stunned: false, carrying: None, carried_by: None, is_air: false, is_flyer: false, base: None, life: 0, returning: false, strike: 0, range: 0, delay: 1, cooldown: 0 }
     }
 
     /// The cell the unit stands in.

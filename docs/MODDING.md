@@ -25,7 +25,10 @@ Changing a flag list under `[flags]` changes which types the simulation
 treats as walk-blocking, island-creating, geysers, Temples and so on.
 Adding a piece to `[bridges].pieces` puts it into every player's queue.
 `[production]` sets the slots per Workshop and the types a Temple provides
-without one.
+without one. `[air]` names the base classes, which attacker each base
+launches, the respawn wait and strike reach, and per attacker its flight
+time and habits (refuelling, hunting Transports, cracking bridges, feeding
+on kills).
 
 ## rules.rhai
 
@@ -46,6 +49,8 @@ Available hooks:
 - `knowledge_grant(known_bits, all_bits)` -> int or `()`
 - `target_priority(threat, distance, is_unit)` -> int, higher wins
 - `workshop_can_produce(workshop_theme, type_theme, type_level)` -> bool
+- `air_attack(class, use_air_damage, air_range, air_damage, range, hp_per_sec)` -> `#{ air_range, air_damage, ground }` or `()`
+- `air_target_priority(distance, is_unit, is_transport, hunts_transports)` -> int or `()` to refuse
 
 ## Sounds
 

@@ -173,9 +173,39 @@ From the type properties and the manual:
   its remaining health, and shocks bridges like an explosion but damages
   nothing else (the manual).
 
-Not yet modelled: `airrange` and `airdamage` against flyers, stunning and
-capturing priests, unit-versus-unit combat (no unit shoots yet), Energy
-requirements, and enemy AI beyond static shooters.
+## Air
+
+The manual: Aerial Transports (Balloon, Air Ship, Cloud Floater) float
+over the clouds and travel anywhere, harvesting and capturing like Golems.
+Air Attack Bases (Whirlibase, Devil Maker, Man o'War Pool) launch aerial
+attackers and make a new one each time theirs is lost; the base's range is
+the distance at which it detects an enemy and sends its attacker. A
+Whirligig destroys target after target, refuels at its base once a minute,
+never targets a Transport and soon crashes if its base is destroyed. A
+Dust Devil lasts ten seconds, returns every twenty and cracks the bridges
+it crosses. A Man o'War lives a minute, prefers Ground Transports, and
+each kill feeds it for another minute. The Vander Tower is a short-range
+weapon that fires at airborne units only. Attackers cost no Storm Power
+and refund none.
+
+Islefall: `flyer` types are attackers and `balloon` types Aerial
+Transports; both fly straight lines, need no ground, never fall and are
+hit only by weapons with `airrange`/`airdamage` (Sun Disc Thrower 12
+cells, Crossbow 16, Vander Tower 18), whose air shot deals
+`airdamage x delayBetweenShots`. The `air_attack` hook reads a type's
+class and air properties: "Anti-Air" shoots only upwards, a Shooter with
+air damage both ways. Bases (`air.base_classes`) launch the attacker
+`air.launches` names for them, since the data does not, after
+`air.respawn_seconds`. An attacker hunts the nearest enemy within its
+`range` of the base (the `air_target_priority` hook decides preference
+and refusals), strikes within `air.strike_range` cells for one shot of its
+`hpPerSec`, and lives `life_seconds` from `[air.attackers]`; whether it
+refuels, hunts Transports, cracks bridges or feeds on kills is set there
+too. Balloons are Battle units: they cost, need Energy and production,
+and are placed anywhere.
+
+Not yet modelled: the Cloud Floater's one-in-twenty hit chance, the
+floating priest, unit-versus-unit ground combat (no walker shoots).
 
 ## Workshops and production
 

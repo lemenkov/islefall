@@ -65,7 +65,7 @@ reserve; drops cost their type's price. Right-click acts with the current tool:
 `Q`, `W`, `A`, `S` pick one of the four bridge pieces on offer (`R` rotates
 it), `1` to `6` drop a sun cannon, archer, battery, factory, tree or wind
 generator (the last needs Knowledge from a sacrifice), `U`
-spawns a golem. `Delete` destroys the bridge cell under the cursor, `C`
+places a golem and `I` a balloon, which flies anywhere. `Delete` destroys the bridge cell under the cursor, `C`
 cracks it, `H` hardens it, `V` salvages your structure under the cursor; unsupported bridges crack and crumble, taking
 whatever stands on them. Drops follow the rules in `docs/RULES.md`, including Energy: the rings
 around the Temple and Generators show where units can be placed. Arrow
