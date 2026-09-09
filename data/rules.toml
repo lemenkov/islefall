@@ -170,6 +170,7 @@ bridge_fell = { file = "bridgeFall.WAV" }
 island_fell = { file = "islandFall.wav" }
 unit_lost = { file = "unitLost.wav" }
 launched = { property = "activeSound" }
+floating = { file = "priestFall.wav" }
 
 # The projectile type of each shooter. The type files hold fire and impact
 # sounds on the projectile, but nothing in the data links the two, so the

@@ -51,9 +51,9 @@ From the manual and the tutorial texts:
   see the letter table in `FORMATS.md`. Where a bridge meets island land,
   the island's rim cell is overlaid with a `bridgeconnector` frame.
 
-Not yet modelled: an Edge Farm blocking bridges off an island edge, bridge
-ownership (you may connect to enemy open ends but not build off them), and
-a floating priest waiting for a bridge to be rebuilt under him.
+Not yet modelled: an Edge Farm blocking bridges off an island edge and
+bridge ownership (you may connect to enemy open ends but not build off
+them).
 
 ## Dropping structures
 
@@ -106,8 +106,15 @@ Temple heals two points per second and leaves the stun above half health.
 The heal range and rate are Islefall's guesses; Knowledge does not yet
 unlock anything.
 
-Not yet modelled: the priest floating when his bridge is blown, capture by
-aerial Transports, and what each sacrifice actually teaches.
+The manual: a priest whose bridge is blown out from under him does not
+fall but floats in the clouds until a bridge is rebuilt beneath him, when
+he settles onto it; an Aerial Transport can capture a floating enemy
+priest. Islefall: a priest over fallen ground gets `floating` instead of
+dying, cannot move, lands the moment his cell is ground again, and may be
+captured by a `balloon`-flagged Transport whether or not he is stunned.
+A Transport that falls releases the priest it carried.
+
+Not yet modelled: what each sacrifice actually teaches.
 
 ## Storm Power
 
@@ -204,8 +211,8 @@ refuels, hunts Transports, cracks bridges or feeds on kills is set there
 too. Balloons are Battle units: they cost, need Energy and production,
 and are placed anywhere.
 
-Not yet modelled: the Cloud Floater's one-in-twenty hit chance, the
-floating priest, unit-versus-unit ground combat (no walker shoots).
+Not yet modelled: the Cloud Floater's one-in-twenty hit chance and
+unit-versus-unit ground combat (no walker shoots).
 
 ## Workshops and production
 

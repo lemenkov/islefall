@@ -74,6 +74,7 @@ pub struct SoundEvents {
     pub island_fell: SoundCue,
     pub unit_lost: SoundCue,
     pub launched: SoundCue,
+    pub floating: SoundCue,
 }
 
 impl SoundEvents {
@@ -94,6 +95,7 @@ impl SoundEvents {
             EventKind::IslandFell => &self.island_fell,
             EventKind::UnitLost => &self.unit_lost,
             EventKind::Launched => &self.launched,
+            EventKind::Floating => &self.floating,
         }
     }
 }

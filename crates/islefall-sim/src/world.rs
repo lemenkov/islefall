@@ -118,6 +118,8 @@ pub enum EventKind {
     UnitLost,
     /// A base sent an aerial attacker up; `kind` is the attacker.
     Launched,
+    /// A priest's ground fell away and he floats.
+    Floating,
 }
 
 /// Why a type could not be put into production.
@@ -526,15 +528,36 @@ impl World {
             self.structure_version += 1;
         }
         let mut lost = Vec::new();
+        let mut released = Vec::new();
         for u in &mut self.units {
-            if u.alive && !u.is_air && !reached.contains(&u.cell()) {
+            if u.alive && !u.is_air && !u.is_priest && u.carried_by.is_none() && !reached.contains(&u.cell()) {
                 u.alive = false;
                 u.path.clear();
+                u.task = Task::Idle;
+                if let Some(p) = u.carrying.take() {
+                    released.push(p);
+                }
                 lost.push((u.kind.clone(), u.cell(), u.owner));
+            }
+        }
+        for p in released {
+            self.units[p].carried_by = None;
+        }
+        // The manual: a priest whose bridge is blown does not fall but floats.
+        let mut floating = Vec::new();
+        for u in &mut self.units {
+            if u.alive && u.is_priest && !u.floating && u.carried_by.is_none() && !reached.contains(&u.cell()) {
+                u.floating = true;
+                u.path.clear();
+                u.task = Task::Idle;
+                floating.push((u.kind.clone(), u.cell(), u.owner));
             }
         }
         for (kind, at, owner) in lost {
             self.emit(EventKind::UnitLost, &kind, at, owner);
+        }
+        for (kind, at, owner) in floating {
+            self.emit(EventKind::Floating, &kind, at, owner);
         }
     }
 
@@ -892,7 +915,8 @@ impl World {
         if !u.alive || !u.is_transport || u.carrying.is_some() || u.stunned {
             return false;
         }
-        if !p.alive || !p.is_priest || !p.stunned || p.owner == u.owner || p.carried_by.is_some() {
+        let takeable = p.stunned || (p.floating && u.is_air);
+        if !p.alive || !p.is_priest || !takeable || p.owner == u.owner || p.carried_by.is_some() {
             return false;
         }
         let target = p.cell();
@@ -957,7 +981,11 @@ impl World {
             if near_temple && u.hp < u.max_hp && self.tick % heal_ticks == 0 {
                 self.units[i].hp += 1;
             }
+            let landed = self.units[i].floating && self.is_ground(at);
             let u = &mut self.units[i];
+            if landed {
+                u.floating = false;
+            }
             u.stunned = u.hp * 2 <= u.max_hp;
             if u.stunned {
                 u.path.clear();
@@ -1232,7 +1260,8 @@ impl World {
                         self.units[i].task = Task::Idle;
                         continue;
                     };
-                    if !p.alive || !p.stunned || p.carried_by.is_some() {
+                    let takeable = p.stunned || (p.floating && u.is_air);
+                    if !p.alive || !takeable || p.carried_by.is_some() {
                         self.units[i].task = Task::Idle;
                         continue;
                     }
@@ -1240,6 +1269,7 @@ impl World {
                     let adjacent = pc == at || [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().any(|&(dx, dy)| at.offset(dx, dy) == pc);
                     if adjacent {
                         self.units[priest].carried_by = Some(i);
+                        self.units[priest].floating = false;
                         self.units[priest].task = Task::Idle;
                         self.units[i].carrying = Some(priest);
                         self.units[i].task = Task::Idle;
@@ -1323,7 +1353,7 @@ impl World {
     /// Order a unit to walk to `cell` along the cheapest walkable path.
     /// Returns `false` if the cell is unreachable.
     pub fn order_move(&mut self, unit: usize, cell: Cell) -> bool {
-        let Some(from) = self.units.get(unit).filter(|u| u.alive && !u.stunned && u.carried_by.is_none()).map(|u| u.cell()) else { return false };
+        let Some(from) = self.units.get(unit).filter(|u| u.alive && !u.stunned && !u.floating && u.carried_by.is_none()).map(|u| u.cell()) else { return false };
         if self.units[unit].is_air {
             // Flyers cross the sky in a straight line.
             let sub = self.subcell();
@@ -1877,6 +1907,60 @@ mod tests {
             w.step(&scripts);
         }
         assert!(w.units.iter().filter(|u| u.is_flyer).count() >= 2, "a new attacker took off (and may already be down again)");
+    }
+
+    #[test]
+    fn a_priest_whose_bridge_falls_floats_until_rescued_or_taken_by_air() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 4), 0);
+        w.push_island(IslandMap::rect(Cell::new(20, 0), 4, 4), 1);
+        let speed = speed_per_tick(&w.cfg, 4.0);
+        let sub = w.subcell();
+        w.units.push(Unit::new("priest", Cell::new(3, 1), speed, sub));
+        w.units[0].is_priest = true;
+        w.units[0].hp = 100;
+        w.units[0].max_hp = 100;
+        for x in 4..8 {
+            w.place_bridge(Cell::new(x, 1));
+        }
+        assert!(w.order_move(0, Cell::new(7, 1)));
+        for _ in 0..200 {
+            w.step(&test_scripts());
+        }
+        assert_eq!(w.units[0].cell(), Cell::new(7, 1));
+        w.destroy_bridge(Cell::new(4, 1));
+        for _ in 0..300 {
+            w.step(&test_scripts());
+        }
+        assert!(!w.is_bridge(Cell::new(7, 1)), "the cut-off bridge crumbled");
+        assert!(w.units[0].alive && w.units[0].floating, "the priest floats instead of falling");
+        assert!(!w.order_move(0, Cell::new(3, 1)), "a floating priest cannot walk");
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 2.0, ..TypeRules::plain() };
+        let g = w.spawn_unit_for(1, "sunwalker", &golem, Cell::new(21, 1)).unwrap();
+        assert!(!w.order_capture(g, 0), "a Ground Transport cannot reach him");
+        let balloon = TypeRules { is_unit: true, is_air: true, is_transport: true, max_hit_points: 150, speed: 4.0, ..TypeRules::plain() };
+        let b = w.spawn_unit_for(1, "sunballoon", &balloon, Cell::new(21, 2)).unwrap();
+        assert!(w.order_capture(b, 0), "an Aerial Transport may take a floating priest");
+        for _ in 0..300 {
+            w.step(&test_scripts());
+        }
+        assert_eq!(w.units[0].carried_by, Some(b));
+        assert!(!w.units[0].floating);
+        // A second priest is rescued by rebuilding the bridge under him.
+        let p2 = w.units.len();
+        w.units.push(Unit::new("priest", Cell::new(6, 1), speed, sub));
+        w.units[p2].is_priest = true;
+        w.units[p2].hp = 100;
+        w.units[p2].max_hp = 100;
+        w.units[p2].floating = true;
+        w.step(&test_scripts());
+        assert!(w.units[p2].floating);
+        for x in 4..7 {
+            assert!(w.place_bridge(Cell::new(x, 1)));
+        }
+        w.step(&test_scripts());
+        assert!(!w.units[p2].floating, "he settles onto the new bridge");
+        assert!(w.order_move(p2, Cell::new(3, 1)));
     }
 
     #[test]

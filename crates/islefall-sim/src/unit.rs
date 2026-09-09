@@ -112,6 +112,9 @@ pub struct Unit {
     pub is_transport: bool,
     /// A priest at or below half health cannot act.
     pub stunned: bool,
+    /// A priest whose ground fell away hangs in the clouds until ground
+    /// returns under him or an Aerial Transport takes him.
+    pub floating: bool,
     /// Index of the unit this one is carrying (a captured priest).
     pub carrying: Option<usize>,
     /// Index of the unit carrying this one.
@@ -135,7 +138,7 @@ pub struct Unit {
 
 impl Unit {
     pub fn new(kind: impl Into<String>, cell: Cell, speed: i32, subcell: i32) -> Unit {
-        Unit { kind: kind.into(), pos: Pos::cell_centre(cell, subcell), facing: Dir8::S, path: VecDeque::new(), speed, subcell, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1, threat: 0, is_priest: false, is_transport: false, stunned: false, carrying: None, carried_by: None, is_air: false, is_flyer: false, base: None, life: 0, returning: false, strike: 0, range: 0, delay: 1, cooldown: 0 }
+        Unit { kind: kind.into(), pos: Pos::cell_centre(cell, subcell), facing: Dir8::S, path: VecDeque::new(), speed, subcell, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1, threat: 0, is_priest: false, is_transport: false, stunned: false, floating: false, carrying: None, carried_by: None, is_air: false, is_flyer: false, base: None, life: 0, returning: false, strike: 0, range: 0, delay: 1, cooldown: 0 }
     }
 
     /// The cell the unit stands in.
