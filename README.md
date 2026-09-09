@@ -14,7 +14,7 @@ Status: early development. Nothing is playable yet.
 
 | Path | What |
 |------|------|
-| `crates/islefall-data` | Loaders for the original data files (sprite cache, palettes). No engine dependency. |
+| `crates/islefall-data` | Loaders for the original data files (sprite cache, palettes, the `netstorm.tarc` archive and its `.type` unit definitions). No engine dependency. |
 | `crates/islefall` | The game binary, built on Bevy. Currently a sprite viewer. |
 | `docs/FORMATS.md` | Reverse-engineered descriptions of the NetStorm file formats. |
 | `tools/shp_decode.py` | Python reference decoder used while working out the sprite format. |
@@ -54,6 +54,13 @@ sheet:
 ```sh
 cargo run -p islefall-data --bin shpdump -- stats "$NETSTORM_DIR/d/_shapes.shp"
 cargo run -p islefall-data --bin shpdump -- sheet "$NETSTORM_DIR/d/_shapes.shp" 88 walker.png --col "$NETSTORM_DIR/d/SUNCANNON.COL"
+```
+
+`tarcdump` lists or extracts the text archive and parses all unit definitions:
+
+```sh
+cargo run -p islefall-data --bin tarcdump -- types "$NETSTORM_DIR/netstorm.tarc"
+cargo run -p islefall-data --bin tarcdump -- cat "$NETSTORM_DIR/netstorm.tarc" sunwalker.type
 ```
 
 Decoders treat the input as untrusted: sizes come from the decoded data, not

@@ -16,6 +16,10 @@ name = "shpdump"
 path = "src/bin/shpdump.rs"
 required-features = ["png"]
 
+[[bin]]
+name = "tarcdump"
+path = "src/bin/tarcdump.rs"
+
 [features]
 default = ["png"]
 png = ["dep:png"]

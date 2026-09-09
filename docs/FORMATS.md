@@ -13,7 +13,8 @@ All integers are little-endian. Offsets are given in hex.
 1. [`_shapes.shp` sprite cache](#_shapesshp-sprite-cache)
 2. [`*.COL` palettes](#col-palettes)
 3. [`netstorm.tarc` text archive](#netstormtarc-text-archive)
-4. [Decoder safety notes](#decoder-safety-notes)
+4. [`*.type` unit definitions](#type-unit-definitions)
+5. [Decoder safety notes](#decoder-safety-notes)
 
 ---
 
@@ -230,20 +231,81 @@ table, which is how the layout was confirmed.
 
 ## `netstorm.tarc` text archive
 
-`netstorm.tarc` is a flat archive of text resources (`*.type`, `*.english`,
-`*.fort`); it contains no images.
+`netstorm.tarc` (710,961 bytes in the 8.2 release) is a flat archive of text
+resources: 124 `*.type` unit definitions, 90 `*.english` string tables and
+32 `*.fort` files. It contains no images.
 
 | Offset | Size | Field |
 |-------:|-----:|-------|
+| 0x00 | 10 | magic `TAFF v0.2\x1a` |
+| 0x10 | 4 | 2, meaning unknown |
 | 0x14 | 4 | number of files |
-| 0x20 | 4 | offset of the name/offset table |
-| 0x24 | 4 | length of that table |
+| 0x18 | 4 | 2, meaning unknown |
+| 0x1c | 4 | 0x2c, apparently the header size |
+| 0x20 | 4 | offset of the name table |
+| 0x24 | 4 | length of the name table |
 | 0x28 | 4 | offset of the data area |
+| 0x2c | 4 x files | one u32 per file, meaning unknown |
 
-The table holds, per file, `u32 offset`, `u32 size`, then a NUL-terminated
-path such as `\d\bird.type`. Offsets are relative to the data area. Each
-file's bytes are XOR-obfuscated with the repeating 13-byte key
-`mydoghasfleas`.
+The name table holds, per file, `u32 offset`, `u32 size`, then a
+NUL-terminated path such as `\d\bird.type`. Offsets are relative to the data
+area. Each file's bytes are XOR-obfuscated with the repeating 13-byte key
+`mydoghasfleas`, restarting at the first byte of every file. The decoded text
+is Latin-1 with `//` comments and mixed line endings.
+
+---
+
+## `*.type` unit definitions
+
+Each `.type` file inside the archive defines one object type: a unit, a
+building, an island piece, an effect or a spell. The format is a small text
+language:
+
+```
+typename sunwalker constructor
+typeflags walker shadow;
+{
+	description = "Golem";
+	class = "Ground Transport";
+	maxHitPoints = 50;
+	theme = "sun";
+	speed = 1.8;
+	hotFootRatioX = 0.5;
+}
+
+// NORTH
+A00 : : "golem.gif" #64 : "s_golem.gif" #64;
+A05 : default gumpframe : "golem.gif" #69 : "s_golem.gif" #69;
+```
+
+Rules observed across all 124 files:
+
+- `//` starts a comment; there are no block comments.
+- `typename <name> [client] [constructor]` names the type. The modifiers
+  appear on 75 files and probably select which side instantiates the type.
+- `typeflags <flag>* ;` lists boolean flags. The most common are `shadow`,
+  `dontSave`, `default_hotspot`, `mayDropOnRim`, `emplacement`,
+  `createsisland`, `not_real`, `bomb`, `dropBlocking`, `yuckWalk`,
+  `shotblocking`, `not_selectable`, `walker`, `island`, `bridge`, `altar`,
+  `priest`, `geyser`. Spelling varies in case (`notreal`, `not_real`).
+- One `{ ... }` block holds `key = value;` properties. Values are quoted
+  strings, integers or decimals. Keys vary in case between files
+  (`hotFootRatioX`, `hotfootratiox`), so lookups must be case-insensitive.
+  Frequent keys: `description`, `class`, `zorder`, `foot_x`, `foot_y`,
+  `theme` (`sun`, `rain`, `wind`, `thunder`), `level`, `maxHitPoints`,
+  `threat`, `cost`, `range`, `speed`, `turningSpeed`, `constructionRate`,
+  `group`, `techBit`, `damageEffect`, `hotFootRatioX/Y`, and sound names.
+- Every other statement is a frame: `LABEL : flags : "file.gif" #n [: "file.gif" #n] ;`.
+  The label is a run of letters naming an animation (`A` to `H` are the
+  eight facing directions for walkers, `AA` and later letters are further
+  sets) followed by the frame number. Frame flags include `default`, `help`,
+  `baseframe`, `gumpframe`, and for island pieces `solid`, `dirt`, `hard`,
+  `cracked`, `lit`, `unlit`. The second image reference, when present, is
+  the frame's shadow. Statements may span lines and end at `;`.
+
+The GIF files named here are not shipped; the frames they refer to are the
+records of `_shapes.shp`. How containers map to GIF names is not yet
+established.
 
 ---
 

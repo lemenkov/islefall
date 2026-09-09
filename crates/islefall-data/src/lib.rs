@@ -2,7 +2,8 @@
 //! Loaders for the original NetStorm data files.
 //!
 //! Islefall does not ship any game data. These loaders read the files of a
-//! user-supplied NetStorm installation (the `d/` directory). File layouts are
+//! user-supplied NetStorm installation: the sprite cache and palettes in
+//! `d/`, and the unit definitions inside `netstorm.tarc`. File layouts are
 //! documented in `docs/FORMATS.md` at the repository root.
 //!
 //! Every loader is written on the assumption that the input may be corrupt:
@@ -11,6 +12,10 @@
 
 pub mod col;
 pub mod shp;
+pub mod tarc;
+pub mod typefile;
 
 pub use col::Palette;
 pub use shp::{Frame, FrameHeader, ShapeFile, ShpError};
+pub use tarc::Archive;
+pub use typefile::TypeDef;
