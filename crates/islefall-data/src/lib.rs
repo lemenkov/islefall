@@ -11,11 +11,15 @@
 //! capped by [`shp::MAX_DIM`] and [`shp::MAX_PIXELS`].
 
 pub mod col;
+pub mod install;
+pub mod shapes;
 pub mod shp;
 pub mod tarc;
 pub mod typefile;
 
 pub use col::Palette;
+pub use install::Installation;
+pub use shapes::ShapeRecords;
 pub use shp::{Frame, FrameHeader, ShapeFile, ShpError};
 pub use tarc::Archive;
 pub use typefile::TypeDef;

@@ -69,11 +69,11 @@ impl std::fmt::Display for AtlasError {
 
 impl std::error::Error for AtlasError {}
 
-/// Pack every frame of `container` into an atlas. Frames that fail to decode
-/// or are empty become 1x1 transparent cells so animation indices stay
-/// aligned with the container's entry order.
-pub fn build_atlas(shp: &ShapeFile, palette: &Palette, container: usize) -> Result<ShapeAtlas, AtlasError> {
-    let frames: Vec<Option<Frame>> = shp.decode_container(container).into_iter().map(Result::ok).collect();
+/// Pack the records at `offsets` into an atlas, one cell per offset in
+/// order. Records that fail to decode or are empty become 1x1 transparent
+/// cells so atlas indices stay aligned with frame indices.
+pub fn build_atlas(shp: &ShapeFile, palette: &Palette, offsets: &[usize]) -> Result<ShapeAtlas, AtlasError> {
+    let frames: Vec<Option<Frame>> = offsets.iter().map(|&o| shp.decode(o).ok()).collect();
     if frames.iter().all(|f| f.as_ref().is_none_or(Frame::is_empty)) {
         return Err(AtlasError::NoFrames);
     }

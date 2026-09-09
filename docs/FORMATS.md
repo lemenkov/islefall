@@ -199,19 +199,38 @@ row. Two zero bytes pad to the trailer:
 `box = (11, 17, 12, 16, 0, -1)`; `11/16 = 0.6875`, `17/11 = 1.545`, ... match
 the floats.
 
-### What the containers hold
+### Containers are types
 
-Observed in the 8.2 data, rendered with the sun cannon palette:
+Each container holds the frames of one object type from the `*.type` files
+(see below), in the order the game registers its types. That order is not
+stored in any data file; it was recovered from the string table of the
+game's `netstorm.game` binary, where the type names appear consecutively
+after `zoRISING`, and verified against every container's entry count. One
+name (`mog`) is absent from that table because the linker merged it with an
+identical string elsewhere; it belongs at position 83. The full list of 119
+file stems is `SHAPE_ORDER` in `crates/islefall-data/src/shapes.rs`.
 
-| Container | Content |
-|-----------|---------|
-| 0, 88 | walking figures |
-| 2 | buildings (dome, windmill) and a landscape |
-| 27 | terrain, 16 x 11 tile halves |
-| 109 | explosion ring growing over 10 frames |
+A container's entries are the type's frames in file order, one record per
+frame. If the type carries the `shadow` or `flyershadow` flag, the container
+has twice as many entries: first every frame's image, then every frame's
+shadow. Frames that reference the same `"file.gif" #n` share one record, and
+the file contains records that no table references at all. So for a type
+with N frames:
 
-Which palette belongs to which container is not yet known; the mapping is
-presumably in the `*.type` files.
+```
+entries[i]       image of frame i        (0 <= i < N)
+entries[N + i]   shadow of frame i       (only with a shadow flag)
+```
+
+Examples from the 8.2 data:
+
+| Container | Type | Entries |
+|----------:|------|---------|
+| 0 | `dude` | 65 frames x 2 (shadowed) |
+| 27 | `isle` | 317 terrain tiles, 16 x 11 |
+| 63 | `sunwalker` | 66 frames x 2 |
+| 88 | `priest` | 168 frames x 2 |
+| 109 | `gravitationeffect` | 10 frames of a growing ring |
 
 ---
 
