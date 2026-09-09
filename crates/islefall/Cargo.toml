@@ -1,0 +1,22 @@
+[package]
+name = "islefall"
+description = "Islefall, a sky-islands real-time strategy game"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+islefall-data = { workspace = true }
+
+[dependencies.bevy]
+version = "0.19.1"
+default-features = false
+# 2D only: no PBR, glTF, audio decoders or gamepad backend until needed.
+features = ["2d", "wayland", "x11"]
+
+[features]
+default = []
+# Faster incremental dev builds: `cargo run --features dynamic_linking`.
+dynamic_linking = ["bevy/dynamic_linking"]
