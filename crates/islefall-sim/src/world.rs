@@ -754,10 +754,8 @@ impl World {
                     return Err(DropError::UnknownTech(bit));
                 }
             }
-            if owner == 0 {
-                self.check_energy(owner, rules, cell)?;
-                self.check_production(owner, kind, rules)?;
-            }
+            self.check_energy(owner, rules, cell)?;
+            self.check_production(owner, kind, rules)?;
         }
         // Geysers are placed by the map, not bought; everything else costs its type's price.
         let slot = self.slot(owner);
@@ -877,10 +875,8 @@ impl World {
                     return Err(DropError::UnknownTech(bit));
                 }
             }
-            if owner == 0 {
-                self.check_energy(owner, rules, cell)?;
-                self.check_production(owner, kind, rules)?;
-            }
+            self.check_energy(owner, rules, cell)?;
+            self.check_production(owner, kind, rules)?;
         }
         let slot = self.slot(owner);
         if rules.cost > self.powers[slot] {

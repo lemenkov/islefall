@@ -135,8 +135,10 @@ range_px = 128
 move_seconds = 4.0
 # Every this many moves the opponent drops a shooter instead of a piece.
 shooter_every = 3
-# What the opponent drops.
+# What the opponent drops, and what it drops instead when the shooter's
+# site lacks Energy; it puts both into production at its Workshop.
 shooter = "sunarcher"
+generator = "sunbattery"
 # How far from an open end a shooter's hotspot may be tried.
 shooter_reach = 3
 # Seed of the opponent's piece queue.

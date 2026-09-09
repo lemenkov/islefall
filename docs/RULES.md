@@ -259,12 +259,15 @@ time (`constructionRate`) and the Storm Power Stream are not modelled.
 
 ## The opponent
 
-A first computer player, in `crates/islefall-sim/src/ai.rs`, moves every
-few seconds: it lays the piece and rotation from its own random queue that
-brings a bridge closest to the player's altar, attaching only to its own
-island edges and open bridge ends, and every third move drops a Sun Disc
-Thrower in the sky at the open end nearest the target. It pays its own Storm
-Power and sends idle Transports to harvest, but needs no Energy yet.
+A computer player follows the same rules as you: its drops cost Storm
+Power and need Knowledge, Energy at the site and a Workshop with the type
+in production; its structures are built by streams. Every `ai.move_seconds`
+it sends idle Transports harvesting, keeps its shooter and generator in
+production at any Workshop it owns, and either drops a shooter at the open
+end nearest its target (every `shooter_every`th move), drops a generator
+at the nearest site with Energy when every shooter site lacked it, or lays
+the bridge piece from its own queue that brings it closest to its target.
+An opponent without a Workshop only bridges and harvests.
 
 ## Ownership
 

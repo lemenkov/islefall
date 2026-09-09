@@ -24,7 +24,7 @@ remove = [[23, 0], [22, 0], [23, 1]]
 owner = 1
 theme = "sun"
 origin = [36, 4]
-size = [11, 11]
+size = [16, 11]
 
 # A neutral island with a geyser: anyone may build on it, nobody may bridge
 # off it until an Outpost claims it.
@@ -72,7 +72,7 @@ at = [32, 4]
 [[structures]]
 owner = 1
 kind = "geyser"
-at = [42, 9]
+at = [43, 8]
 
 [[structures]]
 owner = 0
@@ -82,18 +82,26 @@ at = [30, 11]
 [[structures]]
 owner = 1
 kind = "sunarcher"
-at = [39, 7]
+at = [39, 13]
 
 [[structures]]
 owner = 1
 kind = "residence"
-at = [43, 13]
+at = [40, 9]
 
 # A Whirlibase: its Whirligig hunts anything within 35 cells.
 [[structures]]
 owner = 1
 kind = "sunaviary"
-at = [45, 9]
+at = [50, 7]
+
+# The opponent's Temple stands near the west edge it bridges from, so its
+# Energy reaches the sky there and batteries can chain along the bridge.
+# Its Workshop puts the shooters and batteries into production.
+[[structures]]
+owner = 1
+kind = "sunfactory"
+at = [50, 13]
 
 # A Sun Disc Thrower guards the Workshop against the Whirligig.
 [[structures]]
@@ -116,12 +124,12 @@ move_to = [11, 6]
 [[units]]
 owner = 1
 kind = "priest"
-at = [38, 11]
+at = [42, 12]
 
 [[units]]
 owner = 1
 kind = "sunwalker"
-at = [44, 6]
+at = [42, 10]
 
 # Computer players: bridge towards a target cell, or the enemy altar when
 # `target` is omitted.

@@ -7,8 +7,15 @@ use crate::config::Config;
 use crate::grid::Cell;
 use crate::pieces::{Piece, PieceQueue};
 use crate::rules::TypeRules;
+use crate::script::Scripts;
 use crate::unit::Task;
-use crate::world::World;
+use crate::world::{DropError, World};
+
+/// The types an opponent builds with, resolved by the app from the data.
+pub struct AiKit {
+    pub shooter: (String, TypeRules),
+    pub generator: (String, TypeRules),
+}
 
 pub struct Ai {
     pub owner: u8,
@@ -29,6 +36,10 @@ pub struct Ai {
 pub enum AiMove {
     Piece { name: String, at: Cell },
     Shooter { kind: String, at: Cell },
+    /// A generator dropped so that a later shooter has Energy.
+    Generator { kind: String, at: Cell },
+    /// A drop was tried and refused; why, for the log.
+    Refused { kind: String, why: String },
     Nothing,
 }
 
@@ -48,7 +59,7 @@ impl Ai {
     }
 
     /// Call once per simulation tick; acts every `every` ticks.
-    pub fn tick(&mut self, world: &mut World, shooter: (&str, &TypeRules)) -> Option<AiMove> {
+    pub fn tick(&mut self, world: &mut World, kit: &AiKit, scripts: &Scripts) -> Option<AiMove> {
         self.ticks += 1;
         if self.ticks < self.every {
             return None;
@@ -56,11 +67,22 @@ impl Ai {
         self.ticks = 0;
         self.moves += 1;
         self.send_idle_transports_harvesting(world);
-        let m = if self.moves % self.shooter_every == 0 { self.drop_shooter(world, shooter) } else { AiMove::Nothing };
-        if m != AiMove::Nothing {
+        self.keep_in_production(world, kit, scripts);
+        let m = if self.moves % self.shooter_every == 0 { self.drop_battle_unit(world, kit) } else { AiMove::Nothing };
+        if !matches!(m, AiMove::Nothing) {
             return Some(m);
         }
         Some(self.extend_bridge(world))
+    }
+
+    /// Keep the shooter and the generator in production wherever a
+    /// Workshop of the opponent's allows; nothing happens without one.
+    fn keep_in_production(&self, world: &mut World, kit: &AiKit, scripts: &Scripts) {
+        for (kind, rules) in [&kit.shooter, &kit.generator] {
+            if !world.in_production(self.owner, kind) {
+                let _ = world.put_into_production(self.owner, kind, rules, scripts);
+            }
+        }
     }
 
     /// Idle Transports of the opponent go and harvest the nearest geyser with stock.
@@ -153,27 +175,66 @@ impl Ai {
     }
 
     /// Drop a shooter in the sky next to the open end nearest the target.
-    fn drop_shooter(&mut self, world: &mut World, (kind, rules): (&str, &TypeRules)) -> AiMove {
+    /// Drop the shooter at the open end nearest the target; when every site
+    /// lacks Energy, drop the generator at the nearest site that has it,
+    /// so the line of batteries follows the bridge.
+    fn drop_battle_unit(&mut self, world: &mut World, kit: &AiKit) -> AiMove {
         let mut ends: Vec<Cell> = world.bridge_owners.iter().filter(|(c, o)| **o == self.owner && world.is_open_end(**c)).map(|(&c, _)| c).collect();
         ends.sort_by_key(|&c| Self::distance(c, self.target));
-        for end in ends.into_iter().take(3) {
-            let mut spots = Vec::new();
-            for dy in -self.shooter_reach..=self.shooter_reach {
-                for dx in -self.shooter_reach..=self.shooter_reach {
-                    let at = end.offset(dx, dy);
-                    if world.can_drop(rules, at).is_ok() {
-                        spots.push(at);
-                    }
+        let (kind, rules) = &kit.shooter;
+        let mut refused: Vec<DropError> = Vec::new();
+        for end in ends.iter().take(3) {
+            match self.drop_near(world, *end, kind, rules) {
+                Ok(at) => return AiMove::Shooter { kind: kind.clone(), at },
+                Err(Some(e)) => refused.push(e),
+                Err(None) => {}
+            }
+        }
+        let mut why = refused.first().map(|e| e.to_string());
+        if refused.iter().any(|e| matches!(e, DropError::NotEnoughEnergy { .. })) {
+            // Chain batteries from the island's edge along the bridge: the
+            // site nearest the target that Energy already reaches.
+            let (kind, rules) = &kit.generator;
+            let mut anchors = self.frontier(world);
+            anchors.sort_by_key(|&c| Self::distance(c, self.target));
+            let mut generator_why: Option<DropError> = None;
+            for anchor in anchors {
+                match self.drop_near(world, anchor, kind, rules) {
+                    Ok(at) => return AiMove::Generator { kind: kind.clone(), at },
+                    Err(e) => generator_why = generator_why.or(e),
                 }
             }
-            spots.sort_by_key(|&c| Self::distance(c, self.target));
-            if let Some(at) = spots.first().copied() {
-                if world.drop_structure_for(self.owner, kind, rules, at).is_ok() {
-                    return AiMove::Shooter { kind: kind.to_string(), at };
+            if let Some(e) = generator_why {
+                why = Some(format!("{}; no site for a {kind} either: {e}", why.unwrap_or_default()));
+            }
+        }
+        match why {
+            Some(why) => AiMove::Refused { kind: kind.clone(), why },
+            None => AiMove::Nothing,
+        }
+    }
+
+    /// Try the sites around an open end nearest the target first. `Err(None)`
+    /// means no site fits at all; `Err(Some(e))` the rule that refused the best.
+    fn drop_near(&self, world: &mut World, end: Cell, kind: &str, rules: &TypeRules) -> Result<Cell, Option<DropError>> {
+        let mut spots = Vec::new();
+        for dy in -self.shooter_reach..=self.shooter_reach {
+            for dx in -self.shooter_reach..=self.shooter_reach {
+                let at = end.offset(dx, dy);
+                if world.can_drop(rules, at).is_ok() {
+                    spots.push(at);
                 }
             }
         }
-        AiMove::Nothing
+        spots.sort_by_key(|&c| Self::distance(c, self.target));
+        let mut first = None;
+        for at in spots {
+            match world.drop_structure_for(self.owner, kind, rules, at) {
+                Ok(_) => return Ok(at),
+                Err(e) => first = first.or(Some(e)),
+            }
+        }
+        Err(first)
     }
 }
 
@@ -195,11 +256,13 @@ mod tests {
         w.powers[1] = 5000;
         let scripts = test_scripts();
         let thrower = TypeRules { foot_x: 3, foot_y: 3, creates_island: true, may_drop_on_rim: true, max_hit_points: 400, range: 8, hp_per_sec: 12, damage_per_shot: 12, ..TypeRules::plain() };
+        let battery = TypeRules { foot_x: 2, foot_y: 2, creates_island: true, may_drop_on_rim: true, max_hit_points: 200, ..TypeRules::plain() };
+        let kit = AiKit { shooter: ("sunarcher".into(), thrower), generator: ("sunbattery".into(), battery) };
         let mut pieces = 0;
         let mut shooters = 0;
         for _ in 0..600 {
             w.step(&scripts);
-            match ai.tick(&mut w, ("sunarcher", &thrower)) {
+            match ai.tick(&mut w, &kit, &scripts) {
                 Some(AiMove::Piece { .. }) => pieces += 1,
                 Some(AiMove::Shooter { .. }) => shooters += 1,
                 _ => {}
@@ -212,4 +275,40 @@ mod tests {
         assert!(w.bridge_owners.values().all(|&o| o == 1));
         assert!(w.structures.iter().any(|s| s.owner == 1 && s.kind == "sunarcher"));
     }
+
+    #[test]
+    fn opponent_chains_generators_when_its_shooters_need_energy() {
+        use crate::rules::EnergyNeed;
+        use islefall_data::isle::Theme;
+        let mut cfg = test_config();
+        cfg.ai.move_seconds = 10.0 / cfg.sim.tick_hz as f64;
+        let mut ai = Ai::new(1, Cell::new(2, 2), &cfg);
+        let mut w = World::new(cfg);
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 6, 6), 0);
+        w.push_island(IslandMap::rect(Cell::new(30, 0), 8, 8), 1);
+        let scripts = test_scripts();
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, produces: Some(Theme::Sun), ..TypeRules::plain() };
+        let workshop = TypeRules { foot_x: 2, foot_y: 2, is_workshop: true, theme: Theme::Sun, ..TypeRules::plain() };
+        w.drop_structure_for(1, "residence", &temple, Cell::new(32, 2)).unwrap();
+        w.drop_structure_for(1, "sunfactory", &workshop, Cell::new(35, 5)).unwrap();
+        w.powers[1] = 20_000;
+        w.energy_enforced = true;
+        let need = Some(EnergyNeed { theme: Theme::Sun, themed: 0, any: 1 });
+        let thrower = TypeRules { foot_x: 3, foot_y: 3, creates_island: true, may_drop_on_rim: true, max_hit_points: 400, range: 8, hp_per_sec: 12, damage_per_shot: 12, energy: need, cost: 250, ..TypeRules::plain() };
+        let battery = TypeRules { foot_x: 2, foot_y: 2, creates_island: true, may_drop_on_rim: true, max_hit_points: 200, produces: Some(Theme::Sun), energy: need, cost: 300, ..TypeRules::plain() };
+        let kit = AiKit { shooter: ("sunarcher".into(), thrower), generator: ("sunbattery".into(), battery) };
+        let (mut shooters, mut generators) = (0, 0);
+        for _ in 0..1500 {
+            w.step(&scripts);
+            match ai.tick(&mut w, &kit, &scripts) {
+                Some(AiMove::Shooter { .. }) => shooters += 1,
+                Some(AiMove::Generator { .. }) => generators += 1,
+                _ => {}
+            }
+        }
+        assert!(generators >= 1, "a battery went down to feed the line ({generators})");
+        assert!(shooters >= 1, "and shooters followed ({shooters})");
+        assert!(w.structures.iter().any(|s| s.owner == 1 && s.slots > 0 && s.production.len() == 2), "both types in production");
+    }
 }
+

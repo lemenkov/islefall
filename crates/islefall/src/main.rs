@@ -720,12 +720,14 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>) {
     }
     let Sim { world: Some(world), ais } = &mut *sim else { return };
     world.step(&data.scripts);
-    let shooter = data.cfg.ai.shooter.clone();
-    let rules = data.rules(&shooter);
+    let (shooter, generator) = (data.cfg.ai.shooter.clone(), data.cfg.ai.generator.clone());
+    let kit = islefall_sim::ai::AiKit { shooter: (shooter.clone(), data.rules(&shooter)), generator: (generator.clone(), data.rules(&generator)) };
     for ai in ais.iter_mut() {
-        match ai.tick(world, (&shooter, &rules)) {
+        match ai.tick(world, &kit, &data.scripts) {
             Some(AiMove::Piece { name, at }) => info!("opponent {} lays a {name} piece at {at:?}", ai.owner),
             Some(AiMove::Shooter { kind, at }) => info!("opponent {} drops a {kind} at {at:?}", ai.owner),
+            Some(AiMove::Generator { kind, at }) => info!("opponent {} drops a {kind} for Energy at {at:?}", ai.owner),
+            Some(AiMove::Refused { kind, why }) => info!("opponent {} could not drop a {kind}: {why}", ai.owner),
             _ => {}
         }
     }

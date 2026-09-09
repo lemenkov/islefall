@@ -281,6 +281,8 @@ pub struct AiConfig {
     pub move_seconds: f64,
     pub shooter_every: u32,
     pub shooter: String,
+    /// What the opponent drops when a shooter's site lacks Energy.
+    pub generator: String,
     pub shooter_reach: i32,
     pub queue_seed: u64,
 }
