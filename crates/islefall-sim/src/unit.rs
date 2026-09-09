@@ -86,6 +86,10 @@ pub enum Task {
     Idle,
     /// Carry crystals from `geyser` to `temple` until the geyser is empty.
     Harvest { geyser: usize, temple: usize, carrying: i32, work: u32 },
+    /// Walk to a stunned enemy priest and pick him up.
+    Capture { priest: usize },
+    /// Carry the held priest to the centre of `altar` and sacrifice him.
+    Sacrifice { altar: usize },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,11 +108,20 @@ pub struct Unit {
     pub owner: u8,
     pub hp: i32,
     pub max_hp: i32,
+    pub threat: i32,
+    pub is_priest: bool,
+    pub is_transport: bool,
+    /// A priest at or below half health cannot act.
+    pub stunned: bool,
+    /// Index of the unit this one is carrying (a captured priest).
+    pub carrying: Option<usize>,
+    /// Index of the unit carrying this one.
+    pub carried_by: Option<usize>,
 }
 
 impl Unit {
     pub fn new(kind: impl Into<String>, cell: Cell, speed: i32) -> Unit {
-        Unit { kind: kind.into(), pos: Pos::cell_centre(cell), facing: Dir8::S, path: VecDeque::new(), speed, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1 }
+        Unit { kind: kind.into(), pos: Pos::cell_centre(cell), facing: Dir8::S, path: VecDeque::new(), speed, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1, threat: 0, is_priest: false, is_transport: false, stunned: false, carrying: None, carried_by: None }
     }
 
     pub fn is_moving(&self) -> bool {
@@ -119,7 +132,7 @@ impl Unit {
     /// Leftover movement after reaching a waypoint is not carried over, so a
     /// unit takes a whole tick per waypoint at most once per cell.
     pub fn step(&mut self) {
-        if !self.alive {
+        if !self.alive || self.stunned || self.carried_by.is_some() {
             return;
         }
         let Some(&t) = self.path.front() else { return };

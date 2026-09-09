@@ -57,6 +57,12 @@ pub struct TypeRules {
     pub cardinal_only: bool,
     /// `threat`: targeting priority, higher first.
     pub threat: i32,
+    /// A High Priest (`priest` flag): can be stunned, captured and sacrificed.
+    pub is_priest: bool,
+    /// A Transport (`walker`, `flyer`, `balloon` without `priest`): can carry a captured priest.
+    pub is_transport: bool,
+    /// An Altar (`dais` flag): where captured priests are sacrificed.
+    pub is_altar: bool,
 }
 
 impl TypeRules {
@@ -87,6 +93,9 @@ impl TypeRules {
             // No flag marks this; the manual says Sun/Rain/Thunder Cannons shoot only straight.
             cardinal_only: def.name.to_ascii_lowercase().contains("cannon"),
             threat: def.get_i64("threat").unwrap_or(0) as i32,
+            is_priest: def.has_flag("priest"),
+            is_transport: !def.has_flag("priest") && (def.has_flag("walker") || def.has_flag("flyer") || def.has_flag("balloon")),
+            is_altar: def.has_flag("dais"),
         }
     }
 
@@ -115,6 +124,9 @@ impl TypeRules {
             delay_between_shots: 1.0,
             cardinal_only: false,
             threat: 0,
+            is_priest: false,
+            is_transport: false,
+            is_altar: false,
         }
     }
 }

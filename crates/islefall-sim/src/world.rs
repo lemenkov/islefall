@@ -28,6 +28,10 @@ pub const EXPLOSION_RADIUS: i32 = 2;
 pub const EXPLOSION_DAMAGE: i32 = 150;
 /// Share of the cost refunded when a healthy unit is salvaged.
 pub const SALVAGE_REFUND_PERCENT: i32 = 25;
+/// Cells from an own Temple within which a priest regenerates.
+pub const TEMPLE_HEAL_RANGE: i32 = 8;
+/// Ticks between one point of priest regeneration.
+pub const HEAL_TICKS: u32 = TICK_HZ / 2;
 
 /// Condition of a bridge cell.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -123,6 +127,8 @@ pub struct World {
     pub storm_power: i32,
     /// Shots fired during the last tick, for effects and logging.
     pub last_shots: Vec<(usize, Target)>,
+    /// Knowledge granted to the player by sacrifices.
+    pub knowledge: u32,
 }
 
 impl Default for World {
@@ -141,6 +147,7 @@ impl Default for World {
             queue: PieceQueue::new(PIECE_SLOTS, 0x5eed),
             storm_power: 0,
             last_shots: Vec::new(),
+            knowledge: 0,
         }
     }
 }
@@ -455,6 +462,7 @@ impl World {
         s.max_hp = rules.max_hit_points;
         s.cost = rules.cost;
         s.threat = rules.threat;
+        s.is_altar = rules.is_altar;
         if rules.range > 0 && rules.hp_per_sec > 0 {
             s.weapon = Some(Weapon {
                 range: rules.range,
@@ -495,8 +503,89 @@ impl World {
         u.owner = owner;
         u.hp = rules.max_hit_points.max(1);
         u.max_hp = u.hp;
+        u.threat = rules.threat;
+        u.is_priest = rules.is_priest;
+        u.is_transport = rules.is_transport;
         self.units.push(u);
         Some(self.units.len() - 1)
+    }
+
+    /// Order a Transport to capture a stunned enemy priest.
+    pub fn order_capture(&mut self, unit: usize, priest: usize) -> bool {
+        let (Some(u), Some(p)) = (self.units.get(unit), self.units.get(priest)) else { return false };
+        if !u.alive || !u.is_transport || u.carrying.is_some() || u.stunned {
+            return false;
+        }
+        if !p.alive || !p.is_priest || !p.stunned || p.owner == u.owner || p.carried_by.is_some() {
+            return false;
+        }
+        let target = p.pos.cell();
+        if !self.walk_next_to(unit, target) {
+            return false;
+        }
+        self.units[unit].task = Task::Capture { priest };
+        true
+    }
+
+    /// Order a Transport carrying a priest to sacrifice him on the altar at `altar`.
+    pub fn order_sacrifice(&mut self, unit: usize, altar: usize) -> bool {
+        let (Some(u), Some(a)) = (self.units.get(unit), self.structures.get(altar)) else { return false };
+        if !u.alive || u.carrying.is_none() || !a.is_altar || a.owner != u.owner {
+            return false;
+        }
+        let centre = a.centre();
+        if !self.order_move(unit, centre) {
+            return false;
+        }
+        self.units[unit].task = Task::Sacrifice { altar };
+        true
+    }
+
+    /// Path a unit onto `target` or, failing that, to a walkable cell next to it.
+    fn walk_next_to(&mut self, unit: usize, target: Cell) -> bool {
+        let Some(from) = self.units.get(unit).map(|u| u.pos.cell()) else { return false };
+        if from == target || [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().any(|&(dx, dy)| from.offset(dx, dy) == target) {
+            self.units[unit].path.clear();
+            return true;
+        }
+        let mut targets: Vec<Cell> = [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().map(|&(dx, dy)| target.offset(dx, dy)).filter(|&c| self.is_walkable(c)).collect();
+        targets.sort_by_key(|c| (c.x - from.x).abs() + (c.y - from.y).abs());
+        for t in targets {
+            if self.order_move(unit, t) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Stun and regeneration for priests, and carried units following their carrier.
+    fn run_priests(&mut self) {
+        let temples: Vec<(u8, Cell)> = self.structures.iter().filter(|s| s.is_temple).map(|s| (s.owner, s.centre())).collect();
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            if !u.alive {
+                continue;
+            }
+            if let Some(c) = u.carried_by {
+                let pos = self.units[c].pos;
+                self.units[i].pos = pos;
+                continue;
+            }
+            if !u.is_priest {
+                continue;
+            }
+            let at = u.pos.cell();
+            let near_temple = temples.iter().any(|&(o, c)| o == u.owner && (c.x - at.x).abs() <= TEMPLE_HEAL_RANGE && (c.y - at.y).abs() <= TEMPLE_HEAL_RANGE);
+            if near_temple && u.hp < u.max_hp && self.tick % HEAL_TICKS as u64 == 0 {
+                self.units[i].hp += 1;
+            }
+            let u = &mut self.units[i];
+            u.stunned = u.hp * 2 <= u.max_hp;
+            if u.stunned {
+                u.path.clear();
+                u.task = Task::Idle;
+            }
+        }
     }
 
     /// Salvage one of the player's structures: part of its cost comes back,
@@ -608,6 +697,11 @@ impl World {
             u.alive = false;
             u.path.clear();
             u.task = Task::Idle;
+            if let Some(p) = u.carrying.take() {
+                if let Some(priest) = self.units.get_mut(p) {
+                    priest.carried_by = None;
+                }
+            }
         }
     }
 
@@ -632,10 +726,10 @@ impl World {
                 }
             }
             for (j, u) in self.units.iter().enumerate() {
-                if !u.alive || u.owner == s.owner || !in_range(u.pos.cell()) {
+                if !u.alive || u.owner == s.owner || u.carried_by.is_some() || !in_range(u.pos.cell()) {
                     continue;
                 }
-                let key = (0, -s.distance_to(u.pos.cell()));
+                let key = (u.threat, -s.distance_to(u.pos.cell()));
                 if best.as_ref().is_none_or(|b| (b.0, b.1) < key) {
                     best = Some((key.0, key.1, Target::Unit(j)));
                 }
@@ -711,8 +805,51 @@ impl World {
             if !u.alive || u.is_moving() {
                 continue;
             }
-            let Task::Harvest { geyser, temple, carrying, work } = u.task else { continue };
             let at = u.pos.cell();
+            match u.task {
+                Task::Capture { priest } => {
+                    let Some(p) = self.units.get(priest) else {
+                        self.units[i].task = Task::Idle;
+                        continue;
+                    };
+                    if !p.alive || !p.stunned || p.carried_by.is_some() {
+                        self.units[i].task = Task::Idle;
+                        continue;
+                    }
+                    let pc = p.pos.cell();
+                    let adjacent = pc == at || [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().any(|&(dx, dy)| at.offset(dx, dy) == pc);
+                    if adjacent {
+                        self.units[priest].carried_by = Some(i);
+                        self.units[priest].task = Task::Idle;
+                        self.units[i].carrying = Some(priest);
+                        self.units[i].task = Task::Idle;
+                    } else if !self.walk_next_to(i, pc) {
+                        self.units[i].task = Task::Idle;
+                    }
+                    continue;
+                }
+                Task::Sacrifice { altar } => {
+                    let owner = u.owner;
+                    let (Some(centre), Some(p)) = (self.structures.get(altar).map(|a| a.centre()), u.carrying) else {
+                        self.units[i].task = Task::Idle;
+                        continue;
+                    };
+                    if centre == at {
+                        self.units[p].alive = false;
+                        self.units[p].carried_by = None;
+                        self.units[i].carrying = None;
+                        self.units[i].task = Task::Idle;
+                        if owner == 0 {
+                            self.knowledge += 1;
+                        }
+                    } else if !self.order_move(i, centre) {
+                        self.units[i].task = Task::Idle;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            let Task::Harvest { geyser, temple, carrying, work } = u.task else { continue };
             let (Some(g), Some(t)) = (self.structures.get(geyser), self.structures.get(temple)) else {
                 self.units[i].task = Task::Idle;
                 continue;
@@ -758,7 +895,7 @@ impl World {
     /// Order a unit to walk to `cell` along the cheapest walkable path.
     /// Returns `false` if the cell is unreachable.
     pub fn order_move(&mut self, unit: usize, cell: Cell) -> bool {
-        let Some(from) = self.units.get(unit).filter(|u| u.alive).map(|u| u.pos.cell()) else { return false };
+        let Some(from) = self.units.get(unit).filter(|u| u.alive && !u.stunned && u.carried_by.is_none()).map(|u| u.pos.cell()) else { return false };
         let Some(path) = find_path_costed(from, cell, |c| self.walk_cost(c)) else { return false };
         let u = &mut self.units[unit];
         u.path = path.into_iter().map(Pos::cell_centre).collect();
@@ -782,6 +919,7 @@ impl World {
         for u in &mut self.units {
             u.step();
         }
+        self.run_priests();
         self.run_tasks();
         self.last_shots.clear();
         self.run_combat();
@@ -1096,6 +1234,60 @@ mod tests {
         assert_eq!(w.salvage(i), Some(50), "half health, half refund");
         let e = w.drop_structure_for(1, "thing", &r, Cell::new(3, 2)).unwrap();
         assert_eq!(w.salvage(e), None, "cannot salvage enemy property");
+    }
+
+    #[test]
+    fn stunned_priest_is_captured_and_sacrificed() {
+        let mut w = world();
+        w.islands.push(IslandMap::rect(Cell::new(0, 4), 12, 8));
+        w.storm_power = 1000;
+        let altar = TypeRules { foot_x: 3, foot_y: 3, is_altar: true, may_drop_on_rim: true, cost: 500, ..TypeRules::plain() };
+        let a = w.drop_structure("dais", &altar, Cell::new(5, 9)).unwrap();
+        let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, threat: 25, speed: 1.8, ..TypeRules::plain() };
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
+        let p = w.spawn_unit_for(1, "priest", &priest, Cell::new(9, 7)).unwrap();
+        let g = w.spawn_unit("sunwalker", &golem, Cell::new(1, 6)).unwrap();
+        assert!(!w.order_capture(g, p), "a healthy priest cannot be captured");
+        w.damage_unit(p, 50);
+        w.step();
+        assert!(w.units[p].stunned);
+        assert!(!w.order_move(p, Cell::new(9, 9)), "stunned priests cannot move");
+        assert!(w.order_capture(g, p));
+        for _ in 0..400 {
+            w.step();
+            if w.units[g].carrying.is_some() {
+                break;
+            }
+        }
+        assert_eq!(w.units[g].carrying, Some(p));
+        assert_eq!(w.units[p].carried_by, Some(g));
+        assert!(w.order_sacrifice(g, a));
+        for _ in 0..400 {
+            w.step();
+            if w.units[g].task == Task::Idle && w.units[g].carrying.is_none() {
+                break;
+            }
+        }
+        assert!(!w.units[p].alive, "sacrificed");
+        assert_eq!(w.knowledge, 1);
+        assert_eq!(w.units[g].pos.cell(), w.structures[a].centre());
+    }
+
+    #[test]
+    fn temple_heals_a_priest_out_of_stun() {
+        let mut w = world();
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, ..TypeRules::plain() };
+        let p = w.spawn_unit("priest", &priest, Cell::new(4, 1)).unwrap();
+        w.damage_unit(p, 60);
+        w.step();
+        assert!(w.units[p].stunned);
+        for _ in 0..(HEAL_TICKS * 12) {
+            w.step();
+        }
+        assert!(!w.units[p].stunned, "healed above half by the temple");
+        assert!(w.units[p].hp > 50);
     }
 
     #[test]

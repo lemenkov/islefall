@@ -4,8 +4,10 @@
 //! Two modes, chosen with `ISLEFALL_MODE`:
 //! - `island` (default): an island with the altar and the High Priest,
 //!   driven by the simulation. Left-click selects a unit, sends the selected
-//!   unit somewhere, or, on a Storm Geyser, sets it harvesting; right-click
-//!   acts with the current tool. The window title shows Storm Power.
+//!   unit somewhere, on a Storm Geyser sets it harvesting, on a stunned enemy
+//!   priest sends a Transport to capture him, and on your Altar sacrifices a
+//!   carried priest; right-click acts with the current tool. The window
+//!   title shows Storm Power and Knowledge.
 //!   Tools: `Q`, `W`, `A`, `S` pick a bridge piece from the four slots on
 //!   offer (`R` rotates it), `1`..`5` drop a building, `U` spawn a golem.
 //!   `Delete` destroys, `C` cracks and `H` hardens the bridge cell under the
@@ -294,6 +296,10 @@ fn setup_island(
     if let Err(e) = sim.world.drop_structure_for(1, "sunarcher", &data.rules("sunarcher"), Cell::new(31, 7)) {
         warn!("enemy sunarcher: {e}");
     }
+    // The enemy High Priest lives on the geyser island: stun, capture and sacrifice him.
+    if sim.world.spawn_unit_for(1, "priest", &data.rules("priest"), Cell::new(33, 11)).is_none() {
+        warn!("enemy priest could not be placed");
+    }
     sim.world.storm_power = START_POWER;
     if let Some(i) = sim.world.spawn_unit("priest", &data.rules("priest"), Cell::new(2, 8)) {
         sim.world.order_move(i, Cell::new(23, 3));
@@ -399,14 +405,15 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>) {
     }
 }
 
-/// Keep the window title showing the Storm Power reserve.
-fn title(sim: Res<Sim>, mut windows: Query<&mut Window, With<PrimaryWindow>>, mut last: Local<Option<i32>>) {
-    if *last == Some(sim.world.storm_power) {
+/// Keep the window title showing the Storm Power reserve and Knowledge.
+fn title(sim: Res<Sim>, mut windows: Query<&mut Window, With<PrimaryWindow>>, mut last: Local<Option<(i32, u32)>>) {
+    let now = (sim.world.storm_power, sim.world.knowledge);
+    if *last == Some(now) {
         return;
     }
-    *last = Some(sim.world.storm_power);
+    *last = Some(now);
     if let Ok(mut w) = windows.single_mut() {
-        w.title = format!("Islefall - Storm Power {}", sim.world.storm_power);
+        w.title = format!("Islefall - Storm Power {} - Knowledge {}", now.0, now.1);
     }
 }
 
@@ -494,13 +501,28 @@ fn mouse_actions(
     }
     let Some(cell) = cursor_cell(&windows, &cameras) else { return };
     if left {
-        // Click on a unit selects it; on a geyser, the selected unit harvests; otherwise it moves.
-        if let Some(i) = sim.world.units.iter().position(|u| u.alive && u.pos.cell() == cell) {
+        // Click on an own unit selects it; on a stunned enemy priest, the selected
+        // Transport captures him; on a geyser it harvests; on your altar it
+        // sacrifices a carried priest; otherwise it moves.
+        let sel = player.selected;
+        if let Some(i) = sim.world.units.iter().position(|u| u.alive && u.owner == 0 && u.carried_by.is_none() && u.pos.cell() == cell) {
             player.selected = i;
             info!("selected unit {i} ({})", sim.world.units[i].kind);
+        } else if let Some(p) = sim.world.units.iter().position(|u| u.alive && u.owner != 0 && u.is_priest && u.pos.cell() == cell) {
+            if sim.world.order_capture(sel, p) {
+                info!("unit {sel} sent to capture the priest");
+            } else {
+                info!("unit {sel} cannot capture: needs a Transport and a stunned priest");
+            }
+        } else if let Some(a) = sim.world.structures.iter().position(|s| s.is_altar && s.owner == 0 && s.covers(cell)) {
+            if sim.world.order_sacrifice(sel, a) {
+                info!("unit {sel} carries the priest to the altar");
+            } else if sim.world.command_move(sel, cell) {
+                info!("unit {sel} ordered to {cell:?}");
+            }
         } else if let Some(g) = sim.world.structures.iter().position(|s| s.stock > 0 && s.covers(cell)) {
             let sel = player.selected;
-            if sim.world.order_harvest(sel, g) {
+                if sim.world.order_harvest(sel, g) {
                 info!("unit {sel} harvesting geyser {g}");
             } else {
                 info!("unit {sel} cannot harvest geyser {g}: needs a temple and a bridge connection");
@@ -662,9 +684,20 @@ fn overlays(mut commands: Commands, sim: Res<Sim>, existing: Query<Entity, With<
         }
     }
     for u in &sim.world.units {
-        if u.alive && u.hp < u.max_hp {
-            let p = unit_to_world(u);
+        if !u.alive {
+            continue;
+        }
+        let p = unit_to_world(u);
+        if u.hp < u.max_hp {
             bar(&mut commands, Vec2::new(p.x, p.y + 22.0), 12.0, u.hp as f32 / u.max_hp as f32);
+        }
+        if u.stunned {
+            // The manual's glowing ring around a stunned priest.
+            commands.spawn((
+                Sprite::from_color(Color::srgba(1.0, 0.95, 0.3, 0.45), Vec2::new(18.0, 12.0)),
+                Transform::from_translation(Vec3::new(p.x, p.y - 2.0, 59.0)),
+                Overlay,
+            ));
         }
     }
     for &(_, target) in &sim.world.last_shots {

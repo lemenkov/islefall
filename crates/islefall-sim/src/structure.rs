@@ -32,6 +32,7 @@ pub struct Structure {
     /// Ticks until the weapon may fire again.
     pub cooldown: u32,
     pub threat: i32,
+    pub is_altar: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +62,7 @@ impl Structure {
             weapon: None,
             cooldown: 0,
             threat: 0,
+            is_altar: false,
         }
     }
 

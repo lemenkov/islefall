@@ -82,10 +82,31 @@ influencing the space") are not modelled yet.
 
 ## Units
 
-- `walker`, `flyer` and `balloon` mark mobile types. Flyers and balloons are
-  not yet special: they walk.
+- `walker`, `flyer` and `balloon` mark mobile types; those without `priest`
+  are Transports. Flyers and balloons are not yet special: they walk.
 - Facing uses the eight walk animations `A` to `H`: north, north-east, east,
   south-east, south, south-west, west, north-west.
+- Units have `maxHitPoints` and `threat`; shooters prefer the highest
+  threat, which makes the High Priest (25) the favourite target.
+
+## The High Priest
+
+From the manual: bringing a priest's health to the half-way point stuns
+him; a stunned priest can be captured by any Transport; a Transport carries
+him to the centre of your Altar, secures him and walks away; the sacrifice
+grants Knowledge; a priest near his own Temple regenerates.
+
+Islefall: a priest at or below half health is stunned and takes no orders.
+A Transport ordered to capture walks next to him and picks him up; the
+priest then follows the carrier and is not shot at. Ordered to sacrifice,
+the carrier walks to the altar's centre cell, the priest dies and the
+player's Knowledge counter rises by one. A priest within 8 cells of an own
+Temple heals two points per second and leaves the stun above half health.
+The heal range and rate are Islefall's guesses; Knowledge does not yet
+unlock anything.
+
+Not yet modelled: the priest floating when his bridge is blown, capture by
+aerial Transports, and what each sacrifice actually teaches.
 
 ## Storm Power
 
