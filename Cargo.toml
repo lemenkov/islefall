@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/lemenkov/islefall"
+rust-version = "1.85"
+
+[workspace.dependencies]
+islefall-data = { path = "crates/islefall-data", default-features = false }
+
+# Fast incremental dev builds: our own code lightly optimised, dependencies fully.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

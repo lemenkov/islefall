@@ -1,0 +1,25 @@
+[package]
+name = "islefall-data"
+description = "Loaders for the original NetStorm data files (sprite cache, palettes)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+
+[[bin]]
+name = "shpdump"
+path = "src/bin/shpdump.rs"
+required-features = ["png"]
+
+[features]
+default = ["png"]
+png = ["dep:png"]
+
+[dependencies.png]
+version = "0.17"
+optional = true
