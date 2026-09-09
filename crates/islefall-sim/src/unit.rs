@@ -90,11 +90,13 @@ pub struct Unit {
     pub path: VecDeque<Pos>,
     /// Movement per tick in fixed-point steps.
     pub speed: i32,
+    /// Dead units stay in the list so indices remain stable.
+    pub alive: bool,
 }
 
 impl Unit {
     pub fn new(kind: impl Into<String>, cell: Cell, speed: i32) -> Unit {
-        Unit { kind: kind.into(), pos: Pos::cell_centre(cell), facing: Dir8::S, path: VecDeque::new(), speed }
+        Unit { kind: kind.into(), pos: Pos::cell_centre(cell), facing: Dir8::S, path: VecDeque::new(), speed, alive: true }
     }
 
     pub fn is_moving(&self) -> bool {
@@ -105,6 +107,9 @@ impl Unit {
     /// Leftover movement after reaching a waypoint is not carried over, so a
     /// unit takes a whole tick per waypoint at most once per cell.
     pub fn step(&mut self) {
+        if !self.alive {
+            return;
+        }
         let Some(&t) = self.path.front() else { return };
         let (dx, dy) = ((t.x - self.pos.x) as i64, (t.y - self.pos.y) as i64);
         let dist = ((dx * dx + dy * dy) as u64).isqrt() as i64;

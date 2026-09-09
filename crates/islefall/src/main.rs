@@ -5,8 +5,10 @@
 //! - `island` (default): an island with the altar and the High Priest,
 //!   driven by the simulation. Left-click selects a unit or sends the
 //!   selected unit somewhere; right-click acts with the current tool.
-//!   Tools: `B` bridge cells, `1`..`5` drop a building, `U` spawn a golem.
-//!   Arrow keys or WASD pan the camera, `-` and `=` zoom.
+//!   Tools: `Q`, `W`, `A`, `S` pick a bridge piece from the four slots on
+//!   offer (`R` rotates it), `1`..`5` drop a building, `U` spawn a golem.
+//!   `Delete` destroys, `C` cracks and `H` hardens the bridge cell under the
+//!   cursor. Arrow keys or WASD pan the camera, `-` and `=` zoom.
 //! - `viewer`: animates one object type at a time. `[` and `]` step
 //!   through types, `,` and `.` through animations.
 //!
@@ -31,7 +33,7 @@ use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
 use islefall_data::{Installation, TypeDef};
-use islefall_sim::{CELL_H, CELL_W, Cell, Dir8, IslandMap, TICK_HZ, TypeRules, Unit, World};
+use islefall_sim::{CELL_H, CELL_W, Cell, Dir8, IslandMap, Piece, TICK_HZ, TypeRules, Unit, World};
 use sprites::FrameInfo;
 use world::{BridgeTile, LoadedShape, ShapeLibrary, StructureSprite, TerrainTile, Z_SHADOW, Z_STRUCTURE, Z_UNIT};
 
@@ -66,10 +68,14 @@ enum Mode {
 /// What a right-click does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Tool {
-    Bridge,
+    /// A bridge piece taken from queue slot `.0`, rotated as `.1`.
+    Bridge(usize, Piece),
     Drop(&'static str),
     Spawn(&'static str),
 }
+
+/// Keys for the piece slots, as in the original Production window.
+const SLOT_KEYS: [KeyCode; 6] = [KeyCode::KeyQ, KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyS, KeyCode::KeyZ, KeyCode::KeyX];
 
 /// The user-supplied NetStorm data, loaded once at startup.
 #[derive(Resource)]
@@ -96,6 +102,10 @@ struct Player {
     tool: Tool,
     selected: usize,
 }
+
+/// Marks the placement preview sprites.
+#[derive(Component)]
+struct Ghost;
 
 #[derive(Resource)]
 struct Viewer {
@@ -175,7 +185,7 @@ fn main() {
     .insert_resource(Time::<Fixed>::from_hz(TICK_HZ as f64))
     .init_resource::<ShapeLibrary>()
     .init_resource::<Sim>()
-    .insert_resource(Player { tool: Tool::Bridge, selected: 0 })
+    .insert_resource(Player { tool: Tool::Spawn(UNIT_TOOL), selected: 0 })
     .insert_resource(Viewer {
         type_index: SHAPE_ORDER.iter().position(|s| *s == START_TYPE).unwrap_or(0),
         animation: 0,
@@ -187,7 +197,7 @@ fn main() {
     .add_systems(Update, (common_keys, animate, auto_screenshot))
     .add_systems(
         Update,
-        (camera_keys, tool_keys, mouse_actions, sync_units, sync_bridges, sync_structures, sync_platforms)
+        (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, sync_units, sync_bridges, sync_structures, sync_platforms)
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
@@ -267,13 +277,12 @@ fn setup_island(
     for (x, y) in [(14, 4), (15, 4), (16, 4), (17, 4), (18, 4), (18, 3), (18, 2), (16, 3), (16, 5), (16, 6), (19, 3), (17, 2), (15, 5), (17, 3)] {
         sim.world.place_bridge(Cell::new(x, y));
     }
-    // A battery dropped on the bridge turns the cells under it into a platform.
-    sim.world.place_bridge(Cell::new(16, 2));
-    if let Err(e) = sim.world.drop_structure("sunbattery", &data.rules("sunbattery"), Cell::new(18, 4)) {
+    // A battery dropped in the sky off the bridge end at (19,3) makes its own island.
+    if let Err(e) = sim.world.drop_structure("sunbattery", &data.rules("sunbattery"), Cell::new(22, 4)) {
         warn!("sunbattery: {e}");
     }
     if let Some(i) = sim.world.spawn_unit("priest", &data.rules("priest"), Cell::new(2, 8)) {
-        sim.world.order_move(i, Cell::new(17, 3));
+        sim.world.order_move(i, Cell::new(21, 3));
     }
     if let Some(i) = sim.world.spawn_unit(UNIT_TOOL, &data.rules(UNIT_TOOL), Cell::new(5, 8)) {
         sim.world.order_move(i, Cell::new(11, 8));
@@ -386,7 +395,7 @@ fn sync_units(
     mut lib: ResMut<ShapeLibrary>,
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-    mut layers: Query<(&mut Transform, &mut Sprite, &mut Anchor, &mut ShapeSprite, &mut UnitLayer)>,
+    mut layers: Query<(Entity, &mut Transform, &mut Sprite, &mut Anchor, &mut ShapeSprite, &mut UnitLayer)>,
     mut known: Local<usize>,
 ) {
     // New units since last frame get their layers.
@@ -404,8 +413,12 @@ fn sync_units(
             commands.entity(e).insert(UnitLayer { unit: i, facing: unit.facing, shadow: k == 1 });
         }
     }
-    for (mut tf, mut sprite, mut anchor, mut shape, mut layer) in &mut layers {
+    for (entity, mut tf, mut sprite, mut anchor, mut shape, mut layer) in &mut layers {
         let Some(unit) = sim.world.units.get(layer.unit) else { continue };
+        if !unit.alive {
+            commands.entity(entity).despawn();
+            continue;
+        }
         let pos = unit_to_world(unit);
         tf.translation.x = pos.x;
         tf.translation.y = pos.y;
@@ -457,7 +470,7 @@ fn mouse_actions(
     let Some(cell) = cursor_cell(&windows, &cameras) else { return };
     if left {
         // Click on a unit selects it; otherwise move the selected unit.
-        if let Some(i) = sim.world.units.iter().position(|u| u.pos.cell() == cell) {
+        if let Some(i) = sim.world.units.iter().position(|u| u.alive && u.pos.cell() == cell) {
             player.selected = i;
             info!("selected unit {i} ({})", sim.world.units[i].kind);
         } else if sim.world.order_move(player.selected, cell) {
@@ -468,13 +481,15 @@ fn mouse_actions(
         return;
     }
     match player.tool.clone() {
-        Tool::Bridge => {
-            if sim.world.place_bridge(cell) {
-                info!("bridge placed at {cell:?}");
-            } else {
-                info!("cannot place a bridge at {cell:?}");
+        Tool::Bridge(slot, piece) => match sim.world.place_piece(&piece.cells_at(cell)) {
+            Ok(()) => {
+                info!("{} piece placed at {cell:?}", piece.name);
+                sim.world.queue.refill(slot);
+                // The slot now holds a fresh piece; pick it up so building can continue.
+                player.tool = Tool::Bridge(slot, sim.world.queue.slots[slot].clone());
             }
-        }
+            Err(e) => info!("cannot place {}: {e}", piece.name),
+        },
         Tool::Drop(stem) => match sim.world.drop_structure(stem, &data.rules(stem), cell) {
             Ok(_) => info!("{stem} dropped at {cell:?}"),
             Err(e) => info!("cannot drop {stem}: {e}"),
@@ -489,10 +504,19 @@ fn mouse_actions(
     }
 }
 
-fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut player: ResMut<Player>) {
-    if keys.just_pressed(KeyCode::KeyB) {
-        player.tool = Tool::Bridge;
-    } else if keys.just_pressed(KeyCode::KeyU) {
+fn tool_keys(keys: Res<ButtonInput<KeyCode>>, sim: Res<Sim>, mut player: ResMut<Player>) {
+    if keys.just_pressed(KeyCode::KeyR) {
+        if let Tool::Bridge(slot, piece) = &player.tool {
+            player.tool = Tool::Bridge(*slot, piece.rotated());
+        }
+        return;
+    }
+    if let Some(slot) = SLOT_KEYS.iter().position(|k| keys.just_pressed(*k)).filter(|&i| i < sim.world.queue.slots.len()) {
+        player.tool = Tool::Bridge(slot, sim.world.queue.slots[slot].clone());
+        info!("tool: bridge piece {} from slot {slot}", sim.world.queue.slots[slot].name);
+        return;
+    }
+    if keys.just_pressed(KeyCode::KeyU) {
         player.tool = Tool::Spawn(UNIT_TOOL);
     } else if let Some((_, stem)) = BUILD_TOOLS.iter().find(|(k, _)| keys.just_pressed(*k)) {
         player.tool = Tool::Drop(stem);
@@ -500,6 +524,69 @@ fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut player: ResMut<Player>) {
         return;
     }
     info!("tool: {:?}", player.tool);
+}
+
+/// Crack, harden or destroy the bridge cell under the cursor.
+fn bridge_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    cameras: Query<(&Camera, &GlobalTransform)>,
+    mut sim: ResMut<Sim>,
+) {
+    let (crack, harden, destroy) = (keys.just_pressed(KeyCode::KeyC), keys.just_pressed(KeyCode::KeyH), keys.just_pressed(KeyCode::Delete));
+    if !crack && !harden && !destroy {
+        return;
+    }
+    let Some(cell) = cursor_cell(&windows, &cameras) else { return };
+    if crack {
+        info!("crack {cell:?}: {}", sim.world.crack_bridge(cell));
+    } else if harden {
+        info!("harden {cell:?}: {}", sim.world.harden_bridge(cell));
+    } else {
+        let before = sim.world.bridges.len();
+        if sim.world.destroy_bridge(cell) {
+            info!("destroyed {cell:?}; {} bridge cells fell", before - 1 - sim.world.bridges.len());
+        }
+    }
+}
+
+/// Show the current piece or footprint under the cursor, green when it can go there.
+#[allow(clippy::too_many_arguments)]
+fn ghost(
+    mut commands: Commands,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    cameras: Query<(&Camera, &GlobalTransform)>,
+    data: Res<GameData>,
+    player: Res<Player>,
+    sim: Res<Sim>,
+    existing: Query<Entity, With<Ghost>>,
+) {
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
+    let Some(cell) = cursor_cell(&windows, &cameras) else { return };
+    let (cells, ok) = match &player.tool {
+        Tool::Bridge(_, piece) => {
+            let cells = piece.cells_at(cell);
+            let ok = sim.world.can_place_piece(&cells).is_ok();
+            (cells, ok)
+        }
+        Tool::Drop(stem) => {
+            let rules = data.rules(stem);
+            let probe = islefall_sim::Structure::new(*stem, cell, rules.foot_x, rules.foot_y, islefall_sim::Walk::Free);
+            (probe.cells().collect(), sim.world.can_drop(&rules, cell).is_ok())
+        }
+        Tool::Spawn(_) => (vec![cell], sim.world.is_walkable(cell)),
+    };
+    let color = if ok { Color::srgba(0.2, 1.0, 0.2, 0.35) } else { Color::srgba(1.0, 0.2, 0.2, 0.35) };
+    for c in cells {
+        let (x, y) = c.top_left_px();
+        commands.spawn((
+            Sprite::from_color(color, Vec2::new(CELL_W as f32, CELL_H as f32)),
+            Transform::from_translation(Vec3::new(x as f32 + CELL_W as f32 / 2.0, -(y as f32 + CELL_H as f32 / 2.0), 50.0)),
+            Ghost,
+        ));
+    }
 }
 
 /// Rebuild the bridge layer whenever the simulation's bridge set changes.

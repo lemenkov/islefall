@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use islefall_data::isle::{self, Theme};
 use islefall_data::{Installation, Palette, bridge};
-use islefall_sim::{Cell, IslandMap, World};
+use islefall_sim::{BridgeState, Cell, IslandMap, World};
 
 /// Marks a terrain tile sprite; platform tiles are rebuilt when terrain changes.
 #[derive(Component)]
@@ -159,10 +159,15 @@ pub fn spawn_bridges(
 ) {
     let Some(def) = install.type_def("bridge") else { return };
     let Some(shape) = lib.get_or_load(install, palette, "bridge", images, layouts) else { return };
-    let mut by_mask: HashMap<u8, Vec<usize>> = HashMap::new();
-    for &cell in &world.bridges {
+    let mut by_mask: HashMap<(u8, BridgeState), Vec<usize>> = HashMap::new();
+    for (&cell, &state) in &world.bridges {
         let mask = world.bridge_connections(cell);
-        let frames = by_mask.entry(mask).or_insert_with(|| bridge::frames(def, mask, bridge::Condition::Normal));
+        let condition = match state {
+            BridgeState::Normal => bridge::Condition::Normal,
+            BridgeState::Cracked => bridge::Condition::Cracked,
+            BridgeState::Hard => bridge::Condition::Hard,
+        };
+        let frames = by_mask.entry((mask, state)).or_insert_with(|| bridge::frames(def, mask, condition));
         if frames.is_empty() {
             continue;
         }
@@ -190,7 +195,7 @@ fn spawn_bridge_connectors(
     let Some(def) = install.type_def("bridgeconnector") else { return };
     let Some(shape) = lib.get_or_load(install, palette, "bridgeconnector", images, layouts) else { return };
     let mut done = std::collections::HashSet::new();
-    for &cell in &world.bridges {
+    for &cell in world.bridges.keys() {
         for (frame, dx, dy) in [(0usize, 0, -1), (1, 1, 0), (2, 0, 1), (3, -1, 0)] {
             let land = cell.offset(dx, dy);
             if frame >= def.frames.len() || !world.is_land(land) || !done.insert((land, frame)) {

@@ -1,9 +1,11 @@
 # Game rules as read from the data
 
 Islefall derives its rules from the `typeflags` and properties of the
-original `.type` files rather than hardcoding per-unit behaviour. This file
-records how each flag is interpreted and how sure that reading is. The
-implementation lives in `crates/islefall-sim/src/rules.rs` and `world.rs`.
+original `.type` files, cross-checked against the game's own manual
+(`help/GAME.HLP`, a WinHelp file readable after decompiling it with
+`helpdeco`). This file records how each flag is interpreted and how sure
+that reading is. The implementation lives in `crates/islefall-sim/src/rules.rs`,
+`pieces.rs` and `world.rs`.
 
 ## Map
 
@@ -27,29 +29,56 @@ corner of a blocked cell. Movement is fixed point (256 steps per cell) at
 
 ## Bridges
 
-- A bridge cell can be placed on sky orthogonally adjacent to ground.
-- A bridge cell's tile is chosen by which of its four neighbours are ground;
-  see the letter table in `FORMATS.md`.
-- Where a bridge meets island land, the island's rim cell is overlaid with a
-  `bridgeconnector` frame (island north, east, south, west of the bridge).
+From the manual and the tutorial texts:
 
-Not yet modelled: NetStorm's bridge pieces (several cells dropped as one
-tetromino-like shape), `cracked` and `hard` bridge states, and bridge
-destruction.
+- Bridges are dropped as multi-cell pieces from a Production window that
+  offers 2, 4 or 6 random pieces (keys Q, W, A, S, Z, X); a used piece is
+  replaced by a new random one. The shipped catalogue of shapes is not in
+  the data, so `pieces.rs` carries a plausible set.
+- A piece must attach to the edge of an island or to the open end of another
+  bridge. Islefall reads "open end" as a bridge cell with exactly one
+  connection.
+- A bridge with no connection to an island cracks from its own weight and
+  then crumbles. Islefall cracks unsupported cells at once and drops them
+  four seconds later; platforms and the structures on them fall immediately.
+- Destroying a bridge cell destroys adjacent cracked cells too (the manual's
+  "shock"). Explosions of units nearby crack un-cracked bridges; not modelled
+  yet since there is no combat.
+- Hardened bridges (`hard` frames, the Bridge Harden spell) do not crack from
+  damage but still crumble when unsupported.
+- A bridge cell's tile is chosen by which of its four neighbours are ground;
+  see the letter table in `FORMATS.md`. Where a bridge meets island land,
+  the island's rim cell is overlaid with a `bridgeconnector` frame.
+
+Not yet modelled: an Edge Farm blocking bridges off an island edge, bridge
+ownership (you may connect to enemy open ends but not build off them), and
+a floating priest waiting for a bridge to be rebuilt under him.
 
 ## Dropping structures
 
-A structure may be dropped when every footprint cell is ground, no cell is
-already covered by a structure, no unit stands on a cell, and, unless the
-type has `mayDropOnRim`, no cell is a natural island's edge cell.
+The manual: "Units may only be built on islands you own, off of the ends
+of friendly bridges, or on Neutral Islands. Buildings, by virtue of their
+tremendous weight, can only be constructed on islands", and "place the unit
+in the sky, just off the end of a bridge piece. You cannot place units
+directly on top of the bridges themselves."
+
+So a `createsisland` type (every 3x3 emplacement) is dropped either wholly on
+island ground or wholly in the sky with a footprint cell orthogonally
+adjacent to an open bridge end; in the sky it creates its own island under
+itself. Everything else needs island ground under every cell. In both cases
+no cell may be covered by another structure or a unit, and unless the type
+has `mayDropOnRim`, no cell may be a natural island's edge.
 
 | Flag | Reading | Confidence |
 |------|---------|------------|
+| `createsisland` | May be placed in the sky at a bridge end; the footprint becomes a platform island. | High |
 | `dropBlocking` | Nothing may later be dropped onto the footprint. Currently every structure blocks drops, so the flag is recorded but not yet distinguishing. | Medium |
-| `createsisland` | Bridge cells under the footprint become island ground (a platform) and the bridge tiles there disappear. Every 3x3 emplacement has it. | High for the effect, medium for the exact extent. |
 | `mayDropOnRim` | The footprint may include island rim cells. | Medium |
 | `mayDropOnIsle` | Not yet used. Probably: may be dropped on platforms created by other structures. | Low |
 | `emplacement`, `factory`, `fence`, `tree`, `vortex`, `dais` | Category markers, no rule attached yet. | - |
+
+Ownership, Storm Power costs and the Energy requirement ("the proper Energy
+influencing the space") are not modelled yet.
 
 ## Units
 
@@ -58,9 +87,20 @@ type has `mayDropOnRim`, no cell is a natural island's edge cell.
 - Facing uses the eight walk animations `A` to `H`: north, north-east, east,
   south-east, south, south-west, west, north-west.
 
+## Economy and combat, from the manual (not yet modelled)
+
+- Storm Power is the currency. Geysers hold 2000 units by default;
+  Transports (Golems, Air Ships) harvest Storm Crystals from a geyser and
+  bring them to the Temple. Ground Transports need a bridge connection.
+- Destroying an enemy unit rewards 25% of its Storm Power value.
+- Units cost Storm Power and need the right Energy (from Temples and
+  Generators) at the placement site; Workshops put Knowledge into
+  production.
+- Capturing a stunned enemy High Priest with a Transport and sacrificing
+  him on an Altar grants Knowledge.
+
 ## Open questions
 
 - Whether `yuckWalk` blocks or merely deters.
-- What `mayDropOnIsle` and `mayDropOnRim` mean exactly for the home island.
-- Hit points, threat, range, cost, mana and the geyser economy are parsed
-  but unused.
+- What `mayDropOnIsle` means exactly.
+- The real bridge piece catalogue.

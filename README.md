@@ -47,12 +47,16 @@ NETSTORM_DIR=~/games/NetStorm cargo run --release
 ```
 
 By default this shows a first scene: an island assembled from the terrain
-tiles, the altar, trees, a bridge and two units walking under the
-simulation's control. Left-click on a unit selects it, left-click elsewhere
-sends the selected unit there along a path around obstacles. Right-click acts
-with the current tool: `B` places bridge cells, `1` to `5` drop a sun cannon,
-archer, battery, factory or tree, `U` spawns a golem. Drops follow the rules
-in `docs/RULES.md`. Arrow keys or WASD pan the camera and `-` / `=` zoom.
+tiles, the altar, trees, a bridge, a battery on its own island at the
+bridge end, and two units walking under the simulation's control.
+Left-click on a unit selects it, left-click elsewhere sends the selected unit
+there along a path around obstacles. Right-click acts with the current tool:
+`Q`, `W`, `A`, `S` pick one of the four bridge pieces on offer (`R` rotates
+it), `1` to `5` drop a sun cannon, archer, battery, factory or tree, `U`
+spawns a golem. `Delete` destroys the bridge cell under the cursor, `C`
+cracks it, `H` hardens it; unsupported bridges crack and crumble, taking
+whatever stands on them. Drops follow the rules in `docs/RULES.md`. Arrow
+keys or WASD pan the camera and `-` / `=` zoom.
 `ISLEFALL_MODE=viewer` instead
 animates one object type at a time: `[` and `]` step through types, `,` and
 `.` through its animations. In both modes `Space` pauses and `P` saves a
