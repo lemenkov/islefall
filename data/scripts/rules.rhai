@@ -105,3 +105,13 @@ fn air_target_priority(distance, is_unit, is_transport, hunts_transports) {
     let bonus = if is_transport { 1000 } else { 0 };
     bonus - distance
 }
+
+// Gain in decibels of a sound `edge` of the way from the camera centre to
+// the edge of the view (0 at the centre, 1 at the edge), at camera `zoom`.
+// `base_db` is the file's own gain. The camera's height costs
+// `db_per_halving` for each halving of the zoom below `reference_zoom`;
+// zooming in closer than that adds nothing.
+fn sound_gain(edge, zoom, base_db, edge_db, reference_zoom, db_per_halving) {
+    let halvings = if zoom > 0.0 && reference_zoom > zoom { (reference_zoom / zoom).ln() / 2.0.ln() } else { 0.0 };
+    base_db + edge * edge_db - halvings * db_per_halving
+}

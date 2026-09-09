@@ -174,6 +174,29 @@ unit_lost = { file = "unitLost.wav" }
 launched = { property = "activeSound" }
 floating = { file = "priestFall.wav" }
 
+# Every sound fades with its distance from the camera centre and with the
+# camera's height; the curve is `sound_gain` in scripts/rules.rhai. Objects
+# outside the view are silent. A file name ending in "-500" carries its own
+# base gain of -5 dB, as the original engine read it.
+[sounds.attenuation]
+# Zoom at which the camera's height costs nothing; each halving of the
+# zoom (the camera rising) takes `db_per_halving` off.
+reference_zoom = 4.0
+db_per_halving = 6.0
+# Decibels lost at the edge of the view, relative to its centre.
+edge_db = -9.0
+# Most object loops playing at once, nearest the centre first.
+max_loops = 8
+# Type property naming the loop an object plays while it stands or flies.
+loop_property = "activeSound"
+
+# A bed that never stops, and sky noises at random intervals (seconds,
+# least and most); both play at their base gain wherever the camera is.
+[sounds.ambient]
+bed = "distantWindQuiet-3000.wav"
+sky = ["eagleScream-1500.wav", "whale.wav", "guy-1200.wav", "ThunderQuietDistant.wav"]
+sky_seconds = [12.0, 45.0]
+
 # The projectile type of each shooter. The type files hold fire and impact
 # sounds on the projectile, but nothing in the data links the two, so the
 # pairing is by name here. A shooter's own property still wins.

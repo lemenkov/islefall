@@ -51,6 +51,7 @@ Available hooks:
 - `workshop_can_produce(workshop_theme, type_theme, type_level)` -> bool
 - `air_attack(class, use_air_damage, air_range, air_damage, range, hp_per_sec)` -> `#{ air_range, air_damage, ground }` or `()`
 - `air_target_priority(distance, is_unit, is_transport, hunts_transports)` -> int or `()` to refuse
+- `sound_gain(edge, zoom, base_db, edge_db, reference_zoom, db_per_halving)` -> decibels (presentation only)
 
 ## Sounds
 
@@ -71,6 +72,18 @@ to a path of your own relative to the data directory, which is how a mod
 replaces a sound; only WAV is decoded unless the app is built with more of
 Bevy's decoders. `volume` is the master level, `max_per_frame` caps how
 many sounds start at once, and `ISLEFALL_VOLUME=0` silences a run.
+
+Every sound is heard from the camera. `[sounds.attenuation]` sets the
+decibels lost at the edge of the view, the zoom at which the camera's
+height costs nothing and the decibels lost per halving of the zoom below
+it; the `sound_gain` hook turns those into a gain, so a mod can reshape
+the curve. Anything outside the view is silent. A file name ending in
+`-500` carries a base gain of -5 dB, DirectSound's hundredths of a
+decibel, as the original engine read it. Objects whose type names a
+`loop_property` sound (`activeSound`: batteries hum, Whirligigs spin)
+play it as a loop while in view, nearest the centre first up to
+`max_loops`. `[sounds.ambient]` names a bed that never stops and sky
+noises played at random intervals; both ignore the camera.
 
 ## Maps
 

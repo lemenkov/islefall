@@ -35,6 +35,8 @@ pub struct Sounds {
     pub volume: f32,
     pub max_per_frame: usize,
     pub events: SoundEvents,
+    pub attenuation: Attenuation,
+    pub ambient: Ambient,
     /// Shooter type stem to projectile type stem, consulted after the shooter.
     #[serde(default)]
     pub projectiles: BTreeMap<String, String>,
@@ -44,6 +46,26 @@ pub struct Sounds {
     /// Names replaced by files of the mod's own, relative to the data directory.
     #[serde(default)]
     pub overrides: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Attenuation {
+    pub reference_zoom: f32,
+    pub db_per_halving: f32,
+    pub edge_db: f32,
+    pub max_loops: usize,
+    pub loop_property: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Ambient {
+    #[serde(default)]
+    pub bed: Option<String>,
+    #[serde(default)]
+    pub sky: Vec<String>,
+    pub sky_seconds: [f32; 2],
 }
 
 /// What an event plays: the type's `property` when it names a file, else `file`.
@@ -309,6 +331,10 @@ impl Config {
         }
         if !(0.0..=1.0).contains(&self.sounds.volume) {
             return bad("sounds.volume must be 0.0..1.0");
+        }
+        let [least, most] = self.sounds.ambient.sky_seconds;
+        if least <= 0.0 || most < least || self.sounds.attenuation.reference_zoom <= 0.0 {
+            return bad("sounds.ambient.sky_seconds and attenuation.reference_zoom must be positive, least first");
         }
         Ok(())
     }

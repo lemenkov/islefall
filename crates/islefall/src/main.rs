@@ -43,7 +43,7 @@ use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
 use islefall_data::{Installation, TypeDef};
-use bevy::audio::{AudioPlayer, AudioSource, GlobalVolume, PlaybackSettings, Volume};
+use bevy::audio::{AudioPlayer, AudioSink, AudioSinkPlayback, AudioSource, GlobalVolume, PlaybackSettings, Volume};
 use islefall_sim::config::Grid;
 use islefall_sim::map::{self, MapDef};
 use islefall_sim::{Ai, AiMove, Cell, Config, Dir8, IslandMap, Piece, Scripts, TypeRules, Unit, World};
@@ -85,7 +85,94 @@ struct GameData {
 #[derive(Resource, Default)]
 struct SoundBank {
     files: HashMap<String, PathBuf>,
-    loaded: HashMap<String, Option<Handle<AudioSource>>>,
+    /// Decoded sources with the base gain in decibels their file name carries.
+    loaded: HashMap<String, Option<(Handle<AudioSource>, f32)>>,
+}
+
+/// The gain a NetStorm sound file name carries: `name-500.wav` is -5 dB,
+/// DirectSound's hundredths of a decibel.
+fn file_gain_db(path: &Path) -> f32 {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    match stem.rsplit_once('-') {
+        Some((_, digits)) if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) => -(digits.parse::<f32>().unwrap_or(0.0)) / 100.0,
+        _ => 0.0,
+    }
+}
+
+/// A looping object sound tied to a structure or unit.
+#[derive(Component)]
+struct ObjectLoop(LoopKey);
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum LoopKey {
+    Structure(String, Cell),
+    Unit(usize),
+}
+
+/// The camera as a listener: world centre, half extent of the view and zoom.
+struct View {
+    centre: Vec2,
+    half: Vec2,
+    zoom: f32,
+}
+
+impl View {
+    fn of(cameras: &Query<(&Camera, &GlobalTransform, &Projection), With<Camera2d>>) -> Option<View> {
+        let (camera, tf, proj) = cameras.single().ok()?;
+        let size = camera.logical_viewport_size()?;
+        let scale = match proj {
+            Projection::Orthographic(o) => o.scale,
+            _ => 1.0,
+        };
+        Some(View { centre: tf.translation().truncate(), half: size * 0.5 * scale, zoom: 1.0 / scale.max(1e-6) })
+    }
+
+    /// How far out `pos` lies: 0 at the centre, 1 at the view's edge, more beyond.
+    fn edge(&self, pos: Vec2) -> f32 {
+        let d = (pos - self.centre).abs();
+        (d.x / self.half.x.max(1.0)).max(d.y / self.half.y.max(1.0))
+    }
+}
+
+/// Gain of a sound at `pos`, or `None` when it lies outside the view.
+fn gain_at(view: &View, pos: Vec2, base_db: f32, data: &GameData) -> Option<Volume> {
+    let edge = view.edge(pos);
+    if edge > 1.0 {
+        return None;
+    }
+    let a = &data.cfg.sounds.attenuation;
+    let db = data
+        .scripts
+        .sound_gain(edge as f64, view.zoom as f64, base_db as f64, a.edge_db as f64, a.reference_zoom as f64, a.db_per_halving as f64)
+        .unwrap_or(base_db as f64);
+    Some(Volume::Decibels(db as f32))
+}
+
+fn cell_to_world(cell: Cell, g: &Grid) -> Vec2 {
+    let (x, y) = cell.centre_px(g);
+    Vec2::new(x as f32, -(y as f32))
+}
+
+/// Sky noises on a random timer.
+#[derive(Resource)]
+struct Sky {
+    timer: Timer,
+    rng: u64,
+}
+
+impl Sky {
+    fn next(&mut self) -> u64 {
+        // xorshift; presentation only, never the simulation.
+        self.rng ^= self.rng << 13;
+        self.rng ^= self.rng >> 7;
+        self.rng ^= self.rng << 17;
+        self.rng
+    }
+
+    fn wait(&mut self, range: [f32; 2]) -> f32 {
+        let t = (self.next() % 10_000) as f32 / 10_000.0;
+        range[0] + (range[1] - range[0]) * t
+    }
 }
 
 impl SoundBank {
@@ -114,14 +201,14 @@ impl SoundBank {
         SoundBank { files, loaded: HashMap::new() }
     }
 
-    fn get_or_load(&mut self, name: &str, sources: &mut Assets<AudioSource>) -> Option<Handle<AudioSource>> {
+    fn get_or_load(&mut self, name: &str, sources: &mut Assets<AudioSource>) -> Option<(Handle<AudioSource>, f32)> {
         let key = name.to_lowercase();
         if let Some(h) = self.loaded.get(&key) {
             return h.clone();
         }
-        let handle = match self.files.get(&key).map(std::fs::read) {
-            Some(Ok(bytes)) => Some(sources.add(AudioSource { bytes: bytes.into() })),
-            Some(Err(e)) => {
+        let handle = match self.files.get(&key).map(|p| (std::fs::read(p), file_gain_db(p))) {
+            Some((Ok(bytes), gain)) => Some((sources.add(AudioSource { bytes: bytes.into() }), gain)),
+            Some((Err(e), _)) => {
                 warn!("sound {name}: {e}");
                 None
             }
@@ -273,6 +360,7 @@ fn main() {
     let screenshot_at = std::env::var("ISLEFALL_SCREENSHOT_AT").ok().and_then(|s| s.parse().ok()).unwrap_or(cfg.controls.screenshot_seconds);
     let unit_tool = cfg.controls.unit_tools[0].clone();
     let volume = std::env::var("ISLEFALL_VOLUME").ok().and_then(|s| s.parse().ok()).unwrap_or(cfg.sounds.volume);
+    let sky_first = cfg.sounds.ambient.sky_seconds[0];
 
     let mut app = App::new();
     app.add_plugins(
@@ -285,6 +373,10 @@ fn main() {
     )
     .insert_resource(GameData { install, cfg, scripts, palette, map })
     .insert_resource(GlobalVolume::new(Volume::Linear(volume)))
+    .insert_resource(Sky {
+        timer: Timer::from_seconds(sky_first, TimerMode::Once),
+        rng: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0x9E37_79B9_7F4A_7C15) | 1,
+    })
     .insert_resource(mode)
     .insert_resource(Time::<Fixed>::from_hz(tick_hz as f64))
     .init_resource::<ShapeLibrary>()
@@ -311,7 +403,7 @@ fn main() {
         (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
-    .add_systems(Update, play_sounds.after(mouse_actions).after(bridge_keys).run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, (play_sounds.after(mouse_actions).after(bridge_keys), sync_loops, ambient).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
         app.insert_resource(AutoScreenshot { path, delay: Timer::from_seconds(screenshot_at, TimerMode::Once) });
@@ -573,12 +665,14 @@ fn play_sounds(
     mut bank: ResMut<SoundBank>,
     mut sources: ResMut<Assets<AudioSource>>,
     volume: Res<GlobalVolume>,
+    cameras: Query<(&Camera, &GlobalTransform, &Projection), With<Camera2d>>,
 ) {
     let Some(world) = sim.world.as_mut() else { return };
     let events = world.take_events();
     if volume.volume == Volume::Linear(0.0) {
         return;
     }
+    let Some(view) = View::of(&cameras) else { return };
     let snd = &data.cfg.sounds;
     let mut started = 0;
     for e in events {
@@ -589,9 +683,89 @@ fn play_sounds(
         let named = |stem: &str| cue.property.as_deref().and_then(|p| data.install.type_def(stem).and_then(|d| d.get_str(p))).map(str::to_string);
         let from_type = named(&e.kind).or_else(|| snd.projectiles.get(&e.kind).and_then(|p| named(p)));
         let Some(name) = from_type.or_else(|| cue.file.clone()).filter(|n| !n.is_empty()) else { continue };
-        let Some(handle) = bank.get_or_load(&name, &mut sources) else { continue };
-        commands.spawn((AudioPlayer::new(handle), PlaybackSettings::DESPAWN));
+        let Some((handle, base_db)) = bank.get_or_load(&name, &mut sources) else { continue };
+        // Out of view, out of earshot.
+        let Some(gain) = gain_at(&view, cell_to_world(e.at, data.grid()), base_db, &data) else { continue };
+        commands.spawn((AudioPlayer::new(handle), PlaybackSettings::DESPAWN.with_volume(gain)));
         started += 1;
+    }
+}
+
+/// Keep a loop playing for each object in view that names one, nearest
+/// the centre first up to the cap, with its volume following the camera.
+fn sync_loops(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    mut bank: ResMut<SoundBank>,
+    mut sources: ResMut<Assets<AudioSource>>,
+    cameras: Query<(&Camera, &GlobalTransform, &Projection), With<Camera2d>>,
+    mut existing: Query<(Entity, &ObjectLoop, Option<&mut AudioSink>)>,
+) {
+    let Some(world) = sim.world.as_ref() else { return };
+    let Some(view) = View::of(&cameras) else { return };
+    let a = &data.cfg.sounds.attenuation;
+    let g = data.grid();
+    let names = |kind: &str| data.install.type_def(kind).and_then(|d| d.get_str(&a.loop_property)).map(str::to_string);
+    // (key, name, position, distance from the centre)
+    let mut wanted: Vec<(LoopKey, String, Vec2, f32)> = Vec::new();
+    for s in &world.structures {
+        if let Some(name) = names(&s.kind) {
+            let pos = cell_to_world(s.centre(), g);
+            wanted.push((LoopKey::Structure(s.kind.clone(), s.cell), name, pos, view.edge(pos)));
+        }
+    }
+    for (i, u) in world.units.iter().enumerate() {
+        if !u.alive || u.carried_by.is_some() {
+            continue;
+        }
+        if let Some(name) = names(&u.kind) {
+            let pos = unit_to_world(u, g);
+            wanted.push((LoopKey::Unit(i), name, pos, view.edge(pos)));
+        }
+    }
+    wanted.retain(|w| w.3 <= 1.0);
+    wanted.sort_by(|x, y| x.3.total_cmp(&y.3));
+    wanted.truncate(a.max_loops);
+    let mut keep: HashMap<LoopKey, (String, Vec2)> = wanted.into_iter().map(|(k, n, p, _)| (k, (n, p))).collect();
+    for (entity, l, sink) in existing.iter_mut() {
+        match keep.remove(&l.0) {
+            Some((name, pos)) => {
+                let base_db = bank.get_or_load(&name, &mut sources).map(|(_, db)| db).unwrap_or(0.0);
+                if let (Some(gain), Some(mut sink)) = (gain_at(&view, pos, base_db, &data), sink) {
+                    sink.set_volume(gain);
+                }
+            }
+            None => commands.entity(entity).despawn(),
+        }
+    }
+    for (key, (name, pos)) in keep {
+        let Some((handle, base_db)) = bank.get_or_load(&name, &mut sources) else { continue };
+        let Some(gain) = gain_at(&view, pos, base_db, &data) else { continue };
+        commands.spawn((AudioPlayer::new(handle), PlaybackSettings::LOOP.with_volume(gain), ObjectLoop(key)));
+    }
+}
+
+/// The bed loop, started once, and sky noises at random intervals.
+fn ambient(mut commands: Commands, data: Res<GameData>, mut bank: ResMut<SoundBank>, mut sources: ResMut<Assets<AudioSource>>, time: Res<Time>, mut sky: ResMut<Sky>, mut started: Local<bool>) {
+    let amb = &data.cfg.sounds.ambient;
+    if !*started {
+        *started = true;
+        if let Some((handle, db)) = amb.bed.as_deref().and_then(|b| bank.get_or_load(b, &mut sources)) {
+            commands.spawn((AudioPlayer::new(handle), PlaybackSettings::LOOP.with_volume(Volume::Decibels(db))));
+        }
+    }
+    if amb.sky.is_empty() {
+        return;
+    }
+    sky.timer.tick(time.delta());
+    if sky.timer.just_finished() {
+        let pick = (sky.next() % amb.sky.len() as u64) as usize;
+        if let Some((handle, db)) = bank.get_or_load(&amb.sky[pick], &mut sources) {
+            commands.spawn((AudioPlayer::new(handle), PlaybackSettings::DESPAWN.with_volume(Volume::Decibels(db))));
+        }
+        let wait = sky.wait(amb.sky_seconds);
+        sky.timer = Timer::from_seconds(wait, TimerMode::Once);
     }
 }
 
