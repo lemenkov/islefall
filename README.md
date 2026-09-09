@@ -87,6 +87,18 @@ installation's `sound/` directory through Bevy's built-in audio; the
 fade towards the edge of the view and with zoom, which objects hum, and
 what the sky sounds like. `ISLEFALL_VOLUME=0` silences a run.
 `F5` saves the world as a snapshot and `F9` loads it back.
+To play over a network, run the server and join it from each machine
+with the same data directory:
+
+```sh
+cargo run --release -p islefall-server            # listens on 0.0.0.0:7777
+ISLEFALL_JOIN=host:7777 ISLEFALL_NAME=Peter cargo run --release
+```
+
+The game starts once every player has connected (two by default; a
+`server.toml` argument sets `bind`, `turn_ticks`, `min_players`,
+`max_players` and `hash_every_turns`). Clients report world hashes and the
+server tells everyone if they ever disagree.
 `ISLEFALL_RECORD=game.toml` records every command you give and
 `ISLEFALL_REPLAY=game.toml` plays it back; see `docs/NETWORK.md` for how
 that underpins network play.

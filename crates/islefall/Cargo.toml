@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 islefall-data = { workspace = true, features = ["png"] }
 islefall-sim = { workspace = true }
+islefall-net = { path = "../islefall-net" }
 
 [dependencies.bevy]
 version = "0.19.1"

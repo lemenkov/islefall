@@ -1,0 +1,18 @@
+[package]
+name = "islefall-net"
+description = "The wire protocol between Islefall clients and the server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+islefall-sim = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }
+tokio = { version = "1", features = ["io-util"], optional = true }
+
+[features]
+default = []
+tokio = ["dep:tokio"]

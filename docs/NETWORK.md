@@ -53,13 +53,33 @@ on, and it is also how bugs get reported: a replay file reproduces them.
 - **AI opponents** run inside every client's simulation as now, which is
   free and deterministic.
 
+## What exists
+
+- `crates/islefall-net`: the messages and the framing (a little-endian
+  length and postcard bytes), blocking for the client and async for the
+  server behind the `tokio` feature, and the data hash clients present.
+- `crates/islefall-server`: a relay over TCP. Clients say hello with
+  their name, map and data hash; the first player's data is the
+  standard and anyone differing is refused. Once `min_players` have
+  connected and said ready the game starts; every `turn_ticks` ticks the
+  server sends the commands it received as one turn. Clients send their
+  world hash every `hash_every_turns`, and the server prints agreement
+  or broadcasts a desync with everyone's hashes. It runs no simulation
+  yet, so a client that drops cannot rejoin.
+- The app joins with `ISLEFALL_JOIN=host:port` and `ISLEFALL_NAME`,
+  sends every command to the server instead of applying it, and moves
+  its world only by received turns; the player number comes from the
+  server. The opponent AIs run inside every client identically.
+
 ## Order of work
 
 1. Commands, replays and the world hash (done).
 2. Snapshots: serde on the world, for saving, loading and sending (done: `World::snapshot` and `World::restore`, binary through postcard; `F5` and `F9` in the app).
-3. A protocol crate shared by client and server.
-4. A server binary without Bevy: lobbies, turn relay, hash checks,
-   snapshots, a TOML config.
+3. A protocol crate shared by client and server (done).
+4. A server binary without Bevy: lobby, turn relay, hash checks, a TOML
+   config (done); snapshots for rejoin (to do, needs the server to run
+   the simulation or fetch a snapshot from a client).
 5. Client integration: connect from the command line, lockstep loop
-   driving the simulation from received turns.
-6. Later: browser transport, matchmaking, persistence.
+   driving the simulation from received turns (done).
+6. Later: TLS or QUIC, a lobby screen, rejoin, browser transport,
+   matchmaking, persistence.

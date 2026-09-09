@@ -373,16 +373,25 @@ impl Sim {
 struct Recording {
     record: Option<(PathBuf, Replay)>,
     replay: Option<Replay>,
+    /// The server connection when playing online.
+    net: Option<Net>,
+    /// The local player, for recording and applying.
+    owner: u8,
 }
 
 impl Recording {
     /// Give a command for the local player: apply it, tell the status line,
     /// and record it if recording.
     fn issue(&mut self, w: &mut World, scripts: &Scripts, status: &mut Status, cmd: Command) -> Option<Applied> {
+        if let Some(net) = &self.net {
+            // Online, the server orders every command; it comes back in a turn.
+            net.send(islefall_net::ClientMsg::Command(cmd));
+            return None;
+        }
         let tick = w.tick;
-        let result = w.apply(0, &cmd, scripts);
+        let result = w.apply(self.owner, &cmd, scripts);
         if let Some((path, replay)) = self.record.as_mut() {
-            replay.record(tick, 0, cmd, result.is_ok());
+            replay.record(tick, self.owner, cmd, result.is_ok());
             if let Err(e) = replay.save(&*path) {
                 warn!("cannot write {}: {e}", path.display());
             }
@@ -397,6 +406,65 @@ impl Recording {
                 None
             }
         }
+    }
+}
+
+/// The connection to a server: commands go out, the server's messages come in.
+#[derive(Resource)]
+struct Net {
+    tx: std::sync::mpsc::Sender<islefall_net::ClientMsg>,
+    rx: std::sync::Mutex<std::sync::mpsc::Receiver<islefall_net::ServerMsg>>,
+    turn_ticks: u32,
+    hash_every_turns: u64,
+    started: bool,
+    turns_done: u64,
+}
+
+impl Net {
+    /// Connect in the background: one thread writes what we send, another
+    /// reads what the server says; both hand over through channels.
+    fn connect(addr: &str, hello: islefall_net::ClientMsg) -> Result<Net, String> {
+        let stream = std::net::TcpStream::connect(addr).map_err(|e| format!("{addr}: {e}"))?;
+        stream.set_nodelay(true).ok();
+        let mut writer = stream.try_clone().map_err(|e| e.to_string())?;
+        let mut reader = stream;
+        let (tx, out_rx) = std::sync::mpsc::channel::<islefall_net::ClientMsg>();
+        let (in_tx, rx) = std::sync::mpsc::channel::<islefall_net::ServerMsg>();
+        islefall_net::write_frame(&mut writer, &hello).map_err(|e| e.to_string())?;
+        std::thread::spawn(move || {
+            while let Ok(msg) = out_rx.recv() {
+                if islefall_net::write_frame(&mut writer, &msg).is_err() {
+                    break;
+                }
+            }
+        });
+        std::thread::spawn(move || {
+            loop {
+                match islefall_net::read_frame::<_, islefall_net::ServerMsg>(&mut reader) {
+                    Ok(msg) => {
+                        if in_tx.send(msg).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        Ok(Net { tx, rx: std::sync::Mutex::new(rx), turn_ticks: 1, hash_every_turns: 0, started: false, turns_done: 0 })
+    }
+
+    fn send(&self, msg: islefall_net::ClientMsg) {
+        let _ = self.tx.send(msg);
+    }
+
+    fn drain(&self) -> Vec<islefall_net::ServerMsg> {
+        let mut out = Vec::new();
+        if let Ok(rx) = self.rx.lock() {
+            while let Ok(m) = rx.try_recv() {
+                out.push(m);
+            }
+        }
+        out
     }
 }
 
@@ -420,6 +488,8 @@ struct Hud;
 struct Player {
     tool: Tool,
     selected: usize,
+    /// Which player this machine is: 0 alone, whatever the server says online.
+    id: u8,
 }
 
 #[derive(Resource)]
@@ -478,6 +548,10 @@ struct EnergyRing;
 struct Overlay;
 
 /// Where the game's own data lives.
+fn whoami() -> String {
+    std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_else(|_| "player".into())
+}
+
 fn data_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("ISLEFALL_DATA") {
         return PathBuf::from(d);
@@ -521,6 +595,17 @@ fn main() {
     let volume = std::env::var("ISLEFALL_VOLUME").ok().and_then(|s| s.parse().ok()).unwrap_or(cfg.sounds.volume);
     let sky_first = cfg.sounds.ambient.sky_seconds[0];
     let mut recording = Recording::default();
+    if let Ok(addr) = std::env::var("ISLEFALL_JOIN") {
+        let name = std::env::var("ISLEFALL_NAME").unwrap_or_else(|_| whoami());
+        let mut bytes = std::fs::read(data.join("rules.toml")).unwrap_or_default();
+        bytes.extend(std::fs::read(data.join("scripts/rules.rhai")).unwrap_or_default());
+        bytes.extend(std::fs::read(&map_path).unwrap_or_default());
+        let hello = islefall_net::ClientMsg::Hello { protocol: islefall_net::PROTOCOL, name: name.clone(), map: map_name.clone(), data_hash: islefall_net::fnv64(&bytes) };
+        let net = Net::connect(&addr, hello).unwrap_or_else(|e| fail(format!("cannot join {addr}: {e}")));
+        net.send(islefall_net::ClientMsg::Ready(true));
+        info!("joined {addr} as {name}; waiting for the others");
+        recording.net = Some(net);
+    }
     if let Some(path) = std::env::var_os("ISLEFALL_RECORD") {
         recording.record = Some((PathBuf::from(path), Replay { map: map_name.clone(), commands: Vec::new() }));
     }
@@ -554,7 +639,7 @@ fn main() {
     .init_resource::<Sim>()
     .init_resource::<Status>()
     .insert_resource(recording)
-    .insert_resource(Player { tool: Tool::Spawn(unit_tool), selected: 0 })
+    .insert_resource(Player { tool: Tool::Spawn(unit_tool), selected: 0, id: 0 })
     .insert_resource(Viewer {
         type_index: 0,
         animation: 0,
@@ -824,11 +909,15 @@ fn spawn_viewer_shape(
     spawn_animated(commands, shape, animation, Vec2::ZERO, Z_UNIT, true);
 }
 
-fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>, rec: Res<Recording>) {
+fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>, mut rec: ResMut<Recording>, mut player: ResMut<Player>, mut status: ResMut<Status>) {
     if viewer.paused {
         return;
     }
     let Sim { world: Some(world), ais } = &mut *sim else { return };
+    if rec.net.is_some() {
+        online_step(world, ais, &data, &mut rec, &mut player, &mut status);
+        return;
+    }
     if let Some(replay) = rec.replay.as_ref() {
         let refused = replay.play_tick(world, &data.scripts);
         if refused > 0 {
@@ -1018,22 +1107,88 @@ fn ambient(mut commands: Commands, data: Res<GameData>, mut bank: ResMut<SoundBa
 }
 
 /// How the game stands for the local player, if it is decided.
-fn verdict(w: &World, data: &GameData) -> Option<String> {
+fn verdict(w: &World, data: &GameData, me: u8) -> Option<String> {
     let hud = &data.cfg.hud;
     match w.winner {
-        Some(0) => Some(hud.victory.clone()),
+        Some(id) if id == me => Some(hud.victory.clone()),
         Some(_) => Some(hud.defeat.clone()),
-        None if w.out.contains(&0) => Some(hud.defeat.clone()),
+        None if w.out.contains(&me) => Some(hud.defeat.clone()),
         None => None,
     }
 }
 
+/// Online, the world moves only by the server's turns: every command of
+/// a turn is applied, then the turn's ticks run, the opponents act, and
+/// every so many turns the hash goes back to the server.
+fn online_step(world: &mut World, ais: &mut [Ai], data: &GameData, rec: &mut Recording, player: &mut Player, status: &mut Status) {
+    use islefall_net::{ClientMsg, ServerMsg};
+    let Some(net) = rec.net.as_mut() else { return };
+    let messages = net.drain();
+    let (shooter, generator) = (data.cfg.ai.shooter.clone(), data.cfg.ai.generator.clone());
+    let kit = islefall_sim::ai::AiKit { shooter: (shooter.clone(), data.rules(&shooter)), generator: (generator.clone(), data.rules(&generator)) };
+    for msg in messages {
+        match msg {
+            ServerMsg::Welcome { player: id, turn_ticks, hash_every_turns } => {
+                player.id = id;
+                rec.owner = id;
+                net.turn_ticks = turn_ticks.max(1);
+                net.hash_every_turns = hash_every_turns as u64;
+                status.say(format!("the server made us player {id}"));
+            }
+            ServerMsg::Reject(why) => status.say(format!("the server refused us: {why}")),
+            ServerMsg::Lobby { players } => {
+                let names: Vec<String> = players.iter().map(|p| format!("{}{}", p.name, if p.ready { " (ready)" } else { "" })).collect();
+                status.say(format!("in the lobby: {}", names.join(", ")));
+            }
+            ServerMsg::Start { map } => {
+                net.started = true;
+                status.say(format!("the game starts on {map}"));
+            }
+            ServerMsg::Turn { turn, commands } => {
+                if turn != net.turns_done {
+                    warn!("turn {turn} arrived, expected {}", net.turns_done);
+                }
+                for (owner, cmd) in &commands {
+                    match world.apply(*owner, cmd, &data.scripts) {
+                        Ok(a) if *owner == player.id => status.say(a.message),
+                        Err(e) if *owner == player.id => status.say(e),
+                        _ => {}
+                    }
+                    if let Some((path, replay)) = rec.record.as_mut() {
+                        replay.record(world.tick, *owner, cmd.clone(), true);
+                        let _ = replay.save(&*path);
+                    }
+                }
+                for _ in 0..net.turn_ticks {
+                    world.step(&data.scripts);
+                    for ai in ais.iter_mut() {
+                        ai.tick(world, &kit, &data.scripts);
+                    }
+                }
+                net.turns_done = turn + 1;
+                if net.hash_every_turns > 0 && (turn + 1) % net.hash_every_turns == 0 {
+                    let hash = world.hash();
+                    info!("turn {turn} (tick {}) hash {hash:016x}", world.tick);
+                    net.send(ClientMsg::Hash { turn, hash });
+                }
+            }
+            ServerMsg::Desync { turn, hashes } => {
+                warn!("DESYNC at turn {turn}: {hashes:?}");
+                status.say(format!("DESYNC at turn {turn}: the players' worlds differ"));
+            }
+            ServerMsg::Left(id) => status.say(format!("player {id} left")),
+            ServerMsg::Pong(_) => {}
+        }
+    }
+}
+
 /// Keep the window title showing the Storm Power reserve and Knowledge.
-fn title(sim: Res<Sim>, data: Res<GameData>, mut windows: Query<&mut Window, With<PrimaryWindow>>, mut last: Local<Option<String>>) {
+fn title(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, mut windows: Query<&mut Window, With<PrimaryWindow>>, mut last: Local<Option<String>>) {
     let w = sim.world();
-    let now = match verdict(w, &data) {
+    let me = player.id as usize % data.cfg.sim.max_players;
+    let now = match verdict(w, &data, player.id) {
         Some(v) => format!("Islefall - {v}"),
-        None => format!("Islefall - Storm Power {} - Knowledge {} ({} techs)", w.storm_power(), w.knowledge, w.known_tech[0].len()),
+        None => format!("Islefall - Storm Power {} - Knowledge {} ({} techs)", w.powers[me], w.knowledge, w.known_tech[me].len()),
     };
     if last.as_deref() == Some(now.as_str()) {
         return;
@@ -1051,17 +1206,18 @@ fn hud(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, status: Res<Stat
         Tool::Bridge(slot, _) => format!("bridge piece {} (slot {})", w.queue.slots.get(*slot).map(|p| p.name.as_str()).unwrap_or("?"), slot + 1),
         Tool::Drop(stem) | Tool::Spawn(stem) => stem.clone(),
     };
-    let opponents = w.players.iter().filter(|&&o| o != 0 && !w.out.contains(&o)).count();
+    let me = player.id as usize % data.cfg.sim.max_players;
+    let opponents = w.players.iter().filter(|&&o| o != player.id && !w.out.contains(&o)).count();
     let fill = |t: &str| {
-        t.replace("{power}", &w.storm_power().to_string())
+        t.replace("{power}", &w.powers[me].to_string())
             .replace("{knowledge}", &w.knowledge.to_string())
-            .replace("{techs}", &w.known_tech[0].len().to_string())
+            .replace("{techs}", &w.known_tech[me].len().to_string())
             .replace("{tool}", &tool)
             .replace("{status}", &status.0)
             .replace("{opponents}", &opponents.to_string())
     };
     let mut lines: Vec<String> = data.cfg.hud.lines.iter().map(|l| fill(l)).collect();
-    if let Some(v) = verdict(w, &data) {
+    if let Some(v) = verdict(w, &data, player.id) {
         lines.push(v);
     }
     let text = lines.join("\n");
@@ -1199,14 +1355,15 @@ fn mouse_actions(
     if left {
         let sel = player.selected;
         // Selecting is local; everything else is a command.
-        if let Some(i) = w.units.iter().position(|u| u.alive && u.owner == 0 && u.carried_by.is_none() && u.cell() == cell) {
+        let me = player.id;
+        if let Some(i) = w.units.iter().position(|u| u.alive && u.owner == me && u.carried_by.is_none() && u.cell() == cell) {
             player.selected = i;
             status.say(format!("selected unit {i} ({})", w.units[i].kind));
             return;
         }
-        let cmd = if let Some(p) = w.units.iter().position(|u| u.alive && u.owner != 0 && u.is_priest && u.cell() == cell) {
+        let cmd = if let Some(p) = w.units.iter().position(|u| u.alive && u.owner != me && u.is_priest && u.cell() == cell) {
             Command::Capture { unit: sel, priest: p }
-        } else if let Some(a) = w.structures.iter().position(|s| s.is_altar && s.owner == 0 && s.covers(cell)).filter(|_| w.units.get(sel).is_some_and(|u| u.carrying.is_some())) {
+        } else if let Some(a) = w.structures.iter().position(|s| s.is_altar && s.owner == me && s.covers(cell)).filter(|_| w.units.get(sel).is_some_and(|u| u.carrying.is_some())) {
             Command::Sacrifice { unit: sel, altar: a }
         } else if let Some(o) = w.structures.iter().position(|s| s.is_obelisk && s.covers(cell)) {
             Command::Read { unit: sel, obelisk: o }
@@ -1272,7 +1429,7 @@ fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<Ga
     };
     // Picking a Battle unit puts it into production at a Workshop, as the manual's menu would.
     let rules = data.rules(&stem);
-    if rules.energy.is_some() && !sim.world().in_production(0, &stem) {
+    if rules.energy.is_some() && !sim.world().in_production(player.id, &stem) {
         rec.issue(sim.world_mut(), &data.scripts, &mut status, Command::Produce { kind: stem.clone() });
     }
     player.tool = if spawn { Tool::Spawn(stem) } else { Tool::Drop(stem) };
@@ -1283,6 +1440,7 @@ fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<Ga
 fn bridge_keys(
     mut status: ResMut<Status>,
     mut rec: ResMut<Recording>,
+    player: Res<Player>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform)>,
@@ -1298,10 +1456,10 @@ fn bridge_keys(
     let Some(cell) = cursor_cell(&windows, &cameras, data.grid()) else { return };
     let w = sim.world_mut();
     let cmd = if upgrade {
-        let Some(i) = w.structures.iter().position(|s| s.owner == 0 && s.slots > 0 && s.covers(cell)) else { return };
+        let Some(i) = w.structures.iter().position(|s| s.owner == player.id && s.slots > 0 && s.covers(cell)) else { return };
         Command::Upgrade { structure: i }
     } else if salvage {
-        let Some(i) = w.structures.iter().position(|s| s.owner == 0 && s.covers(cell)) else { return };
+        let Some(i) = w.structures.iter().position(|s| s.owner == player.id && s.covers(cell)) else { return };
         Command::Salvage { structure: i }
     } else if crack {
         Command::CrackBridge { at: cell }
@@ -1336,25 +1494,25 @@ fn ghost(
                 piece = piece.rotated();
             }
             let cells = piece.cells_at(cell);
-            let ok = w.can_place_piece_for(0, &cells).is_ok();
+            let ok = w.can_place_piece_for(player.id, &cells).is_ok();
             (cells, ok)
         }
         Tool::Drop(stem) => {
             let rules = data.rules(stem);
             let probe = islefall_sim::Structure::new(stem.as_str(), cell, rules.foot_x, rules.foot_y, islefall_sim::Walk::Free);
             let ok = w.can_drop(&rules, cell).is_ok()
-                && w.check_ownership(0, &rules, cell).is_ok()
-                && rules.tech_bit.is_none_or(|b| w.knows_tech(0, b))
-                && w.check_energy(0, &rules, cell).is_ok()
-                && w.check_production(0, stem, &rules).is_ok();
+                && w.check_ownership(player.id, &rules, cell).is_ok()
+                && rules.tech_bit.is_none_or(|b| w.knows_tech(player.id, b))
+                && w.check_energy(player.id, &rules, cell).is_ok()
+                && w.check_production(player.id, stem, &rules).is_ok();
             (probe.cells().collect(), ok)
         }
         Tool::Spawn(stem) => {
             let rules = data.rules(stem);
             let ok = (rules.is_air || w.is_walkable(cell))
-                && rules.tech_bit.is_none_or(|b| w.knows_tech(0, b))
-                && w.check_energy(0, &rules, cell).is_ok()
-                && w.check_production(0, stem, &rules).is_ok();
+                && rules.tech_bit.is_none_or(|b| w.knows_tech(player.id, b))
+                && w.check_energy(player.id, &rules, cell).is_ok()
+                && w.check_production(player.id, stem, &rules).is_ok();
             (vec![cell], ok)
         }
     };
@@ -1401,7 +1559,7 @@ fn overlays(
                     let e = world::spawn_frame(&mut commands, shape, frame, Vec2::new(p.x, p.y + 30.0), 62.0);
                     commands.entity(e).insert(Overlay);
                 }
-                if i == player.selected && u.owner == 0 {
+                if i == player.selected && u.owner == player.id {
                     let range = data.rules(spell).spell_range;
                     let size = Vec2::new(((2 * range + 1) * g.cell_w) as f32, ((2 * range + 1) * g.cell_h) as f32);
                     commands.spawn((Sprite::from_color(Color::srgba(0.6, 0.4, 1.0, 0.12), size), Transform::from_translation(Vec3::new(p.x, p.y + g.cell_h as f32 / 2.0, 58.0)), Overlay));
@@ -1485,6 +1643,7 @@ fn sync_energy_rings(
     mut commands: Commands,
     sim: Res<Sim>,
     data: Res<GameData>,
+    player: Res<Player>,
     ring: Res<RingImage>,
     existing: Query<Entity, With<EnergyRing>>,
     mut seen: Local<Option<u64>>,
@@ -1497,7 +1656,7 @@ fn sync_energy_rings(
     for e in &existing {
         commands.entity(e).despawn();
     }
-    for s in w.structures.iter().filter(|s| s.owner == 0 && s.produces.is_some()) {
+    for s in w.structures.iter().filter(|s| s.owner == player.id && s.produces.is_some()) {
         let (x, y) = s.centre().centre_px(data.grid());
         commands.spawn((Sprite::from_image(ring.0.clone()), Transform::from_translation(Vec3::new(x as f32, -(y as f32), 0.9)), EnergyRing));
     }
