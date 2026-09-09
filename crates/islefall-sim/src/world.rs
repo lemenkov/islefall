@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The whole simulated state and its fixed-rate tick.
 
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use islefall_data::isle::Theme;
@@ -16,7 +17,7 @@ use crate::structure::{Structure, Weapon};
 use crate::unit::{Pos, Task, Unit};
 
 /// Condition of a bridge cell.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BridgeState {
     #[default]
     Normal,
@@ -27,7 +28,7 @@ pub enum BridgeState {
 }
 
 /// What a shot was aimed at.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Target {
     Structure(usize),
     Unit(usize),
@@ -85,7 +86,7 @@ pub enum DropError {
 
 /// Something that happened, for sounds and effects. The simulation never
 /// reads these back; the app drains them with [`World::take_events`].
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Event {
     pub what: EventKind,
     /// Type stem of the thing involved: the shooter, the building, the unit.
@@ -94,7 +95,7 @@ pub struct Event {
     pub owner: u8,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EventKind {
     /// A structure fired; `kind` is the shooter.
     Fired,
@@ -178,7 +179,7 @@ impl std::fmt::Display for DropError {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct World {
     /// The rules this world runs under.
     pub cfg: Config,

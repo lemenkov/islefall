@@ -573,7 +573,7 @@ fn main() {
     .add_systems(Update, (common_keys, animate, auto_screenshot))
     .add_systems(
         Update,
-        (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, hud, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
+        (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(Update, tint_shells.after(sync_structures).run_if(resource_equals(Mode::Island)))
@@ -1639,6 +1639,26 @@ fn animate(
         let frame = shape.sequence[shape.step];
         atlas.index = frame;
         *anchor = shape.frames[frame].anchor();
+    }
+}
+
+/// F5 saves the world as a snapshot, F9 restores it.
+fn save_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<GameData>, mut status: ResMut<Status>) {
+    let path = data.data_dir.join(&data.cfg.controls.save_file);
+    if keys.just_pressed(KeyCode::F5) {
+        let Some(w) = sim.world.as_ref() else { return };
+        match std::fs::write(&path, w.snapshot()) {
+            Ok(()) => status.say(format!("saved tick {} to {}", w.tick, path.display())),
+            Err(e) => status.say(format!("cannot save to {}: {e}", path.display())),
+        }
+    } else if keys.just_pressed(KeyCode::F9) {
+        match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| World::restore(&b)) {
+            Ok(w) => {
+                status.say(format!("loaded tick {} from {}", w.tick, path.display()));
+                sim.world = Some(w);
+            }
+            Err(e) => status.say(format!("cannot load {}: {e}", path.display())),
+        }
     }
 }
 

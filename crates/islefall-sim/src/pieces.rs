@@ -6,12 +6,13 @@
 //! to the open end of another bridge". The exact shipped catalogue is not
 //! in the data files, so this is a plausible set that can be adjusted.
 
+use serde::{Deserialize, Serialize};
 use crate::config::PieceDef;
 use crate::grid::Cell;
 
 /// A piece shape as offsets from its origin cell, normalised so that the
 /// smallest x and y offsets are zero.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Piece {
     pub name: String,
     pub cells: Vec<(i32, i32)>,
@@ -60,7 +61,7 @@ impl Piece {
 
 /// The Production window: a few random pieces, each replaced by another
 /// random piece when used. Deterministic given the seed.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PieceQueue {
     pub slots: Vec<Piece>,
     catalogue: Vec<Piece>,

@@ -86,6 +86,7 @@ installation's `sound/` directory through Bevy's built-in audio; the
 `[sounds]` section of the rules says what each event plays, how sounds
 fade towards the edge of the view and with zoom, which objects hum, and
 what the sky sounds like. `ISLEFALL_VOLUME=0` silences a run.
+`F5` saves the world as a snapshot and `F9` loads it back.
 `ISLEFALL_RECORD=game.toml` records every command you give and
 `ISLEFALL_REPLAY=game.toml` plays it back; see `docs/NETWORK.md` for how
 that underpins network play.

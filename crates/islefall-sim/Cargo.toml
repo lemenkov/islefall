@@ -11,4 +11,5 @@ rust-version.workspace = true
 islefall-data = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 toml = "1"
+postcard = { version = "1", features = ["use-std"] }
 rhai = { version = "1.26", features = ["sync", "no_time", "only_i64"] }

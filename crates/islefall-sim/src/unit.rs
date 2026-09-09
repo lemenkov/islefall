@@ -4,13 +4,14 @@
 //! Positions are fixed point with [`SUBCELL`] steps per cell so that the
 //! simulation stays integer-only and deterministic across machines.
 
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
 use crate::grid::Cell;
 
 /// The eight facing directions, in the order the walker animations are
 /// listed in the type files (`A` = north, clockwise to `H` = north-west).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Dir8 {
     N,
     NE,
@@ -55,7 +56,7 @@ impl Dir8 {
 }
 
 /// A fixed-point map position.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Pos {
     pub x: i32,
     pub y: i32,
@@ -78,7 +79,7 @@ impl Pos {
 }
 
 /// A standing order that outlives a single move.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Task {
     Idle,
     /// Carry crystals from `geyser` to `temple` until the geyser is empty.
@@ -91,7 +92,7 @@ pub enum Task {
     Read { obelisk: usize },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Unit {
     /// Type file stem, e.g. `priest`.
     pub kind: String,

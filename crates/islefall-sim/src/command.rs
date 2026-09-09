@@ -209,6 +209,18 @@ impl World {
     }
 }
 
+impl World {
+    /// The whole world as bytes, for saving, loading and handing to a
+    /// client that joins or returns: `restore` gives it back exactly.
+    pub fn snapshot(&self) -> Vec<u8> {
+        postcard::to_stdvec(self).unwrap_or_default()
+    }
+
+    pub fn restore(bytes: &[u8]) -> Result<World, String> {
+        postcard::from_bytes(bytes).map_err(|e| format!("snapshot: {e}"))
+    }
+}
+
 /// FNV-1a, 64-bit: small, portable and good enough to catch a drift.
 struct Fnv(u64);
 
@@ -382,5 +394,28 @@ mod tests {
         assert_ne!(run(&other).0, a, "a different command, a different world");
         let text = replay.to_toml();
         assert_eq!(Replay::parse(&text).unwrap(), replay, "replays round-trip through TOML");
+    }
+
+    #[test]
+    fn a_snapshot_restores_the_world_and_carries_on_identically() {
+        let scripts = test_scripts();
+        let replay = script();
+        let mut w = arena();
+        for _ in 0..40 {
+            replay.play_tick(&mut w, &scripts);
+            w.step(&scripts);
+        }
+        let bytes = w.snapshot();
+        let mut back = World::restore(&bytes).unwrap();
+        assert_eq!(back.hash(), w.hash(), "restored as it was");
+        assert_eq!(back, w);
+        for _ in 0..80 {
+            replay.play_tick(&mut w, &scripts);
+            w.step(&scripts);
+            replay.play_tick(&mut back, &scripts);
+            back.step(&scripts);
+        }
+        assert_eq!(back.hash(), w.hash(), "and it goes on the same way");
+        assert!(bytes.len() < 64 * 1024, "a small world is a small snapshot ({} bytes)", bytes.len());
     }
 }

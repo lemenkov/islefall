@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Island shapes on the grid and the terrain piece each cell needs.
 
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 use islefall_data::isle::Piece;
@@ -8,7 +9,7 @@ use islefall_data::isle::Piece;
 use crate::grid::Cell;
 
 /// The set of cells that belong to one island.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IslandMap {
     cells: BTreeSet<Cell>,
 }

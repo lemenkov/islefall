@@ -231,6 +231,8 @@ palette = "gifcloud"
 # Log the world's hash this often in seconds (0 never): two runs of one
 # replay must log the same hashes.
 hash_every_seconds = 10.0
+# F5 saves the world here (a binary snapshot) and F9 loads it.
+save_file = "islefall.save"
 
 [sounds]
 # Directory of sound files inside the NetStorm installation.

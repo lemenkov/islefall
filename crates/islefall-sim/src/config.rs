@@ -5,11 +5,11 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::world::EventKind;
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub sim: Sim,
@@ -35,7 +35,7 @@ pub struct Config {
 
 /// The on-screen text: templates with `{power}`, `{knowledge}`, `{techs}`,
 /// `{tool}`, `{status}` and `{opponents}` filled in.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Hud {
     pub font_size: f32,
@@ -44,14 +44,14 @@ pub struct Hud {
     pub defeat: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sprites {
     /// Directory under the data directory holding a mod's sprite sheets.
     pub dir: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sky {
     pub extent_tiles: u32,
@@ -59,7 +59,7 @@ pub struct Sky {
     pub layers: Vec<SkyLayer>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkyLayer {
     pub image: String,
@@ -74,7 +74,7 @@ fn white() -> [f32; 3] {
     [1.0, 1.0, 1.0]
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sounds {
     pub dir: String,
@@ -95,7 +95,7 @@ pub struct Sounds {
     pub overrides: BTreeMap<String, String>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Attenuation {
     pub reference_zoom: f32,
@@ -108,7 +108,7 @@ pub struct Attenuation {
 }
 
 /// Step sounds of walkers, tied to their walk animation.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Footsteps {
     /// Type property naming the step (or, for flyers, the flight loop).
@@ -119,7 +119,7 @@ pub struct Footsteps {
     pub variants: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Ambient {
     #[serde(default)]
@@ -130,7 +130,7 @@ pub struct Ambient {
 }
 
 /// What an event plays: the type's `property` when it names a file, else `file`.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SoundCue {
     #[serde(default)]
@@ -139,7 +139,7 @@ pub struct SoundCue {
     pub file: Option<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct SoundEvents {
     pub fired: SoundCue,
@@ -195,7 +195,7 @@ impl SoundEvents {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Air {
     pub base_classes: Vec<String>,
@@ -205,7 +205,7 @@ pub struct Air {
     pub attackers: BTreeMap<String, Attacker>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Attacker {
     pub life_seconds: f64,
@@ -215,7 +215,7 @@ pub struct Attacker {
     pub kill_extends_life: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Production {
     /// Slots per Workshop level, Level One first.
@@ -225,7 +225,7 @@ pub struct Production {
     pub outpost_types: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Spells {
     pub default_cast_seconds: f64,
@@ -237,7 +237,7 @@ pub struct Spells {
     pub effects: BTreeMap<String, SpellEffect>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpellEffect {
     pub kind: EffectKind,
@@ -245,7 +245,7 @@ pub struct SpellEffect {
     pub amount: i32,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EffectKind {
     Damage,
@@ -256,34 +256,34 @@ pub enum EffectKind {
     Treason,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Construction {
     pub power_per_rate: f64,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Sim {
     pub tick_hz: u32,
     pub max_players: usize,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Grid {
     pub cell_w: i32,
     pub cell_h: i32,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Walking {
     pub avoid_cost: u32,
     pub subcell: i32,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Flags {
     pub walk_blocked: Vec<String>,
@@ -304,14 +304,14 @@ pub struct Flags {
     pub energy_source_classes: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PieceDef {
     pub name: String,
     pub cells: Vec<[i32; 2]>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Bridges {
     pub crumble_seconds: f64,
@@ -320,7 +320,7 @@ pub struct Bridges {
     pub pieces: Vec<PieceDef>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Economy {
     pub nugget_power: i32,
@@ -330,7 +330,7 @@ pub struct Economy {
     pub geyser_stock_from_cost: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Combat {
     pub explosion_radius: i32,
@@ -338,20 +338,20 @@ pub struct Combat {
     pub default_delay_between_shots: f64,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Priest {
     pub temple_heal_range: i32,
     pub heal_per_second: u32,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Energy {
     pub range_px: i32,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiConfig {
     pub move_seconds: f64,
@@ -363,7 +363,7 @@ pub struct AiConfig {
     pub queue_seed: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Controls {
     pub slot_keys: Vec<String>,
@@ -377,6 +377,8 @@ pub struct Controls {
     pub palette: String,
     /// Log the world's hash this often (0 for never), to compare runs.
     pub hash_every_seconds: f64,
+    /// Where F5 saves a snapshot and F9 loads it from.
+    pub save_file: String,
 }
 
 #[derive(Debug)]

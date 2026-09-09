@@ -10,7 +10,7 @@
 use crate::typefile::TypeDef;
 
 /// The four weather themes, in the order the terrain frames are blocked.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Theme {
     Sun,
     Thunder,

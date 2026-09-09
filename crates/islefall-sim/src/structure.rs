@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Things placed on the map that occupy a footprint of cells.
 
+use serde::{Deserialize, Serialize};
 use islefall_data::isle::Theme;
 
 use crate::grid::Cell;
 use crate::rules::Walk;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Structure {
     /// Type file stem, e.g. `dais` or `treetwo`.
     pub kind: String,
@@ -62,7 +63,7 @@ pub struct Structure {
     pub paralysed: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Weapon {
     pub range: i32,
     pub damage: i32,

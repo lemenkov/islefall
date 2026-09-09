@@ -13,6 +13,7 @@
 //!   footprint into island ground.
 //! - `mayDropOnRim`: the drop may include island rim cells.
 
+use serde::{Deserialize, Serialize};
 use islefall_data::TypeDef;
 use islefall_data::isle::Theme;
 
@@ -20,7 +21,7 @@ use crate::config::Config;
 use crate::script::{ScriptError, Scripts};
 
 /// Energy a type needs at its placement site. Sun means any kind.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnergyNeed {
     pub theme: Theme,
     /// Units that must be of `theme` (0 for Sun types).
@@ -36,7 +37,7 @@ impl EnergyNeed {
 }
 
 /// How a footprint affects walking.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Walk {
     Free,
     /// Passable but expensive: `yuckWalk`.
@@ -46,14 +47,14 @@ pub enum Walk {
 
 /// What a shooting type can hit: flyers within `air_range` for `air_damage`
 /// per second, and the ground when `ground`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AirAttack {
     pub air_range: i32,
     pub air_damage: i32,
     pub ground: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TypeRules {
     pub foot_x: i32,
     pub foot_y: i32,
