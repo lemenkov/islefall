@@ -47,9 +47,10 @@ NETSTORM_DIR=~/games/NetStorm cargo run --release
 ```
 
 By default this shows a first scene: a home island with the altar and the
-Temple, a bridge to a battery on its own islet, a neutral island with a
-Storm Geyser, an enemy Disc Thrower and the enemy High Priest, and two units
-walking under the simulation's control. Structures shoot enemies in range; damaged things
+Temple, a bridge to a battery on its own islet, an enemy island with a
+Storm Geyser, a Disc Thrower and the enemy High Priest, whose owner bridges
+towards your altar and drops shooters on the way, and two units walking
+under the simulation's control. Structures shoot enemies in range; damaged things
 show a health bar, destroyed ones explode and crack nearby bridges.
 Left-click on a unit selects it, left-click elsewhere sends the selected unit
 there along a path around obstacles, left-click on a Storm Geyser sets it

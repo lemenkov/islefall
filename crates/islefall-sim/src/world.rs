@@ -119,12 +119,16 @@ pub struct World {
     pub tick: u64,
     /// Natural islands.
     pub islands: Vec<IslandMap>,
+    /// Owner of each natural island, parallel to `islands`.
+    pub island_owners: Vec<u8>,
     /// Platforms created under `createsisland` structures dropped on bridges.
     pub platforms: IslandMap,
     /// Incremented whenever islands or platforms change.
     pub terrain_version: u64,
     /// Cells carrying a bridge tile and their condition. Bridges are one cell wide.
     pub bridges: BTreeMap<Cell, BridgeState>,
+    /// Who built each bridge cell.
+    pub bridge_owners: BTreeMap<Cell, u8>,
     /// Incremented whenever `bridges` changes, so renderers can refresh.
     pub bridge_version: u64,
     pub structures: Vec<Structure>,
@@ -150,9 +154,11 @@ impl Default for World {
         World {
             tick: 0,
             islands: Vec::new(),
+            island_owners: Vec::new(),
             platforms: IslandMap::new(),
             terrain_version: 0,
             bridges: BTreeMap::new(),
+            bridge_owners: BTreeMap::new(),
             bridge_version: 0,
             structures: Vec::new(),
             structure_version: 0,
@@ -170,6 +176,13 @@ impl Default for World {
 impl World {
     pub fn new() -> World {
         World::default()
+    }
+
+    /// Add a natural island with its owner.
+    pub fn push_island(&mut self, island: IslandMap, owner: u8) {
+        self.islands.push(island);
+        self.island_owners.push(owner);
+        self.terrain_version += 1;
     }
 
     /// Whether an island or a platform covers `cell`.
@@ -257,9 +270,14 @@ impl World {
     }
 
     pub fn place_piece(&mut self, cells: &[Cell]) -> Result<(), PieceError> {
+        self.place_piece_for(0, cells)
+    }
+
+    pub fn place_piece_for(&mut self, owner: u8, cells: &[Cell]) -> Result<(), PieceError> {
         self.can_place_piece(cells)?;
         for &c in cells {
             self.bridges.insert(c, BridgeState::Normal);
+            self.bridge_owners.insert(c, owner);
         }
         self.bridge_version += 1;
         Ok(())
@@ -305,6 +323,7 @@ impl World {
                 }
             }
         }
+        self.prune_bridge_owners();
         self.bridge_version += 1;
         self.settle();
         true
@@ -362,6 +381,12 @@ impl World {
         falling.len()
     }
 
+    /// Forget owners of cells that no longer carry a bridge.
+    fn prune_bridge_owners(&mut self) {
+        let bridges = &self.bridges;
+        self.bridge_owners.retain(|c, _| bridges.contains_key(c));
+    }
+
     fn remove_unsupported_things(&mut self, reached: &BTreeSet<Cell>) {
         let before = self.structures.len();
         self.structures.retain(|s| s.cells().all(|c| reached.contains(&c)));
@@ -392,6 +417,7 @@ impl World {
             self.doomed.remove(c);
             self.bridges.remove(c);
         }
+        self.prune_bridge_owners();
         self.bridge_version += 1;
         let reached = self.supported();
         self.remove_unsupported_things(&reached);
@@ -706,6 +732,7 @@ impl World {
             changed = true;
         }
         if changed {
+            self.prune_bridge_owners();
             self.bridge_version += 1;
         }
     }

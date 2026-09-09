@@ -18,7 +18,8 @@
 //! Environment:
 //! - `NETSTORM_DIR`: directory containing the game's `d/` and `netstorm.tarc`.
 //! - `ISLEFALL_PALETTE`: palette file stem from `d/` (default `gifcloud`, the game palette).
-//! - `ISLEFALL_SCREENSHOT=file.png`: save a screenshot shortly after start-up.
+//! - `ISLEFALL_SCREENSHOT=file.png`: save a screenshot shortly after start-up,
+//!   after `ISLEFALL_SCREENSHOT_AT` seconds (default 1.5).
 //! - `ISLEFALL_ISLAND=cross`: use a cross-shaped test island in the island scene.
 //! - `ISLEFALL_CAMERA=x,y`: start the camera centred on that cell instead of the island.
 //!
@@ -36,7 +37,7 @@ use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
 use islefall_data::{Installation, TypeDef};
-use islefall_sim::{CELL_H, CELL_W, Cell, Dir8, ENERGY_RANGE_PX, IslandMap, Piece, TICK_HZ, TypeRules, Unit, World};
+use islefall_sim::{Ai, AiMove, CELL_H, CELL_W, Cell, Dir8, ENERGY_RANGE_PX, IslandMap, Piece, TICK_HZ, TypeRules, Unit, World};
 use sprites::FrameInfo;
 use world::{BridgeTile, LoadedShape, ShapeLibrary, StructureSprite, TerrainTile, Z_SHADOW, Z_STRUCTURE, Z_UNIT};
 
@@ -99,7 +100,14 @@ impl GameData {
 #[derive(Resource, Default)]
 struct Sim {
     world: World,
+    /// Computer opponents, acting after each tick.
+    ais: Vec<Ai>,
 }
+
+/// What the opponents drop.
+const AI_SHOOTER: &str = "sunarcher";
+/// Seconds between opponent moves.
+const AI_MOVE_SECONDS: u32 = 4;
 
 /// Player-side interaction state.
 #[derive(Resource)]
@@ -265,10 +273,8 @@ fn main() {
     )
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
-        app.insert_resource(AutoScreenshot {
-            path,
-            delay: Timer::from_seconds(AUTO_SCREENSHOT_SECONDS, TimerMode::Once),
-        });
+        let at = std::env::var("ISLEFALL_SCREENSHOT_AT").ok().and_then(|s| s.parse().ok()).unwrap_or(AUTO_SCREENSHOT_SECONDS);
+        app.insert_resource(AutoScreenshot { path, delay: Timer::from_seconds(at, TimerMode::Once) });
     }
     app.run();
 }
@@ -328,11 +334,11 @@ fn setup_island(
         }
     }
     world::spawn_island(commands, install, lib, palette, images, layouts, &island, Theme::Sun, false);
-    sim.world.islands.push(island);
-    // A small neutral island to the east with a Storm Geyser on it.
+    sim.world.push_island(island, 0);
+    // The enemy island to the east with a Storm Geyser on it.
     let geyser_isle = IslandMap::rect(Cell::new(28, 4), 9, 9);
     world::spawn_island(commands, install, lib, palette, images, layouts, &geyser_isle, Theme::Sun, false);
-    sim.world.islands.push(geyser_isle);
+    sim.world.push_island(geyser_isle, 1);
 
     // The simulation owns everything else; sprites follow it through the sync systems.
     // The starting layout is free and needs no Energy; both apply once it stands.
@@ -361,6 +367,9 @@ fn setup_island(
     }
     sim.world.storm_power = START_POWER;
     sim.world.energy_enforced = true;
+    // The opponent bridges towards our altar and drops shooters on the way.
+    let altar = sim.world.structures.iter().find(|s| s.is_altar && s.owner == 0).map(|s| s.centre()).unwrap_or(Cell::new(6, 4));
+    sim.ais.push(Ai::new(1, altar, AI_MOVE_SECONDS * TICK_HZ, 0xa1));
     if let Some(i) = sim.world.spawn_unit("priest", &data.rules("priest"), Cell::new(2, 8)) {
         sim.world.order_move(i, Cell::new(23, 3));
     }
@@ -459,9 +468,19 @@ fn spawn_viewer_shape(
     spawn_animated(commands, shape, def, animation, Vec2::ZERO, Z_UNIT, true);
 }
 
-fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>) {
-    if !viewer.paused {
-        sim.world.step();
+fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>) {
+    if viewer.paused {
+        return;
+    }
+    let Sim { world, ais } = &mut *sim;
+    world.step();
+    let shooter = data.rules(AI_SHOOTER);
+    for ai in ais.iter_mut() {
+        match ai.tick(world, (AI_SHOOTER, &shooter)) {
+            Some(AiMove::Piece { name, at }) => info!("opponent {} lays a {name} piece at {at:?}", ai.owner),
+            Some(AiMove::Shooter { kind, at }) => info!("opponent {} drops a {kind} at {at:?}", ai.owner),
+            _ => {}
+        }
     }
 }
 

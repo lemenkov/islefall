@@ -5,6 +5,7 @@
 //! grid coordinates, island shapes, and later units and rules. The Bevy
 //! crate reads this state and draws it; it never drives it.
 
+pub mod ai;
 pub mod grid;
 pub mod island;
 pub mod path;
@@ -14,6 +15,7 @@ pub mod structure;
 pub mod unit;
 pub mod world;
 
+pub use ai::{Ai, AiMove};
 pub use grid::{CELL_H, CELL_W, Cell};
 pub use island::IslandMap;
 pub use path::{find_path, find_path_costed};

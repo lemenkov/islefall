@@ -176,6 +176,17 @@ Not yet modelled: `airrange` and `airdamage` against flyers, stunning and
 capturing priests, unit-versus-unit combat (no unit shoots yet), Energy
 requirements, and enemy AI beyond static shooters.
 
+## The opponent
+
+A first computer player, in `crates/islefall-sim/src/ai.rs`, moves every
+few seconds: it lays the piece and rotation from its own random queue that
+brings a bridge closest to the player's altar, attaching only to its own
+island edges and open bridge ends, and every third move drops a Sun Disc
+Thrower in the sky at the open end nearest the target. It pays nothing and
+needs no Energy. Islands and bridge cells now carry an owner; the manual's
+rule that you may connect to enemy open ends but not build off them is not
+enforced yet.
+
 ## Open questions
 
 - Whether `yuckWalk` blocks or merely deters.
