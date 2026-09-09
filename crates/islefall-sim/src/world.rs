@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! The whole simulated state and its fixed-rate tick.
 
+use std::collections::BTreeSet;
+
 use crate::grid::Cell;
 use crate::island::IslandMap;
 use crate::path::find_path;
@@ -15,6 +17,10 @@ pub const TICK_HZ: u32 = 30;
 pub struct World {
     pub tick: u64,
     pub islands: Vec<IslandMap>,
+    /// Cells carrying a bridge tile. Bridges are one cell wide.
+    pub bridges: BTreeSet<Cell>,
+    /// Incremented whenever `bridges` changes, so renderers can refresh.
+    pub bridge_version: u64,
     pub structures: Vec<Structure>,
     pub units: Vec<Unit>,
 }
@@ -29,9 +35,45 @@ impl World {
         self.islands.iter().any(|i| i.contains(cell))
     }
 
-    /// Land that no walk-blocking structure covers.
+    pub fn is_bridge(&self, cell: Cell) -> bool {
+        self.bridges.contains(&cell)
+    }
+
+    /// Ground of any kind: island or bridge.
+    pub fn is_ground(&self, cell: Cell) -> bool {
+        self.is_land(cell) || self.is_bridge(cell)
+    }
+
+    /// Ground that no walk-blocking structure covers.
     pub fn is_walkable(&self, cell: Cell) -> bool {
-        self.is_land(cell) && !self.structures.iter().any(|s| s.blocks_walking && s.covers(cell))
+        self.is_ground(cell) && !self.structures.iter().any(|s| s.blocks_walking && s.covers(cell))
+    }
+
+    /// A bridge cell may be placed on empty sky next to existing ground.
+    /// Diagonal neighbours do not count: bridges connect orthogonally.
+    pub fn can_place_bridge(&self, cell: Cell) -> bool {
+        !self.is_ground(cell) && [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().any(|&(dx, dy)| self.is_ground(cell.offset(dx, dy)))
+    }
+
+    pub fn place_bridge(&mut self, cell: Cell) -> bool {
+        if !self.can_place_bridge(cell) {
+            return false;
+        }
+        self.bridges.insert(cell);
+        self.bridge_version += 1;
+        true
+    }
+
+    /// Connection mask of a bridge cell (north 1, east 2, south 4, west 8):
+    /// a side connects when the neighbour is bridge or island.
+    pub fn bridge_connections(&self, cell: Cell) -> u8 {
+        let mut m = 0;
+        for (bit, dx, dy) in [(1u8, 0, -1), (2, 1, 0), (4, 0, 1), (8, -1, 0)] {
+            if self.is_ground(cell.offset(dx, dy)) {
+                m |= bit;
+            }
+        }
+        m
     }
 
     /// Order a unit to walk to `cell` along the shortest walkable path.
@@ -113,6 +155,22 @@ mod tests {
         let mut w = world();
         w.structures.push(Structure::new("dais", Cell::new(4, 3), 2, 2, false));
         assert!(w.is_walkable(Cell::new(4, 3)));
+    }
+
+    #[test]
+    fn bridges_attach_to_ground_and_connect() {
+        let mut w = world();
+        assert!(!w.place_bridge(Cell::new(3, 1)), "already land");
+        assert!(!w.place_bridge(Cell::new(9, 1)), "not adjacent to ground");
+        assert!(w.place_bridge(Cell::new(8, 1)), "east of the island edge");
+        assert!(w.place_bridge(Cell::new(9, 1)));
+        assert!(w.place_bridge(Cell::new(9, 0)));
+        assert_eq!(w.bridge_version, 3);
+        assert_eq!(w.bridge_connections(Cell::new(8, 1)), 2 | 8, "east to bridge, west to island");
+        assert_eq!(w.bridge_connections(Cell::new(9, 1)), 1 | 8);
+        assert_eq!(w.bridge_connections(Cell::new(9, 0)), 4);
+        assert!(w.is_walkable(Cell::new(9, 0)));
+        assert!(w.order_move(0, Cell::new(9, 0)), "units walk over bridges");
     }
 
     #[test]

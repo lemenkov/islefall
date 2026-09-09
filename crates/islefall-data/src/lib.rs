@@ -10,6 +10,7 @@
 //! no allocation is ever sized from a header field alone, and all rasters are
 //! capped by [`shp::MAX_DIM`] and [`shp::MAX_PIXELS`].
 
+pub mod bridge;
 pub mod col;
 pub mod install;
 pub mod isle;

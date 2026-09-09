@@ -335,6 +335,20 @@ Rules observed across all 124 files:
   `cracked`, `lit`, `unlit`. The second image reference, when present, is
   the frame's shadow. Statements may span lines and end at `;`.
 
+Two type files carry structure in their labels:
+
+- `isle.type` (terrain): `AA` filled pieces, `BF`/`CG`/`DH`/`EI` left, top,
+  right and bottom edges, `FL`/`GM`/`HN`/`IO` outside corners clockwise
+  from top-left, `AB`/`AC`/`AD`/`AE` inside corners. Each label's frames
+  come in four equal blocks for the sun, thunder, wind and rain themes.
+- `bridge.type`: one letter per connection pattern of a one-cell-wide
+  bridge. With north, east, south and west as the connected sides: `A` all
+  four, `B` N+E+S, `C` E+S+W, `D` N+S+W, `E` N+E+W, `F` E+S, `G` S+W,
+  `H` N+W, `I` N+E, `J` N+S, `K` E+W, and the torn ends `L` S, `M` W,
+  `N` N, `O` E. Frame number 1 (and 2) is the normal tile, 11 and 12 are
+  `cracked`, 20 is `hard`. A rail is drawn along every unconnected side,
+  which is how the letters were identified.
+
 The GIF files named here are not shipped; the frames they refer to are the
 records of `_shapes.shp`. How containers map to GIF names is not yet
 established.

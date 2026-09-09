@@ -159,7 +159,7 @@ fn sheet(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
             y0 += row_h + gap;
             row_h = 0;
         }
-        draw(&mut rgba, sw, fr, &pal, x0, y0, scale);
+        draw(&mut rgba, sw, fr, &pal, x0 * scale, y0 * scale, scale);
         x0 += cw + gap;
         row_h = row_h.max(ch);
     }

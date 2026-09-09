@@ -3,7 +3,8 @@
 //!
 //! Two modes, chosen with `ISLEFALL_MODE`:
 //! - `island` (default): an island with the altar and the High Priest,
-//!   driven by the simulation. Left-click on land sends the priest there.
+//!   driven by the simulation. Left-click on ground sends the priest there,
+//!   right-click on sky next to ground places a bridge cell.
 //!   Arrow keys or WASD pan the camera, `-` and `=` zoom.
 //! - `viewer`: animates one object type at a time. `[` and `]` step
 //!   through types, `,` and `.` through animations.
@@ -13,6 +14,7 @@
 //! - `ISLEFALL_PALETTE`: palette file stem from `d/` (default `gifcloud`, the game palette).
 //! - `ISLEFALL_SCREENSHOT=file.png`: save a screenshot shortly after start-up.
 //! - `ISLEFALL_ISLAND=cross`: use a cross-shaped test island in the island scene.
+//! - `ISLEFALL_CAMERA=x,y`: start the camera centred on that cell instead of the island.
 //!
 //! Keys in both modes: `Space` pauses animation, `P` saves a screenshot.
 
@@ -30,7 +32,7 @@ use islefall_data::shapes::SHAPE_ORDER;
 use islefall_data::{Installation, TypeDef};
 use islefall_sim::{CELL_H, CELL_W, Cell, Dir8, IslandMap, Structure, TICK_HZ, Unit, World, speed_per_tick};
 use sprites::FrameInfo;
-use world::{LoadedShape, ShapeLibrary, Z_SHADOW, Z_STRUCTURE, Z_UNIT};
+use world::{BridgeTile, LoadedShape, ShapeLibrary, Z_SHADOW, Z_STRUCTURE, Z_UNIT};
 
 /// Type flags that keep units off a footprint, until the real walk rules are known.
 const BLOCKING_FLAGS: [&str; 9] = ["walkBlocking", "yuckWalk", "dropBlocking", "emplacement", "factory", "tree", "dais", "fence", "vortex"];
@@ -154,7 +156,7 @@ fn main() {
     .add_systems(Startup, setup)
     .add_systems(FixedUpdate, sim_step.run_if(resource_equals(Mode::Island)))
     .add_systems(Update, (common_keys, animate, auto_screenshot))
-    .add_systems(Update, (camera_keys, click_to_move, sync_units).run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, (camera_keys, click_to_move, sync_units, sync_bridges).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
         app.insert_resource(AutoScreenshot {
@@ -226,10 +228,14 @@ fn setup_island(
     for (stem, cell) in [("dais", Cell::new(9, 7)), ("treetwo", Cell::new(3, 3)), ("treetwo", Cell::new(12, 7))] {
         place_structure(commands, data, sim, lib, images, layouts, stem, cell);
     }
+    // A bridge off the east edge that uses straights, a cross, a corner and ends.
+    for (x, y) in [(14, 4), (15, 4), (16, 4), (17, 4), (18, 4), (18, 3), (18, 2), (16, 3), (16, 5), (16, 6), (19, 3), (17, 2), (15, 5), (17, 3)] {
+        sim.world.place_bridge(Cell::new(x, y));
+    }
     if let Some(def) = install.type_def("priest") {
         let speed = speed_per_tick(def.get_f64("speed").unwrap_or(1.0));
         sim.world.units.push(Unit::new("priest", Cell::new(2, 8), speed));
-        sim.world.order_move(0, Cell::new(11, 2));
+        sim.world.order_move(0, Cell::new(18, 2));
         if let Some(shape) = lib.get_or_load(install, palette, "priest", images, layouts) {
             let unit = &sim.world.units[0];
             let entities = spawn_animated(commands, shape, def, unit.facing.animation(), unit_to_world(unit), Z_UNIT, false);
@@ -239,7 +245,12 @@ fn setup_island(
         }
     }
 
-    let centre = (world::cell_to_world(Cell::new(0, 0)) + world::cell_to_world(Cell::new(w - 1, h - 1))) / 2.0;
+    let mut centre = (world::cell_to_world(Cell::new(0, 0)) + world::cell_to_world(Cell::new(w - 1, h - 1))) / 2.0;
+    if let Ok(spec) = std::env::var("ISLEFALL_CAMERA") {
+        if let Some((x, y)) = spec.split_once(',').and_then(|(x, y)| Some((x.trim().parse::<i32>().ok()?, y.trim().parse::<i32>().ok()?))) {
+            centre = world::cell_to_world(Cell::new(x, y));
+        }
+    }
     commands.spawn((Camera2d, zoomed_projection(), Transform::from_translation(centre.extend(0.0))));
     info!("island scene: {} cells, altar and priest", sim.world.islands[0].len());
 }
@@ -400,18 +411,48 @@ fn click_to_move(
     cameras: Query<(&Camera, &GlobalTransform)>,
     mut sim: ResMut<Sim>,
 ) {
-    if !buttons.just_pressed(MouseButton::Left) {
+    let left = buttons.just_pressed(MouseButton::Left);
+    let right = buttons.just_pressed(MouseButton::Right);
+    if !left && !right {
         return;
     }
     let (Ok(window), Ok((camera, cam_tf))) = (windows.single(), cameras.single()) else { return };
     let Some(cursor) = window.cursor_position() else { return };
     let Ok(world_pos) = camera.viewport_to_world_2d(cam_tf, cursor) else { return };
     let cell = world_to_cell(world_pos);
-    if sim.world.order_move(0, cell) {
-        info!("priest ordered to {cell:?}");
+    if left {
+        if sim.world.order_move(0, cell) {
+            info!("priest ordered to {cell:?}");
+        } else {
+            info!("{cell:?} is unreachable");
+        }
+    } else if sim.world.place_bridge(cell) {
+        info!("bridge placed at {cell:?}");
     } else {
-        info!("{cell:?} is unreachable");
+        info!("cannot place a bridge at {cell:?}");
     }
+}
+
+/// Rebuild the bridge layer whenever the simulation's bridge set changes.
+fn sync_bridges(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    mut lib: ResMut<ShapeLibrary>,
+    mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    existing: Query<Entity, With<BridgeTile>>,
+    mut seen: Local<Option<u64>>,
+) {
+    if *seen == Some(sim.world.bridge_version) {
+        return;
+    }
+    *seen = Some(sim.world.bridge_version);
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
+    let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+    world::spawn_bridges(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, &sim.world);
 }
 
 fn camera_keys(

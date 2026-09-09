@@ -6,13 +6,15 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use islefall_data::isle::{self, Theme};
-use islefall_data::{Installation, Palette};
-use islefall_sim::{Cell, IslandMap};
+use islefall_data::{Installation, Palette, bridge};
+use islefall_sim::{Cell, IslandMap, World};
 
 use crate::sprites::{self, FrameInfo};
 
 /// Draw order layers; units add a small y-sort offset on top.
 pub const Z_TERRAIN: f32 = 0.0;
+/// Bridges sit just above terrain; each row draws over the one above it.
+pub const Z_BRIDGE: f32 = 1.0;
 pub const Z_STRUCTURE: f32 = 10.0;
 pub const Z_SHADOW: f32 = 5.0;
 pub const Z_UNIT: f32 = 30.0;
@@ -104,5 +106,36 @@ pub fn spawn_island(
         }
         let frame = frames[variation(cell, frames.len())];
         spawn_frame(commands, shape, frame, cell_to_world(cell), Z_TERRAIN);
+    }
+}
+
+/// Marks a bridge tile sprite so the layer can be rebuilt.
+#[derive(Component)]
+pub struct BridgeTile;
+
+/// Draw every bridge cell of the world with the tile matching its connections.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_bridges(
+    commands: &mut Commands,
+    install: &Installation,
+    lib: &mut ShapeLibrary,
+    palette: &Palette,
+    images: &mut Assets<Image>,
+    layouts: &mut Assets<TextureAtlasLayout>,
+    world: &World,
+) {
+    let Some(def) = install.type_def("bridge") else { return };
+    let Some(shape) = lib.get_or_load(install, palette, "bridge", images, layouts) else { return };
+    let mut by_mask: HashMap<u8, Vec<usize>> = HashMap::new();
+    for &cell in &world.bridges {
+        let mask = world.bridge_connections(cell);
+        let frames = by_mask.entry(mask).or_insert_with(|| bridge::frames(def, mask, bridge::Condition::Normal));
+        if frames.is_empty() {
+            continue;
+        }
+        let frame = frames[variation(cell, frames.len())];
+        let z = Z_BRIDGE + cell.y as f32 * 0.001;
+        let e = spawn_frame(commands, shape, frame, cell_to_world(cell), z);
+        commands.entity(e).insert(BridgeTile);
     }
 }
