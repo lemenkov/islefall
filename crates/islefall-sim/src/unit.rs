@@ -4,6 +4,8 @@
 //! Positions are fixed point with [`SUBCELL`] steps per cell so that the
 //! simulation stays integer-only and deterministic across machines.
 
+use std::collections::VecDeque;
+
 use crate::grid::Cell;
 
 /// Fixed-point steps per cell.
@@ -84,24 +86,26 @@ pub struct Unit {
     pub kind: String,
     pub pos: Pos,
     pub facing: Dir8,
-    /// Where the unit is walking to, if anywhere.
-    pub target: Option<Pos>,
+    /// Waypoints still to visit, front first.
+    pub path: VecDeque<Pos>,
     /// Movement per tick in fixed-point steps.
     pub speed: i32,
 }
 
 impl Unit {
     pub fn new(kind: impl Into<String>, cell: Cell, speed: i32) -> Unit {
-        Unit { kind: kind.into(), pos: Pos::cell_centre(cell), facing: Dir8::S, target: None, speed }
+        Unit { kind: kind.into(), pos: Pos::cell_centre(cell), facing: Dir8::S, path: VecDeque::new(), speed }
     }
 
     pub fn is_moving(&self) -> bool {
-        self.target.is_some()
+        !self.path.is_empty()
     }
 
-    /// Advance one tick towards the target in a straight line.
+    /// Advance one tick along the path, straight towards the next waypoint.
+    /// Leftover movement after reaching a waypoint is not carried over, so a
+    /// unit takes a whole tick per waypoint at most once per cell.
     pub fn step(&mut self) {
-        let Some(t) = self.target else { return };
+        let Some(&t) = self.path.front() else { return };
         let (dx, dy) = ((t.x - self.pos.x) as i64, (t.y - self.pos.y) as i64);
         let dist = ((dx * dx + dy * dy) as u64).isqrt() as i64;
         if let Some(f) = Dir8::from_vector(dx, dy) {
@@ -109,7 +113,7 @@ impl Unit {
         }
         if dist <= self.speed as i64 {
             self.pos = t;
-            self.target = None;
+            self.path.pop_front();
             return;
         }
         // Integer projection of the step onto the direction; rounding keeps it deterministic.
@@ -141,7 +145,7 @@ mod tests {
     #[test]
     fn walks_to_target_and_stops() {
         let mut u = Unit::new("priest", Cell::new(0, 0), 64);
-        u.target = Some(Pos::cell_centre(Cell::new(3, 0)));
+        u.path.push_back(Pos::cell_centre(Cell::new(3, 0)));
         let mut ticks = 0;
         while u.is_moving() {
             u.step();

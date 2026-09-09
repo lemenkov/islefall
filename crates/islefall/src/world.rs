@@ -14,7 +14,7 @@ use crate::sprites::{self, FrameInfo};
 /// Draw order layers; units add a small y-sort offset on top.
 pub const Z_TERRAIN: f32 = 0.0;
 pub const Z_STRUCTURE: f32 = 10.0;
-pub const Z_SHADOW: f32 = 20.0;
+pub const Z_SHADOW: f32 = 5.0;
 pub const Z_UNIT: f32 = 30.0;
 
 /// A type's frames uploaded as atlases: the image layer and, if present, the shadow layer.

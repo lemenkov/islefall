@@ -28,9 +28,17 @@ use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
 use islefall_data::{Installation, TypeDef};
-use islefall_sim::{CELL_H, CELL_W, Cell, Dir8, IslandMap, TICK_HZ, Unit, World, speed_per_tick};
+use islefall_sim::{CELL_H, CELL_W, Cell, Dir8, IslandMap, Structure, TICK_HZ, Unit, World, speed_per_tick};
 use sprites::FrameInfo;
 use world::{LoadedShape, ShapeLibrary, Z_SHADOW, Z_STRUCTURE, Z_UNIT};
+
+/// Type flags that keep units off a footprint, until the real walk rules are known.
+const BLOCKING_FLAGS: [&str; 9] = ["walkBlocking", "yuckWalk", "dropBlocking", "emplacement", "factory", "tree", "dais", "fence", "vortex"];
+
+/// Row-based draw order: things lower on screen draw over things above them.
+fn depth_z(base: f32, row: f32) -> f32 {
+    base + row * 0.01
+}
 
 const START_TYPE: &str = "priest";
 const FRAME_SECONDS: f32 = 0.1;
@@ -95,6 +103,7 @@ struct ViewerEntity;
 struct UnitLayer {
     unit: usize,
     facing: Dir8,
+    shadow: bool,
 }
 
 fn main() {
@@ -212,24 +221,20 @@ fn setup_island(
     }
     world::spawn_island(commands, install, lib, palette, images, layouts, &island, Theme::Sun);
 
-    // The altar has a 7x7 footprint; its hotspot is the bottom-right cell.
-    if let Some(def) = install.type_def("dais") {
-        let frame = def.frames.iter().position(|f| f.label.eq_ignore_ascii_case("P03")).unwrap_or(0);
-        if let Some(shape) = lib.get_or_load(install, palette, "dais", images, layouts) {
-            world::spawn_frame(commands, shape, frame, world::cell_to_world(Cell::new(9, 7)), Z_STRUCTURE);
-        }
-    }
-
-    // The simulation owns the island and the priest; sprites follow it.
+    // The simulation owns the island, the structures and the priest; sprites follow it.
     sim.world.islands.push(island);
+    for (stem, cell) in [("dais", Cell::new(9, 7)), ("treetwo", Cell::new(3, 3)), ("treetwo", Cell::new(12, 7))] {
+        place_structure(commands, data, sim, lib, images, layouts, stem, cell);
+    }
     if let Some(def) = install.type_def("priest") {
         let speed = speed_per_tick(def.get_f64("speed").unwrap_or(1.0));
         sim.world.units.push(Unit::new("priest", Cell::new(2, 8), speed));
         sim.world.order_move(0, Cell::new(11, 2));
         if let Some(shape) = lib.get_or_load(install, palette, "priest", images, layouts) {
             let unit = &sim.world.units[0];
-            for e in spawn_animated(commands, shape, def, unit.facing.animation(), unit_to_world(unit), Z_UNIT, false) {
-                commands.entity(e).insert(UnitLayer { unit: 0, facing: unit.facing });
+            let entities = spawn_animated(commands, shape, def, unit.facing.animation(), unit_to_world(unit), Z_UNIT, false);
+            for (i, e) in entities.into_iter().enumerate() {
+                commands.entity(e).insert(UnitLayer { unit: 0, facing: unit.facing, shadow: i == 1 });
             }
         }
     }
@@ -237,6 +242,34 @@ fn setup_island(
     let centre = (world::cell_to_world(Cell::new(0, 0)) + world::cell_to_world(Cell::new(w - 1, h - 1))) / 2.0;
     commands.spawn((Camera2d, zoomed_projection(), Transform::from_translation(centre.extend(0.0))));
     info!("island scene: {} cells, altar and priest", sim.world.islands[0].len());
+}
+
+/// Add a structure to the simulation from its type's footprint and flags, and draw its default frame.
+#[allow(clippy::too_many_arguments)]
+fn place_structure(
+    commands: &mut Commands,
+    data: &GameData,
+    sim: &mut Sim,
+    lib: &mut ShapeLibrary,
+    images: &mut Assets<Image>,
+    layouts: &mut Assets<TextureAtlasLayout>,
+    stem: &str,
+    cell: Cell,
+) {
+    let install = &data.install;
+    let palette = install.palette(&data.palette).expect("palette checked at start-up");
+    let Some(def) = install.type_def(stem) else {
+        warn!("{stem}: unknown type");
+        return;
+    };
+    let foot_x = def.get_i64("foot_x").unwrap_or(1) as i32;
+    let foot_y = def.get_i64("foot_y").unwrap_or(1) as i32;
+    let blocks = BLOCKING_FLAGS.iter().any(|f| def.has_flag(f));
+    sim.world.structures.push(Structure::new(stem, cell, foot_x, foot_y, blocks));
+    let frame = def.frames.iter().position(|f| f.has_flag("default")).unwrap_or(0);
+    if let Some(shape) = lib.get_or_load(install, palette, stem, images, layouts) {
+        world::spawn_frame(commands, shape, frame, world::cell_to_world(cell), depth_z(Z_STRUCTURE, cell.y as f32));
+    }
 }
 
 /// World position of a unit's feet: cells to source pixels, y flipped.
@@ -337,6 +370,8 @@ fn sync_units(
         let pos = unit_to_world(unit);
         tf.translation.x = pos.x;
         tf.translation.y = pos.y;
+        let (_, row) = unit.pos.to_f32();
+        tf.translation.z = if layer.shadow { Z_SHADOW } else { depth_z(Z_STRUCTURE, row) + 0.005 };
         if unit.facing != layer.facing {
             if let Some(def) = data.install.type_def(&unit.kind) {
                 let seq = animation_sequence(def, unit.facing.animation());
@@ -375,7 +410,7 @@ fn click_to_move(
     if sim.world.order_move(0, cell) {
         info!("priest ordered to {cell:?}");
     } else {
-        info!("{cell:?} is not land");
+        info!("{cell:?} is unreachable");
     }
 }
 
