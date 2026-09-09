@@ -8,13 +8,15 @@
 pub mod grid;
 pub mod island;
 pub mod path;
+pub mod rules;
 pub mod structure;
 pub mod unit;
 pub mod world;
 
 pub use grid::{CELL_H, CELL_W, Cell};
 pub use island::IslandMap;
-pub use path::find_path;
+pub use path::{find_path, find_path_costed};
+pub use rules::{TypeRules, Walk};
 pub use structure::Structure;
 pub use unit::{Dir8, Pos, SUBCELL, Unit};
 pub use world::{TICK_HZ, World, speed_per_tick};

@@ -3,8 +3,9 @@
 //!
 //! Two modes, chosen with `ISLEFALL_MODE`:
 //! - `island` (default): an island with the altar and the High Priest,
-//!   driven by the simulation. Left-click on ground sends the priest there,
-//!   right-click on sky next to ground places a bridge cell.
+//!   driven by the simulation. Left-click selects a unit or sends the
+//!   selected unit somewhere; right-click acts with the current tool.
+//!   Tools: `B` bridge cells, `1`..`5` drop a building, `U` spawn a golem.
 //!   Arrow keys or WASD pan the camera, `-` and `=` zoom.
 //! - `viewer`: animates one object type at a time. `[` and `]` step
 //!   through types, `,` and `.` through animations.
@@ -30,17 +31,9 @@ use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
 use islefall_data::{Installation, TypeDef};
-use islefall_sim::{CELL_H, CELL_W, Cell, Dir8, IslandMap, Structure, TICK_HZ, Unit, World, speed_per_tick};
+use islefall_sim::{CELL_H, CELL_W, Cell, Dir8, IslandMap, TICK_HZ, TypeRules, Unit, World};
 use sprites::FrameInfo;
-use world::{BridgeTile, LoadedShape, ShapeLibrary, Z_SHADOW, Z_STRUCTURE, Z_UNIT};
-
-/// Type flags that keep units off a footprint, until the real walk rules are known.
-const BLOCKING_FLAGS: [&str; 9] = ["walkBlocking", "yuckWalk", "dropBlocking", "emplacement", "factory", "tree", "dais", "fence", "vortex"];
-
-/// Row-based draw order: things lower on screen draw over things above them.
-fn depth_z(base: f32, row: f32) -> f32 {
-    base + row * 0.01
-}
+use world::{BridgeTile, LoadedShape, ShapeLibrary, StructureSprite, TerrainTile, Z_SHADOW, Z_STRUCTURE, Z_UNIT};
 
 const START_TYPE: &str = "priest";
 const FRAME_SECONDS: f32 = 0.1;
@@ -49,11 +42,33 @@ const AUTO_SCREENSHOT_SECONDS: f32 = 1.5;
 const DEFAULT_PALETTE: &str = "gifcloud";
 /// Camera pan speed in source pixels per second.
 const PAN_SPEED: f32 = 120.0;
+/// Buildings on the number keys.
+const BUILD_TOOLS: [(KeyCode, &str); 5] = [
+    (KeyCode::Digit1, "suncannon"),
+    (KeyCode::Digit2, "sunarcher"),
+    (KeyCode::Digit3, "sunbattery"),
+    (KeyCode::Digit4, "sunfactory"),
+    (KeyCode::Digit5, "treetwo"),
+];
+const UNIT_TOOL: &str = "sunwalker";
+
+/// Row-based draw order: things lower on screen draw over things above them.
+fn depth_z(base: f32, row: f32) -> f32 {
+    base + row * 0.01
+}
 
 #[derive(Resource, Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Island,
     Viewer,
+}
+
+/// What a right-click does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Tool {
+    Bridge,
+    Drop(&'static str),
+    Spawn(&'static str),
 }
 
 /// The user-supplied NetStorm data, loaded once at startup.
@@ -63,10 +78,23 @@ struct GameData {
     palette: String,
 }
 
+impl GameData {
+    fn rules(&self, stem: &str) -> TypeRules {
+        self.install.type_def(stem).map(TypeRules::from_type).unwrap_or_else(TypeRules::plain)
+    }
+}
+
 /// The simulation state; stepped on the fixed schedule only.
 #[derive(Resource, Default)]
 struct Sim {
     world: World,
+}
+
+/// Player-side interaction state.
+#[derive(Resource)]
+struct Player {
+    tool: Tool,
+    selected: usize,
 }
 
 #[derive(Resource)]
@@ -147,6 +175,7 @@ fn main() {
     .insert_resource(Time::<Fixed>::from_hz(TICK_HZ as f64))
     .init_resource::<ShapeLibrary>()
     .init_resource::<Sim>()
+    .insert_resource(Player { tool: Tool::Bridge, selected: 0 })
     .insert_resource(Viewer {
         type_index: SHAPE_ORDER.iter().position(|s| *s == START_TYPE).unwrap_or(0),
         animation: 0,
@@ -156,7 +185,11 @@ fn main() {
     .add_systems(Startup, setup)
     .add_systems(FixedUpdate, sim_step.run_if(resource_equals(Mode::Island)))
     .add_systems(Update, (common_keys, animate, auto_screenshot))
-    .add_systems(Update, (camera_keys, click_to_move, sync_units, sync_bridges).run_if(resource_equals(Mode::Island)))
+    .add_systems(
+        Update,
+        (camera_keys, tool_keys, mouse_actions, sync_units, sync_bridges, sync_structures, sync_platforms)
+            .run_if(resource_equals(Mode::Island)),
+    )
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
         app.insert_resource(AutoScreenshot {
@@ -198,7 +231,7 @@ fn zoomed_projection() -> Projection {
     Projection::Orthographic(OrthographicProjection { scale: 1.0 / ZOOM, ..OrthographicProjection::default_2d() })
 }
 
-/// A first scene: a sun-themed island with a notch, the altar, and the priest.
+/// A first scene: a sun-themed island with a notch, the altar, trees, a bridge and the priest.
 fn setup_island(
     commands: &mut Commands,
     data: &GameData,
@@ -221,28 +254,29 @@ fn setup_island(
             island.remove(c);
         }
     }
-    world::spawn_island(commands, install, lib, palette, images, layouts, &island, Theme::Sun);
-
-    // The simulation owns the island, the structures and the priest; sprites follow it.
+    world::spawn_island(commands, install, lib, palette, images, layouts, &island, Theme::Sun, false);
     sim.world.islands.push(island);
-    for (stem, cell) in [("dais", Cell::new(9, 7)), ("treetwo", Cell::new(3, 3)), ("treetwo", Cell::new(12, 7))] {
-        place_structure(commands, data, sim, lib, images, layouts, stem, cell);
+
+    // The simulation owns everything else; sprites follow it through the sync systems.
+    for (stem, cell) in [("dais", Cell::new(9, 7)), ("treetwo", Cell::new(2, 3)), ("treetwo", Cell::new(12, 7))] {
+        if let Err(e) = sim.world.drop_structure(stem, &data.rules(stem), cell) {
+            warn!("{stem} at {cell:?}: {e}");
+        }
     }
-    // A bridge off the east edge that uses straights, a cross, a corner and ends.
+    // A bridge off the east edge that uses straights, a cross, T pieces, corners and ends.
     for (x, y) in [(14, 4), (15, 4), (16, 4), (17, 4), (18, 4), (18, 3), (18, 2), (16, 3), (16, 5), (16, 6), (19, 3), (17, 2), (15, 5), (17, 3)] {
         sim.world.place_bridge(Cell::new(x, y));
     }
-    if let Some(def) = install.type_def("priest") {
-        let speed = speed_per_tick(def.get_f64("speed").unwrap_or(1.0));
-        sim.world.units.push(Unit::new("priest", Cell::new(2, 8), speed));
-        sim.world.order_move(0, Cell::new(18, 2));
-        if let Some(shape) = lib.get_or_load(install, palette, "priest", images, layouts) {
-            let unit = &sim.world.units[0];
-            let entities = spawn_animated(commands, shape, def, unit.facing.animation(), unit_to_world(unit), Z_UNIT, false);
-            for (i, e) in entities.into_iter().enumerate() {
-                commands.entity(e).insert(UnitLayer { unit: 0, facing: unit.facing, shadow: i == 1 });
-            }
-        }
+    // A battery dropped on the bridge turns the cells under it into a platform.
+    sim.world.place_bridge(Cell::new(16, 2));
+    if let Err(e) = sim.world.drop_structure("sunbattery", &data.rules("sunbattery"), Cell::new(18, 4)) {
+        warn!("sunbattery: {e}");
+    }
+    if let Some(i) = sim.world.spawn_unit("priest", &data.rules("priest"), Cell::new(2, 8)) {
+        sim.world.order_move(i, Cell::new(17, 3));
+    }
+    if let Some(i) = sim.world.spawn_unit(UNIT_TOOL, &data.rules(UNIT_TOOL), Cell::new(5, 8)) {
+        sim.world.order_move(i, Cell::new(11, 8));
     }
 
     let mut centre = (world::cell_to_world(Cell::new(0, 0)) + world::cell_to_world(Cell::new(w - 1, h - 1))) / 2.0;
@@ -252,35 +286,7 @@ fn setup_island(
         }
     }
     commands.spawn((Camera2d, zoomed_projection(), Transform::from_translation(centre.extend(0.0))));
-    info!("island scene: {} cells, altar and priest", sim.world.islands[0].len());
-}
-
-/// Add a structure to the simulation from its type's footprint and flags, and draw its default frame.
-#[allow(clippy::too_many_arguments)]
-fn place_structure(
-    commands: &mut Commands,
-    data: &GameData,
-    sim: &mut Sim,
-    lib: &mut ShapeLibrary,
-    images: &mut Assets<Image>,
-    layouts: &mut Assets<TextureAtlasLayout>,
-    stem: &str,
-    cell: Cell,
-) {
-    let install = &data.install;
-    let palette = install.palette(&data.palette).expect("palette checked at start-up");
-    let Some(def) = install.type_def(stem) else {
-        warn!("{stem}: unknown type");
-        return;
-    };
-    let foot_x = def.get_i64("foot_x").unwrap_or(1) as i32;
-    let foot_y = def.get_i64("foot_y").unwrap_or(1) as i32;
-    let blocks = BLOCKING_FLAGS.iter().any(|f| def.has_flag(f));
-    sim.world.structures.push(Structure::new(stem, cell, foot_x, foot_y, blocks));
-    let frame = def.frames.iter().position(|f| f.has_flag("default")).unwrap_or(0);
-    if let Some(shape) = lib.get_or_load(install, palette, stem, images, layouts) {
-        world::spawn_frame(commands, shape, frame, world::cell_to_world(cell), depth_z(Z_STRUCTURE, cell.y as f32));
-    }
+    info!("island scene: {} cells, {} structures, {} bridge cells", sim.world.islands[0].len(), sim.world.structures.len(), sim.world.bridges.len());
 }
 
 /// World position of a unit's feet: cells to source pixels, y flipped.
@@ -370,12 +376,34 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>) {
     }
 }
 
-/// Move unit sprites to their simulated position and pick the facing animation.
+/// Give every simulation unit its sprites, then keep them at the simulated
+/// position with the facing animation; frozen when idle.
+#[allow(clippy::too_many_arguments)]
 fn sync_units(
+    mut commands: Commands,
     sim: Res<Sim>,
     data: Res<GameData>,
+    mut lib: ResMut<ShapeLibrary>,
+    mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut layers: Query<(&mut Transform, &mut Sprite, &mut Anchor, &mut ShapeSprite, &mut UnitLayer)>,
+    mut known: Local<usize>,
 ) {
+    // New units since last frame get their layers.
+    while *known < sim.world.units.len() {
+        let i = *known;
+        *known += 1;
+        let unit = &sim.world.units[i];
+        let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+        let (Some(def), Some(shape)) = (data.install.type_def(&unit.kind), lib.get_or_load(&data.install, palette, &unit.kind, &mut images, &mut layouts)) else {
+            warn!("unit {i}: no sprites for {}", unit.kind);
+            continue;
+        };
+        let entities = spawn_animated(&mut commands, shape, def, unit.facing.animation(), unit_to_world(unit), Z_UNIT, false);
+        for (k, e) in entities.into_iter().enumerate() {
+            commands.entity(e).insert(UnitLayer { unit: i, facing: unit.facing, shadow: k == 1 });
+        }
+    }
     for (mut tf, mut sprite, mut anchor, mut shape, mut layer) in &mut layers {
         let Some(unit) = sim.world.units.get(layer.unit) else { continue };
         let pos = unit_to_world(unit);
@@ -405,10 +433,20 @@ fn sync_units(
     }
 }
 
-fn click_to_move(
+/// Cell under the mouse cursor, if it is over the window.
+fn cursor_cell(windows: &Query<&Window, With<PrimaryWindow>>, cameras: &Query<(&Camera, &GlobalTransform)>) -> Option<Cell> {
+    let (Ok(window), Ok((camera, cam_tf))) = (windows.single(), cameras.single()) else { return None };
+    let cursor = window.cursor_position()?;
+    let world_pos = camera.viewport_to_world_2d(cam_tf, cursor).ok()?;
+    Some(world_to_cell(world_pos))
+}
+
+fn mouse_actions(
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform)>,
+    data: Res<GameData>,
+    mut player: ResMut<Player>,
     mut sim: ResMut<Sim>,
 ) {
     let left = buttons.just_pressed(MouseButton::Left);
@@ -416,21 +454,52 @@ fn click_to_move(
     if !left && !right {
         return;
     }
-    let (Ok(window), Ok((camera, cam_tf))) = (windows.single(), cameras.single()) else { return };
-    let Some(cursor) = window.cursor_position() else { return };
-    let Ok(world_pos) = camera.viewport_to_world_2d(cam_tf, cursor) else { return };
-    let cell = world_to_cell(world_pos);
+    let Some(cell) = cursor_cell(&windows, &cameras) else { return };
     if left {
-        if sim.world.order_move(0, cell) {
-            info!("priest ordered to {cell:?}");
+        // Click on a unit selects it; otherwise move the selected unit.
+        if let Some(i) = sim.world.units.iter().position(|u| u.pos.cell() == cell) {
+            player.selected = i;
+            info!("selected unit {i} ({})", sim.world.units[i].kind);
+        } else if sim.world.order_move(player.selected, cell) {
+            info!("unit {} ordered to {cell:?}", player.selected);
         } else {
             info!("{cell:?} is unreachable");
         }
-    } else if sim.world.place_bridge(cell) {
-        info!("bridge placed at {cell:?}");
-    } else {
-        info!("cannot place a bridge at {cell:?}");
+        return;
     }
+    match player.tool.clone() {
+        Tool::Bridge => {
+            if sim.world.place_bridge(cell) {
+                info!("bridge placed at {cell:?}");
+            } else {
+                info!("cannot place a bridge at {cell:?}");
+            }
+        }
+        Tool::Drop(stem) => match sim.world.drop_structure(stem, &data.rules(stem), cell) {
+            Ok(_) => info!("{stem} dropped at {cell:?}"),
+            Err(e) => info!("cannot drop {stem}: {e}"),
+        },
+        Tool::Spawn(stem) => match sim.world.spawn_unit(stem, &data.rules(stem), cell) {
+            Some(i) => {
+                player.selected = i;
+                info!("{stem} spawned at {cell:?} as unit {i}");
+            }
+            None => info!("cannot spawn {stem} at {cell:?}"),
+        },
+    }
+}
+
+fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut player: ResMut<Player>) {
+    if keys.just_pressed(KeyCode::KeyB) {
+        player.tool = Tool::Bridge;
+    } else if keys.just_pressed(KeyCode::KeyU) {
+        player.tool = Tool::Spawn(UNIT_TOOL);
+    } else if let Some((_, stem)) = BUILD_TOOLS.iter().find(|(k, _)| keys.just_pressed(*k)) {
+        player.tool = Tool::Drop(stem);
+    } else {
+        return;
+    }
+    info!("tool: {:?}", player.tool);
 }
 
 /// Rebuild the bridge layer whenever the simulation's bridge set changes.
@@ -453,6 +522,52 @@ fn sync_bridges(
     }
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
     world::spawn_bridges(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, &sim.world);
+}
+
+/// Rebuild structure sprites whenever the simulation's structures change.
+fn sync_structures(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    mut lib: ResMut<ShapeLibrary>,
+    mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    existing: Query<Entity, With<StructureSprite>>,
+    mut seen: Local<Option<u64>>,
+) {
+    if *seen == Some(sim.world.structure_version) {
+        return;
+    }
+    *seen = Some(sim.world.structure_version);
+    for e in &existing {
+        commands.entity(e).despawn();
+    }
+    let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+    world::spawn_structures(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, &sim.world);
+}
+
+/// Rebuild platform terrain whenever buildings create new ground.
+fn sync_platforms(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    mut lib: ResMut<ShapeLibrary>,
+    mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    existing: Query<(Entity, &TerrainTile)>,
+    mut seen: Local<Option<u64>>,
+) {
+    if *seen == Some(sim.world.terrain_version) {
+        return;
+    }
+    *seen = Some(sim.world.terrain_version);
+    for (e, t) in &existing {
+        if t.platform {
+            commands.entity(e).despawn();
+        }
+    }
+    let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+    world::spawn_island(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, &sim.world.platforms, Theme::Sun, true);
 }
 
 fn camera_keys(

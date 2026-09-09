@@ -2,6 +2,7 @@
 //! Things placed on the map that occupy a footprint of cells.
 
 use crate::grid::Cell;
+use crate::rules::Walk;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Structure {
@@ -12,13 +13,19 @@ pub struct Structure {
     /// Footprint size in cells (`foot_x`, `foot_y` in the type file).
     pub foot_x: i32,
     pub foot_y: i32,
-    /// Whether units may not walk through the footprint.
-    pub blocks_walking: bool,
+    /// How the footprint affects walking.
+    pub walk: Walk,
+    /// Whether nothing may be dropped onto the footprint.
+    pub drop_blocking: bool,
 }
 
 impl Structure {
-    pub fn new(kind: impl Into<String>, cell: Cell, foot_x: i32, foot_y: i32, blocks_walking: bool) -> Structure {
-        Structure { kind: kind.into(), cell, foot_x: foot_x.max(1), foot_y: foot_y.max(1), blocks_walking }
+    pub fn new(kind: impl Into<String>, cell: Cell, foot_x: i32, foot_y: i32, walk: Walk) -> Structure {
+        Structure { kind: kind.into(), cell, foot_x: foot_x.max(1), foot_y: foot_y.max(1), walk, drop_blocking: false }
+    }
+
+    pub fn blocks_walking(&self) -> bool {
+        self.walk == Walk::Blocked
     }
 
     /// Every cell of the footprint. The hotspot cell is the bottom-right one.
@@ -39,7 +46,7 @@ mod tests {
 
     #[test]
     fn footprint_cells() {
-        let s = Structure::new("dais", Cell::new(9, 7), 3, 2, false);
+        let s = Structure::new("dais", Cell::new(9, 7), 3, 2, Walk::Free);
         let cells: Vec<Cell> = s.cells().collect();
         assert_eq!(cells.len(), 6);
         assert!(cells.contains(&Cell::new(9, 7)));

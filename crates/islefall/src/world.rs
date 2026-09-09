@@ -9,6 +9,16 @@ use islefall_data::isle::{self, Theme};
 use islefall_data::{Installation, Palette, bridge};
 use islefall_sim::{Cell, IslandMap, World};
 
+/// Marks a terrain tile sprite; platform tiles are rebuilt when terrain changes.
+#[derive(Component)]
+pub struct TerrainTile {
+    pub platform: bool,
+}
+
+/// Marks a structure sprite so the layer can be rebuilt.
+#[derive(Component)]
+pub struct StructureSprite;
+
 use crate::sprites::{self, FrameInfo};
 
 /// Draw order layers; units add a small y-sort offset on top.
@@ -85,6 +95,7 @@ fn variation(cell: Cell, count: usize) -> usize {
 }
 
 /// Draw every cell of an island with the terrain set of `theme`.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_island(
     commands: &mut Commands,
     install: &Installation,
@@ -94,6 +105,7 @@ pub fn spawn_island(
     layouts: &mut Assets<TextureAtlasLayout>,
     island: &IslandMap,
     theme: Theme,
+    platform: bool,
 ) {
     let Some(isle_def) = install.type_def("isle") else { return };
     let mut by_piece = HashMap::new();
@@ -105,7 +117,28 @@ pub fn spawn_island(
             continue;
         }
         let frame = frames[variation(cell, frames.len())];
-        spawn_frame(commands, shape, frame, cell_to_world(cell), Z_TERRAIN);
+        let e = spawn_frame(commands, shape, frame, cell_to_world(cell), Z_TERRAIN + if platform { 0.5 } else { 0.0 });
+        commands.entity(e).insert(TerrainTile { platform });
+    }
+}
+
+/// Draw every structure of the world with its default frame.
+pub fn spawn_structures(
+    commands: &mut Commands,
+    install: &Installation,
+    lib: &mut ShapeLibrary,
+    palette: &Palette,
+    images: &mut Assets<Image>,
+    layouts: &mut Assets<TextureAtlasLayout>,
+    world: &World,
+) {
+    for st in &world.structures {
+        let Some(def) = install.type_def(&st.kind) else { continue };
+        let frame = def.frames.iter().position(|f| f.has_flag("default")).unwrap_or(0);
+        let Some(shape) = lib.get_or_load(install, palette, &st.kind, images, layouts) else { continue };
+        let z = Z_STRUCTURE + st.cell.y as f32 * 0.01;
+        let e = spawn_frame(commands, shape, frame, cell_to_world(st.cell), z);
+        commands.entity(e).insert(StructureSprite);
     }
 }
 
@@ -137,5 +170,35 @@ pub fn spawn_bridges(
         let z = Z_BRIDGE + cell.y as f32 * 0.001;
         let e = spawn_frame(commands, shape, frame, cell_to_world(cell), z);
         commands.entity(e).insert(BridgeTile);
+    }
+    spawn_bridge_connectors(commands, install, lib, palette, images, layouts, world);
+}
+
+/// Where a bridge meets island land, overlay the island's rim cell with the
+/// connector ramp. `bridgeconnector` frames are ordered by where the island
+/// lies from the bridge: north, east, south, west.
+#[allow(clippy::too_many_arguments)]
+fn spawn_bridge_connectors(
+    commands: &mut Commands,
+    install: &Installation,
+    lib: &mut ShapeLibrary,
+    palette: &Palette,
+    images: &mut Assets<Image>,
+    layouts: &mut Assets<TextureAtlasLayout>,
+    world: &World,
+) {
+    let Some(def) = install.type_def("bridgeconnector") else { return };
+    let Some(shape) = lib.get_or_load(install, palette, "bridgeconnector", images, layouts) else { return };
+    let mut done = std::collections::HashSet::new();
+    for &cell in &world.bridges {
+        for (frame, dx, dy) in [(0usize, 0, -1), (1, 1, 0), (2, 0, 1), (3, -1, 0)] {
+            let land = cell.offset(dx, dy);
+            if frame >= def.frames.len() || !world.is_land(land) || !done.insert((land, frame)) {
+                continue;
+            }
+            let z = Z_BRIDGE - 0.5 + land.y as f32 * 0.001;
+            let e = spawn_frame(commands, shape, frame, cell_to_world(land), z);
+            commands.entity(e).insert(BridgeTile);
+        }
     }
 }

@@ -18,6 +18,7 @@ Status: early development. Nothing is playable yet.
 | `crates/islefall-sim` | The deterministic simulation: grid, islands, later units and rules. No engine dependency. |
 | `crates/islefall` | The game binary, built on Bevy. Currently draws a first island scene and doubles as a sprite viewer. |
 | `docs/FORMATS.md` | Reverse-engineered descriptions of the NetStorm file formats. |
+| `docs/RULES.md` | How the type flags are read as game rules, with confidence notes. |
 | `tools/shp_decode.py` | Python reference decoder used while working out the sprite format. |
 
 ## Building
@@ -46,9 +47,13 @@ NETSTORM_DIR=~/games/NetStorm cargo run --release
 ```
 
 By default this shows a first scene: an island assembled from the terrain
-tiles, the altar, and the High Priest walking under the simulation's control.
-Left-click on ground to send the priest there along a path around obstacles, right-click on sky next to ground to place a bridge cell; arrow keys or WASD pan the
-camera and `-` / `=` zoom. `ISLEFALL_MODE=viewer` instead
+tiles, the altar, trees, a bridge and two units walking under the
+simulation's control. Left-click on a unit selects it, left-click elsewhere
+sends the selected unit there along a path around obstacles. Right-click acts
+with the current tool: `B` places bridge cells, `1` to `5` drop a sun cannon,
+archer, battery, factory or tree, `U` spawns a golem. Drops follow the rules
+in `docs/RULES.md`. Arrow keys or WASD pan the camera and `-` / `=` zoom.
+`ISLEFALL_MODE=viewer` instead
 animates one object type at a time: `[` and `]` step through types, `,` and
 `.` through its animations. In both modes `Space` pauses and `P` saves a
 screenshot; `ISLEFALL_SCREENSHOT=file.png` saves one automatically after

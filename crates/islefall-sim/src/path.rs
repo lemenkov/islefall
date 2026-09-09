@@ -25,6 +25,13 @@ fn heuristic(a: Cell, b: Cell) -> u32 {
 /// excluding `from` and including `to`. Diagonal moves may not cut the
 /// corner of a blocked cell. `None` if unreachable.
 pub fn find_path(from: Cell, to: Cell, walkable: impl Fn(Cell) -> bool) -> Option<Vec<Cell>> {
+    find_path_costed(from, to, |c| walkable(c).then_some(1))
+}
+
+/// Like [`find_path`], but `cost` returns `None` for blocked cells and a
+/// multiplier (1 for plain ground) for the cost of entering a cell.
+pub fn find_path_costed(from: Cell, to: Cell, cost: impl Fn(Cell) -> Option<u32>) -> Option<Vec<Cell>> {
+    let walkable = |c: Cell| cost(c).is_some();
     if from == to {
         return Some(Vec::new());
     }
@@ -68,7 +75,7 @@ pub fn find_path(from: Cell, to: Cell, walkable: impl Fn(Cell) -> bool) -> Optio
                 continue; // no corner cutting
             }
             let step = if dx != 0 && dy != 0 { DIAGONAL } else { STRAIGHT };
-            let ng = g + step;
+            let ng = g + step * cost(next).unwrap_or(1).max(1);
             if ng < best.get(&next).copied().unwrap_or(u32::MAX) {
                 best.insert(next, ng);
                 came_from.insert(next, cur);
@@ -114,6 +121,15 @@ mod tests {
             }
             prev = c;
         }
+    }
+
+    #[test]
+    fn avoids_expensive_cells_when_a_detour_is_cheap() {
+        // A costly column at x=2 spanning y=0..3 with free ground around it.
+        let cost = |c: Cell| open_field(c).then(|| if c.x == 2 && c.y < 4 { 5 } else { 1 });
+        let p = find_path_costed(Cell::new(0, 1), Cell::new(4, 1), cost).unwrap();
+        assert!(p.iter().all(|c| !(c.x == 2 && c.y < 4)), "went through the expensive column: {p:?}");
+        assert!(p.last() == Some(&Cell::new(4, 1)));
     }
 
     #[test]
