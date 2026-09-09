@@ -60,8 +60,9 @@ Left-click on a unit selects it, left-click elsewhere sends the selected unit
 there along a path around obstacles, left-click on a Storm Geyser sets it
 harvesting crystals to the Temple, left-click on a stunned enemy priest sends
 the selected golem to capture him, and left-click on your altar while he is
-carried sacrifices him for Knowledge. The window title shows the Storm Power
-reserve; drops cost their type's price and stand as translucent shells
+carried sacrifices him for Knowledge. The corner text and the window title show the Storm Power
+reserve, Knowledge, the tool in hand and the last thing the game had to
+say; sacrifice the enemy High Priest to win; drops cost their type's price and stand as translucent shells
 until a stream of Storm Power from your Temple, Workshop or Outpost has
 built them, which needs connected ground. Right-click acts with the current tool:
 `Q`, `W`, `A`, `S` pick one of the four bridge pieces on offer (`R` rotates

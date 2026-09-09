@@ -148,12 +148,15 @@ queue_seed = 161
 # looked up in the data directory first (GIF or PNG, so a mod can bring its
 # own), then in the installation's d/. Speed is source pixels per second
 # along x and y; opacity lets the lower layers show through the upper
-# ones. Each layer is laid out `extent_tiles` tiles wide around the camera.
+# ones. The textures are authored grey-violet in the game's palette, so
+# each layer takes a `tint` (RGB, multiplied in) to read as sky; white
+# leaves it as authored. Each layer is laid out `extent_tiles` tiles wide
+# around the camera.
 [sky]
 extent_tiles = 16
 layers = [
-    { image = "Gifcloud.gif", speed = [6.0, 2.0], opacity = 1.0 },
-    { image = "Gifcloud2.GIF", speed = [-3.0, 4.0], opacity = 0.5 },
+    { image = "Gifcloud.gif", speed = [6.0, 2.0], opacity = 1.0, tint = [0.62, 0.74, 1.0] },
+    { image = "Gifcloud2.GIF", speed = [-3.0, 4.0], opacity = 0.5, tint = [0.85, 0.9, 1.0] },
 ]
 
 # A mod's own sprites: `<dir>/<stem>.toml` next to its picture replaces a
@@ -161,6 +164,20 @@ layers = [
 # originals in that form to start from.
 [sprites]
 dir = "sprites"
+
+# The text in the corner of the screen. Placeholders: {power}, {knowledge},
+# {techs}, {tool}, {status} (the last thing the game had to say) and
+# {opponents} (players still in). The last two lines show when the game
+# is decided.
+[hud]
+font_size = 14.0
+lines = [
+    "Storm Power {power}   Knowledge {knowledge} ({techs} techs)",
+    "Tool: {tool}   Opponents standing: {opponents}",
+    "{status}",
+]
+victory = "Victory! The enemy High Priests have been sacrificed."
+defeat = "Defeat. Your High Priest was sacrificed."
 
 [controls]
 # Keys for the piece slots, as in the original Production window.
@@ -208,6 +225,8 @@ island_fell = { file = "islandFall.wav" }
 unit_lost = { file = "unitLost.wav" }
 launched = { property = "activeSound" }
 floating = { file = "priestFall.wav" }
+eliminated = { file = "itIsDone2.WAV" }
+victory = { file = "70AriseMyChampions.wav" }
 
 # Every sound fades with its distance from the camera centre and with the
 # camera's height; the curve is `sound_gain` in scripts/rules.rhai. Objects

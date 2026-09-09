@@ -14,8 +14,8 @@ islefall-sim = { workspace = true }
 [dependencies.bevy]
 version = "0.19.1"
 default-features = false
-# 2D only plus audio with the WAV decoder: no PBR, glTF or gamepad backend until needed.
-features = ["2d", "wayland", "x11", "bevy_audio", "wav"]
+# 2D only plus audio (WAV) and UI text: no PBR, glTF or gamepad backend until needed.
+features = ["2d", "wayland", "x11", "bevy_audio", "wav", "bevy_ui", "bevy_ui_render", "bevy_text", "default_font"]
 
 [features]
 default = []

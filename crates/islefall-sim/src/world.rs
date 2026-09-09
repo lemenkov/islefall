@@ -120,6 +120,10 @@ pub enum EventKind {
     Launched,
     /// A structure was placed and waits for its stream; `Built` follows.
     Placed,
+    /// A player's last High Priest was sacrificed; `owner` is that player.
+    Eliminated,
+    /// Only one player with a High Priest remains; `owner` is the winner.
+    Victory,
     /// A priest's ground fell away and he floats.
     Floating,
 }
@@ -209,6 +213,12 @@ pub struct World {
     pub last_shots: Vec<(usize, Target)>,
     /// Happenings since the last [`World::take_events`].
     pub events: Vec<Event>,
+    /// Owners who have fielded a High Priest: the players in the game.
+    pub players: BTreeSet<u8>,
+    /// Players whose every High Priest has been sacrificed.
+    pub out: BTreeSet<u8>,
+    /// The last player standing, once all others are out.
+    pub winner: Option<u8>,
     /// Rules of every known type, for things the world creates itself
     /// (aerial attackers); the app registers them at start-up.
     pub types: BTreeMap<String, TypeRules>,
@@ -246,6 +256,9 @@ impl World {
             known_tech: vec![BTreeSet::new(); players],
             last_shots: Vec::new(),
             events: Vec::new(),
+            players: BTreeSet::new(),
+            out: BTreeSet::new(),
+            winner: None,
             types: BTreeMap::new(),
             knowledge: 0,
             pending_knowledge: Vec::new(),
@@ -859,8 +872,30 @@ impl World {
         u.range = rules.range;
         u.delay = self.cfg.ticks(rules.delay_between_shots);
         u.life = self.attacker_life(kind);
+        if u.is_priest {
+            self.players.insert(owner);
+        }
         self.units.push(u);
         Some(self.units.len() - 1)
+    }
+
+    /// After a sacrifice: a player with no High Priest left is out, and
+    /// the last one standing wins (the manual: to win, capture the enemy
+    /// High Priests and Sacrifice them).
+    fn judge(&mut self, victim: u8, at: Cell) {
+        if !self.players.contains(&victim) || self.out.contains(&victim) {
+            return;
+        }
+        if self.units.iter().any(|u| u.alive && u.is_priest && u.owner == victim) {
+            return;
+        }
+        self.out.insert(victim);
+        self.emit(EventKind::Eliminated, "priest", at, victim);
+        let standing: Vec<u8> = self.players.difference(&self.out).copied().collect();
+        if self.players.len() >= 2 && standing.len() == 1 && self.winner.is_none() {
+            self.winner = Some(standing[0]);
+            self.emit(EventKind::Victory, "", at, standing[0]);
+        }
     }
 
     /// A player's unit: pays the cost and, under the rules, needs the
@@ -1463,8 +1498,9 @@ impl World {
                             self.knowledge += 1;
                         }
                         self.pending_knowledge.push(owner);
-                        let kind = self.units[p].kind.clone();
+                        let (kind, victim) = (self.units[p].kind.clone(), self.units[p].owner);
                         self.emit(EventKind::Sacrificed, &kind, centre, owner);
+                        self.judge(victim, centre);
                     } else if !self.order_move(i, centre) {
                         self.units[i].task = Task::Idle;
                     }
@@ -2212,6 +2248,43 @@ mod tests {
         assert_eq!(w.upgrade_workshop(0, ws), Ok(3));
         assert!(w.upgrade_workshop(0, ws).is_err(), "twice at most");
         assert!(w.upgrade_workshop(1, ws).is_err(), "not the enemy's to upgrade");
+    }
+
+    #[test]
+    fn sacrificing_the_last_enemy_priest_wins() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 10, 6), 0);
+        let scripts = test_scripts();
+        let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, speed: 2.0, ..TypeRules::plain() };
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 4.0, ..TypeRules::plain() };
+        let altar = TypeRules { foot_x: 1, foot_y: 1, is_altar: true, ..TypeRules::plain() };
+        w.drop_structure("dais", &altar, Cell::new(2, 2)).unwrap();
+        let mine = w.spawn_unit_for(0, "priest", &priest, Cell::new(1, 1)).unwrap();
+        let theirs = w.spawn_unit_for(1, "priest", &priest, Cell::new(6, 1)).unwrap();
+        let g = w.spawn_unit_for(0, "sunwalker", &golem, Cell::new(4, 1)).unwrap();
+        assert_eq!(w.players.len(), 2);
+        w.damage_unit(theirs, 60);
+        w.step(&scripts);
+        assert!(w.units[theirs].stunned);
+        assert!(w.order_capture(g, theirs));
+        for _ in 0..200 {
+            w.step(&scripts);
+            if w.units[g].carrying.is_some() {
+                break;
+            }
+        }
+        assert!(w.order_sacrifice(g, 0), "carry him to the altar");
+        for _ in 0..400 {
+            w.step(&scripts);
+            if w.winner.is_some() {
+                break;
+            }
+        }
+        assert!(w.out.contains(&1), "the enemy is out");
+        assert_eq!(w.winner, Some(0));
+        assert!(w.units[mine].alive);
+        let kinds: Vec<EventKind> = w.take_events().iter().map(|e| e.what).filter(|k| matches!(k, EventKind::Eliminated | EventKind::Victory)).collect();
+        assert_eq!(kinds, [EventKind::Eliminated, EventKind::Victory]);
     }
 
     #[test]

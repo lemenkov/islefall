@@ -152,7 +152,8 @@ fn spawn_sky(commands: &mut Commands, data: &GameData, images: &mut Assets<Image
         let mut sprite = Sprite::from_image(handle);
         sprite.custom_size = Some(extent);
         sprite.image_mode = SpriteImageMode::Tiled { tile_x: true, tile_y: true, stretch_value: 1.0 };
-        sprite.color = Color::srgba(1.0, 1.0, 1.0, layer.opacity);
+        let [r, g, b] = layer.tint;
+        sprite.color = Color::srgba(r, g, b, layer.opacity);
         commands.spawn((
             sprite,
             Transform::from_translation(Vec3::new(0.0, 0.0, Z_SKY + i as f32 * 0.1)),
@@ -332,6 +333,21 @@ impl Sim {
     }
 }
 
+/// The last thing the game had to say, shown on screen.
+#[derive(Resource, Default)]
+struct Status(String);
+
+impl Status {
+    fn say(&mut self, msg: String) {
+        info!("{msg}");
+        self.0 = msg;
+    }
+}
+
+/// The corner text.
+#[derive(Component)]
+struct Hud;
+
 /// Player-side interaction state.
 #[derive(Resource)]
 struct Player {
@@ -457,6 +473,7 @@ fn main() {
     .insert_resource(Time::<Fixed>::from_hz(tick_hz as f64))
     .init_resource::<ShapeLibrary>()
     .init_resource::<Sim>()
+    .init_resource::<Status>()
     .insert_resource(Player { tool: Tool::Spawn(unit_tool), selected: 0 })
     .insert_resource(Viewer {
         type_index: 0,
@@ -476,7 +493,7 @@ fn main() {
     .add_systems(Update, (common_keys, animate, auto_screenshot))
     .add_systems(
         Update,
-        (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
+        (camera_keys, tool_keys, mouse_actions, bridge_keys, ghost, title, hud, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(Update, tint_shells.after(sync_structures).run_if(resource_equals(Mode::Island)))
@@ -535,6 +552,14 @@ fn setup(
         Mode::Island => {
             setup_map(&mut commands, &data, &mut sim, &mut lib, &mut images, &mut layouts);
             spawn_sky(&mut commands, &data, &mut images);
+            commands.spawn((
+                Text::new(""),
+                TextFont { font_size: data.cfg.hud.font_size.into(), ..default() },
+                TextColor(Color::WHITE),
+                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+                Node { position_type: PositionType::Absolute, top: px(8), left: px(8), padding: UiRect::all(px(6)), ..default() },
+                Hud,
+            ));
         }
         Mode::Viewer => {
             commands.spawn((Camera2d, zoomed_projection(data.cfg.controls.zoom)));
@@ -848,16 +873,58 @@ fn ambient(mut commands: Commands, data: Res<GameData>, mut bank: ResMut<SoundBa
     }
 }
 
+/// How the game stands for the local player, if it is decided.
+fn verdict(w: &World, data: &GameData) -> Option<String> {
+    let hud = &data.cfg.hud;
+    match w.winner {
+        Some(0) => Some(hud.victory.clone()),
+        Some(_) => Some(hud.defeat.clone()),
+        None if w.out.contains(&0) => Some(hud.defeat.clone()),
+        None => None,
+    }
+}
+
 /// Keep the window title showing the Storm Power reserve and Knowledge.
-fn title(sim: Res<Sim>, mut windows: Query<&mut Window, With<PrimaryWindow>>, mut last: Local<Option<(i32, u32, usize)>>) {
+fn title(sim: Res<Sim>, data: Res<GameData>, mut windows: Query<&mut Window, With<PrimaryWindow>>, mut last: Local<Option<String>>) {
     let w = sim.world();
-    let now = (w.storm_power(), w.knowledge, w.known_tech[0].len());
-    if *last == Some(now) {
+    let now = match verdict(w, &data) {
+        Some(v) => format!("Islefall - {v}"),
+        None => format!("Islefall - Storm Power {} - Knowledge {} ({} techs)", w.storm_power(), w.knowledge, w.known_tech[0].len()),
+    };
+    if last.as_deref() == Some(now.as_str()) {
         return;
     }
-    *last = Some(now);
     if let Ok(mut win) = windows.single_mut() {
-        win.title = format!("Islefall - Storm Power {} - Knowledge {} ({} techs)", now.0, now.1, now.2);
+        win.title = now.clone();
+    }
+    *last = Some(now);
+}
+
+/// Fill the corner text from the rules' templates.
+fn hud(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, status: Res<Status>, mut texts: Query<&mut Text, With<Hud>>) {
+    let w = sim.world();
+    let tool = match &player.tool {
+        Tool::Bridge(slot, piece) => format!("bridge piece {} (slot {})", piece.name, slot + 1),
+        Tool::Drop(stem) | Tool::Spawn(stem) => stem.clone(),
+    };
+    let opponents = w.players.iter().filter(|&&o| o != 0 && !w.out.contains(&o)).count();
+    let fill = |t: &str| {
+        t.replace("{power}", &w.storm_power().to_string())
+            .replace("{knowledge}", &w.knowledge.to_string())
+            .replace("{techs}", &w.known_tech[0].len().to_string())
+            .replace("{tool}", &tool)
+            .replace("{status}", &status.0)
+            .replace("{opponents}", &opponents.to_string())
+    };
+    let mut lines: Vec<String> = data.cfg.hud.lines.iter().map(|l| fill(l)).collect();
+    if let Some(v) = verdict(w, &data) {
+        lines.push(v);
+    }
+    let text = lines.join("\n");
+    for mut t in &mut texts {
+        if t.0 != text {
+            t.0 = text.clone();
+        }
     }
 }
 
@@ -975,6 +1042,7 @@ fn mouse_actions(
     data: Res<GameData>,
     mut player: ResMut<Player>,
     mut sim: ResMut<Sim>,
+    mut status: ResMut<Status>,
 ) {
     let left = buttons.just_pressed(MouseButton::Left);
     let right = buttons.just_pressed(MouseButton::Right);
@@ -1020,18 +1088,18 @@ fn mouse_actions(
                 w.queue.refill(slot);
                 player.tool = Tool::Bridge(slot, w.queue.slots[slot].clone());
             }
-            Err(e) => info!("cannot place {}: {e}", piece.name),
+            Err(e) => status.say(format!("cannot place {}: {e}", piece.name)),
         },
         Tool::Drop(stem) => match w.drop_structure(&stem, &data.rules(&stem), cell) {
-            Ok(_) => info!("{stem} dropped at {cell:?}"),
-            Err(e) => info!("cannot drop {stem}: {e}"),
+            Ok(_) => status.say(format!("{stem} placed; a stream will build it")),
+            Err(e) => status.say(format!("cannot drop {stem}: {e}")),
         },
         Tool::Spawn(stem) => match w.place_unit_for(0, &stem, &data.rules(&stem), cell) {
             Ok(i) => {
                 player.selected = i;
-                info!("{stem} placed at {cell:?} as unit {i}");
+                status.say(format!("{stem} placed as unit {i}"));
             }
-            Err(e) => info!("cannot place {stem}: {e}"),
+            Err(e) => status.say(format!("cannot place {stem}: {e}")),
         },
     }
 }
@@ -1052,7 +1120,7 @@ fn key_code(name: &str) -> Option<KeyCode> {
 
 const DIGIT_KEYS: [KeyCode; 9] = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9];
 
-fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<GameData>, mut player: ResMut<Player>) {
+fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<GameData>, mut player: ResMut<Player>, mut status: ResMut<Status>) {
     let w = sim.world();
     if keys.just_pressed(KeyCode::KeyR) {
         if let Tool::Bridge(slot, piece) = &player.tool {
@@ -1072,9 +1140,9 @@ fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<Ga
         let rules = data.rules(&stem);
         let w = sim.world_mut();
         match w.put_into_production(0, &stem, &rules, &data.scripts) {
-            Ok(ws) => info!("{stem} in production at {} ({} of {} slots used)", w.structures[ws].kind, w.structures[ws].production.len(), w.structures[ws].slots),
+            Ok(ws) => status.say(format!("{stem} in production at {} ({} of {} slots used)", w.structures[ws].kind, w.structures[ws].production.len(), w.structures[ws].slots)),
             Err(islefall_sim::ProductionError::NotProducible) => {}
-            Err(e) => info!("{stem}: {e}"),
+            Err(e) => status.say(format!("{stem}: {e}")),
         }
         player.tool = Tool::Spawn(stem);
     } else if let Some(i) = DIGIT_KEYS.iter().position(|k| keys.just_pressed(*k)).filter(|&i| i < data.cfg.controls.build_tools.len()) {
@@ -1083,9 +1151,9 @@ fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<Ga
         let rules = data.rules(&stem);
         let w = sim.world_mut();
         match w.put_into_production(0, &stem, &rules, &data.scripts) {
-            Ok(ws) => info!("{stem} in production at {} ({} of {} slots used)", w.structures[ws].kind, w.structures[ws].production.len(), w.structures[ws].slots),
+            Ok(ws) => status.say(format!("{stem} in production at {} ({} of {} slots used)", w.structures[ws].kind, w.structures[ws].production.len(), w.structures[ws].slots)),
             Err(islefall_sim::ProductionError::NotProducible) => {}
-            Err(e) => info!("{stem}: {e}"),
+            Err(e) => status.say(format!("{stem}: {e}")),
         }
         player.tool = Tool::Drop(stem);
     } else {
@@ -1096,6 +1164,7 @@ fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<Ga
 
 /// Crack, harden, destroy or salvage under the cursor.
 fn bridge_keys(
+    mut status: ResMut<Status>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     cameras: Query<(&Camera, &GlobalTransform)>,
@@ -1113,8 +1182,8 @@ fn bridge_keys(
     if upgrade {
         if let Some(i) = w.structures.iter().position(|s| s.owner == 0 && s.slots > 0 && s.covers(cell)) {
             match w.upgrade_workshop(0, i) {
-                Ok(level) => info!("{} upgraded to level {level}: {} slots", w.structures[i].kind, w.structures[i].slots),
-                Err(e) => info!("cannot upgrade {}: {e}", w.structures[i].kind),
+                Ok(level) => status.say(format!("{} upgraded to level {level}: {} slots", w.structures[i].kind, w.structures[i].slots)),
+                Err(e) => status.say(format!("cannot upgrade {}: {e}", w.structures[i].kind)),
             }
         }
         return;
@@ -1123,8 +1192,8 @@ fn bridge_keys(
         if let Some(i) = w.structures.iter().position(|s| s.owner == 0 && s.covers(cell)) {
             let kind = w.structures[i].kind.clone();
             match w.salvage(i, &data.scripts) {
-                Some(refund) => info!("salvaged {kind} for {refund} Storm Power"),
-                None => info!("cannot salvage {kind}"),
+                Some(refund) => status.say(format!("salvaged {kind} for {refund} Storm Power")),
+                None => status.say(format!("cannot salvage {kind}")),
             }
         }
         return;

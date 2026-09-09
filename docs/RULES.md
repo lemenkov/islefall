@@ -290,6 +290,15 @@ an `owner` is neutral; `production.outpost_types` names the Outpost. Not
 modelled: two Outposts raised at once cancelling each other (there is no
 construction time), Obelisks, and the Outpost's Storm Power stream.
 
+## Winning
+
+The manual: to win a multiplayer game you must capture the enemy High
+Priests and Sacrifice them. Islefall: every owner who fields a High Priest
+is a player; a player whose last High Priest is sacrificed is out, and
+when one player remains of two or more, that player has won. The game
+keeps running afterwards. Nothing else ends a game: losing the Temple or
+altar does not.
+
 ## Knowledge
 
 Types with a `techBit` need that Knowledge before their owner can build

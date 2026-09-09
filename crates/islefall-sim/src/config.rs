@@ -29,6 +29,18 @@ pub struct Config {
     pub sounds: Sounds,
     pub sky: Sky,
     pub sprites: Sprites,
+    pub hud: Hud,
+}
+
+/// The on-screen text: templates with `{power}`, `{knowledge}`, `{techs}`,
+/// `{tool}`, `{status}` and `{opponents}` filled in.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Hud {
+    pub font_size: f32,
+    pub lines: Vec<String>,
+    pub victory: String,
+    pub defeat: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -52,6 +64,13 @@ pub struct SkyLayer {
     pub image: String,
     pub speed: [f32; 2],
     pub opacity: f32,
+    /// Colour the texture is multiplied by, RGB 0 to 1; white leaves it as authored.
+    #[serde(default = "white")]
+    pub tint: [f32; 3],
+}
+
+fn white() -> [f32; 3] {
+    [1.0, 1.0, 1.0]
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -126,6 +145,8 @@ pub struct SoundEvents {
     pub unit_lost: SoundCue,
     pub launched: SoundCue,
     pub floating: SoundCue,
+    pub eliminated: SoundCue,
+    pub victory: SoundCue,
 }
 
 impl SoundEvents {
@@ -148,6 +169,8 @@ impl SoundEvents {
             EventKind::UnitLost => &self.unit_lost,
             EventKind::Launched => &self.launched,
             EventKind::Floating => &self.floating,
+            EventKind::Eliminated => &self.eliminated,
+            EventKind::Victory => &self.victory,
         }
     }
 }
