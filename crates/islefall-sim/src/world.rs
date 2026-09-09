@@ -174,7 +174,11 @@ pub struct World {
     /// Natural islands.
     pub islands: Vec<IslandMap>,
     /// Owner of each natural island, parallel to `islands`.
-    pub island_owners: Vec<u8>,
+    /// Owner of each natural island; `None` for a neutral one.
+    pub island_owners: Vec<Option<u8>>,
+    /// Which islands were neutral to begin with: an Outpost claims them
+    /// and its loss lets them go again.
+    pub island_neutral: Vec<bool>,
     /// Platforms created under `createsisland` structures dropped on bridges.
     pub platforms: IslandMap,
     /// Owner of each platform cell.
@@ -224,6 +228,7 @@ impl World {
             tick: 0,
             islands: Vec::new(),
             island_owners: Vec::new(),
+            island_neutral: Vec::new(),
             platforms: IslandMap::new(),
             platform_owners: BTreeMap::new(),
             terrain_version: 0,
@@ -262,8 +267,8 @@ impl World {
 
     /// Owner of the ground at `cell`: a natural island, a platform or a bridge.
     pub fn ground_owner(&self, cell: Cell) -> Option<u8> {
-        if let Some(i) = self.islands.iter().position(|i| i.contains(cell)) {
-            return Some(self.island_owners.get(i).copied().unwrap_or(0));
+        if let Some(i) = self.island_at(cell) {
+            return self.island_owners.get(i).copied().flatten();
         }
         if let Some(&o) = self.platform_owners.get(&cell) {
             return Some(o);
@@ -271,10 +276,39 @@ impl World {
         self.bridge_owners.get(&cell).copied()
     }
 
+    /// Index of the natural island holding `cell`.
+    pub fn island_at(&self, cell: Cell) -> Option<usize> {
+        self.islands.iter().position(|i| i.contains(cell))
+    }
+
+    /// Owners whose Temple or Outpost stands on island `i`: the manual says
+    /// nothing may be built on an island holding an enemy's.
+    fn wardens_of(&self, i: usize) -> BTreeSet<u8> {
+        self.structures.iter().filter(|s| (s.is_temple || s.is_outpost) && self.island_at(s.centre()) == Some(i)).map(|s| s.owner).collect()
+    }
+
+    /// Whether `owner` may build on island `i`: their own, or a neutral one
+    /// no enemy Temple or Outpost wards.
+    pub fn may_build_on_island(&self, owner: u8, i: usize) -> bool {
+        match self.island_owners.get(i).copied().flatten() {
+            Some(o) => o == owner,
+            None => self.wardens_of(i).iter().all(|&w| w == owner),
+        }
+    }
+
+    /// Add a neutral island: anyone may build on it, nobody off it, until
+    /// an Outpost claims it.
+    pub fn push_neutral_island(&mut self, island: IslandMap) {
+        self.islands.push(island);
+        self.island_owners.push(None);
+        self.island_neutral.push(true);
+    }
+
     /// Add a natural island with its owner.
     pub fn push_island(&mut self, island: IslandMap, owner: u8) {
         self.islands.push(island);
-        self.island_owners.push(owner);
+        self.island_owners.push(Some(owner));
+        self.island_neutral.push(false);
         self.terrain_version += 1;
     }
 
@@ -691,7 +725,11 @@ impl World {
         let probe = Structure::new("", cell, rules.foot_x, rules.foot_y, Walk::Free);
         let cells: Vec<Cell> = probe.cells().collect();
         if cells.iter().any(|&c| self.is_land(c)) {
-            if cells.iter().all(|&c| self.ground_owner(c) == Some(owner)) { Ok(()) } else { Err(DropError::NotOwnGround) }
+            let allowed = |c: Cell| match self.island_at(c) {
+                Some(i) => self.may_build_on_island(owner, i),
+                None => self.ground_owner(c) == Some(owner),
+            };
+            if cells.iter().all(|&c| allowed(c)) { Ok(()) } else { Err(DropError::NotOwnGround) }
         } else {
             let own_end = cells.iter().any(|&c| {
                 [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().any(|&(dx, dy)| {
@@ -730,6 +768,7 @@ impl World {
         s.drop_blocking = rules.drop_blocking;
         s.stock = if rules.is_geyser && self.cfg.economy.geyser_stock_from_cost { rules.cost } else { 0 };
         s.is_temple = rules.is_temple;
+        s.is_outpost = rules.is_outpost;
         s.owner = owner;
         s.hp = rules.max_hit_points;
         s.max_hp = rules.max_hit_points;
@@ -774,8 +813,15 @@ impl World {
             }
         }
         let centre = s.centre();
+        let claims = s.is_outpost;
         self.structures.push(s);
         self.structure_version += 1;
+        if claims {
+            // The manual: an Outpost gives you ownership of the neutral island.
+            if let Some(i) = self.island_at(centre).filter(|&i| self.island_neutral.get(i).copied().unwrap_or(false)) {
+                self.island_owners[i] = Some(owner);
+            }
+        }
         self.emit(EventKind::Built, kind, centre, owner);
         Ok(self.structures.len() - 1)
     }
@@ -1020,8 +1066,17 @@ impl World {
     }
 
     fn remove_structure(&mut self, index: usize) {
-        self.structures.remove(index);
+        let gone = self.structures.remove(index);
         self.structure_version += 1;
+        if gone.is_outpost {
+            // A neutral island stays claimed only while an Outpost of its owner stands there.
+            if let Some(i) = self.island_at(gone.centre()).filter(|&i| self.island_neutral.get(i).copied().unwrap_or(false)) {
+                let held = self.structures.iter().any(|s| s.is_outpost && s.owner == gone.owner && self.island_at(s.centre()) == Some(i));
+                if !held {
+                    self.island_owners[i] = None;
+                }
+            }
+        }
         for u in &mut self.units {
             if let Some(b) = u.base {
                 u.base = if b == index {
@@ -1215,7 +1270,7 @@ impl World {
             .structures
             .iter()
             .enumerate()
-            .filter(|(_, s)| s.is_temple && s.owner == owner)
+            .filter(|(_, s)| (s.is_temple || s.is_outpost) && s.owner == owner)
             .min_by_key(|(_, s)| (s.cell.x - from.x).abs() + (s.cell.y - from.y).abs())
             .map(|(i, _)| i)
         else {
@@ -1553,7 +1608,7 @@ mod tests {
 
     fn world() -> World {
         let mut w = World::new(test_config());
-        w.islands.push(IslandMap::rect(Cell::new(0, 0), 8, 4));
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 8, 4), 0);
         let speed = speed_per_tick(&w.cfg, 1.0);
         let sub = w.subcell();
         w.units.push(Unit::new("priest", Cell::new(0, 1), speed, sub));
@@ -1745,7 +1800,7 @@ mod tests {
     #[test]
     fn golems_harvest_a_geyser_into_the_temple() {
         let mut w = world();
-        w.islands.push(IslandMap::rect(Cell::new(10, 0), 6, 6));
+        w.push_island(IslandMap::rect(Cell::new(10, 0), 6, 6), 0);
         for x in 8..10 {
             w.place_bridge(Cell::new(x, 1));
         }
@@ -1796,12 +1851,12 @@ mod tests {
     #[test]
     fn cannons_fire_straight_at_enemies_in_range() {
         let mut w = world();
-        w.islands.push(IslandMap::rect(Cell::new(0, 4), 12, 8));
+        w.push_island(IslandMap::rect(Cell::new(0, 4), 12, 8), 0);
         w.powers[0] = 1000;
         let mine = w.drop_structure("suncannon", &cannon(), Cell::new(3, 6)).unwrap();
         assert_eq!(w.powers[0], 600);
         // Enemy cannon in the same rows, 4 cells east: both in range and in line.
-        w.island_owners = vec![0, 0];
+        w.island_owners = vec![Some(0), Some(0)];
         w.energy_enforced = false; // the enemy has no ground of its own here
         w.powers[1] = 1000;
         let theirs = w.drop_structure_for(1, "suncannon", &cannon(), Cell::new(9, 6)).unwrap();
@@ -1964,6 +2019,30 @@ mod tests {
     }
 
     #[test]
+    fn neutral_islands_take_anyones_buildings_but_only_an_outpost_lets_you_bridge_off() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 4), 0);
+        w.push_neutral_island(IslandMap::rect(Cell::new(10, 0), 8, 6));
+        w.push_island(IslandMap::rect(Cell::new(30, 0), 4, 4), 1);
+        w.powers = vec![10_000; 4];
+        w.energy_enforced = true;
+        let tree = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 30, ..TypeRules::plain() };
+        let outpost = TypeRules { foot_x: 2, foot_y: 2, max_hit_points: 2000, is_outpost: true, cost: 600, may_drop_on_rim: true, ..TypeRules::plain() };
+        assert!(w.drop_structure_for(0, "treetwo", &tree, Cell::new(12, 2)).is_ok(), "anyone builds on neutral land");
+        assert!(w.drop_structure_for(1, "treetwo", &tree, Cell::new(15, 2)).is_ok());
+        assert_eq!(w.can_place_piece_for(0, &[Cell::new(18, 2)]), Err(PieceError::NotOwnGround), "no bridging off a neutral island");
+        let o = w.drop_structure_for(0, "outpost", &outpost, Cell::new(13, 4)).unwrap();
+        assert_eq!(w.island_owners[1], Some(0), "the Outpost claims the island");
+        assert!(w.can_place_piece_for(0, &[Cell::new(18, 2)]).is_ok(), "and lets its owner bridge off it");
+        assert_eq!(w.drop_structure_for(1, "treetwo", &tree, Cell::new(16, 2)), Err(DropError::NotOwnGround), "the island is warded against the enemy");
+        w.destroy_structure(o);
+        assert_eq!(w.island_owners[1], None, "the island is neutral again");
+        assert!(w.drop_structure_for(1, "outpost", &outpost, Cell::new(16, 4)).is_ok(), "and up for the taking");
+        assert_eq!(w.island_owners[1], Some(1));
+        assert_eq!(w.drop_structure_for(0, "treetwo", &tree, Cell::new(11, 1)), Err(DropError::NotOwnGround));
+    }
+
+    #[test]
     fn balloons_fly_over_the_sky_and_walkers_do_not() {
         let mut w = World::new(test_config());
         w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 4), 0);
@@ -2001,14 +2080,14 @@ mod tests {
     #[test]
     fn stunned_priest_is_captured_and_sacrificed() {
         let mut w = world();
-        w.islands.push(IslandMap::rect(Cell::new(0, 4), 12, 8));
+        w.push_island(IslandMap::rect(Cell::new(0, 4), 12, 8), 0);
         w.powers[0] = 1000;
         let altar = TypeRules { foot_x: 3, foot_y: 3, is_altar: true, may_drop_on_rim: true, cost: 500, ..TypeRules::plain() };
         let a = w.drop_structure("dais", &altar, Cell::new(5, 9)).unwrap();
         let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, threat: 25, speed: 1.8, ..TypeRules::plain() };
         let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
         let p = w.spawn_unit_for(1, "priest", &priest, Cell::new(9, 7)).unwrap();
-        w.island_owners = vec![0, 0];
+        w.island_owners = vec![Some(0), Some(0)];
         let g = w.spawn_unit("sunwalker", &golem, Cell::new(1, 6)).unwrap();
         assert!(!w.order_capture(g, p), "a healthy priest cannot be captured");
         w.damage_unit(p, 50);
@@ -2057,7 +2136,7 @@ mod tests {
     fn placement_needs_energy_within_range() {
         use crate::rules::EnergyNeed;
         let mut w = world();
-        w.islands.push(IslandMap::rect(Cell::new(0, 4), 40, 8));
+        w.push_island(IslandMap::rect(Cell::new(0, 4), 40, 8), 0);
         w.powers[0] = 5000;
         let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, produces: Some(Theme::Sun), ..TypeRules::plain() };
         w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();

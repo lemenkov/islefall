@@ -1,6 +1,7 @@
 # The demo scene: a home island with the altar, Temple, a Sun Workshop and
-# a Disc Thrower, a bridge to a battery islet, and an enemy island with a
-# geyser, a shooter, a Whirlibase, a priest, a Temple and a golem.
+# a Disc Thrower, a bridge to a battery islet, a neutral geyser island, and
+# an enemy island with a geyser, a shooter, a Whirlibase, a priest, a
+# Temple and a golem.
 #
 # Cells are (x, y) with y growing downwards. Structure and unit positions
 # are hotspot cells (the bottom-right cell of a footprint). Islands are
@@ -24,6 +25,13 @@ owner = 1
 theme = "sun"
 origin = [36, 4]
 size = [11, 11]
+
+# A neutral island with a geyser: anyone may build on it, nobody may bridge
+# off it until an Outpost claims it.
+[[islands]]
+theme = "sun"
+origin = [25, 8]
+size = [7, 5]
 
 # Bridge cells laid by the map; connections and tiles follow from adjacency.
 [[bridges]]
@@ -65,6 +73,11 @@ at = [32, 4]
 owner = 1
 kind = "geyser"
 at = [42, 9]
+
+[[structures]]
+owner = 0
+kind = "geyser"
+at = [30, 11]
 
 [[structures]]
 owner = 1

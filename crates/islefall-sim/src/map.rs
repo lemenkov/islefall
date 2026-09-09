@@ -29,7 +29,9 @@ pub struct MapDef {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct IslandDef {
-    pub owner: u8,
+    /// Omitted for a neutral island.
+    #[serde(default)]
+    pub owner: Option<u8>,
     pub theme: String,
     pub origin: [i32; 2],
     pub size: [i32; 2],
@@ -110,8 +112,8 @@ mod tests {
     #[test]
     fn demo_map_parses() {
         let m = MapDef::parse(include_str!("../../../data/maps/demo.toml")).unwrap();
-        assert_eq!(m.islands.len(), 2);
-        assert_eq!(m.structures.len(), 11);
+        assert_eq!(m.islands.len(), 3);
+        assert_eq!(m.structures.len(), 12);
         assert_eq!(m.units.len(), 4);
         assert_eq!(m.opponents.len(), 1);
         assert_eq!(m.camera_cell(), Cell::new(11, 5));

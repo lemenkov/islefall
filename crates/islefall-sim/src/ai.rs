@@ -96,7 +96,7 @@ impl Ai {
     fn frontier(&self, world: &World) -> Vec<Cell> {
         let mut out = Vec::new();
         for (i, island) in world.islands.iter().enumerate() {
-            if world.island_owners.get(i).copied().unwrap_or(0) != self.owner {
+            if world.island_owners.get(i).copied().flatten() != Some(self.owner) {
                 continue;
             }
             for c in island.cells() {

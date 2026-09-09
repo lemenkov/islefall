@@ -47,6 +47,8 @@ energy_source_classes = ["Source of Energy"]
 workshop_slots = 2
 # Types any Temple provides without a Workshop (the manual: bridges and Golems).
 temple_types = ["sunwalker"]
+# Outposts: claim a neutral island, ward it, and take in Storm Crystals.
+outpost_types = ["outpost"]
 
 [air]
 # Type classes of structures that launch an aerial attacker.
@@ -130,7 +132,7 @@ queue_seed = 161
 # Keys for the piece slots, as in the original Production window.
 slot_keys = ["Q", "W", "A", "S", "Z", "X"]
 # Buildings on the number keys.
-build_tools = ["suncannon", "sunarcher", "sunbattery", "sunfactory", "treetwo", "windbattery"]
+build_tools = ["suncannon", "sunarcher", "sunbattery", "sunfactory", "treetwo", "windbattery", "outpost"]
 # Units on letter keys: the Golem and the Balloon.
 unit_keys = ["U", "I"]
 unit_tools = ["sunwalker", "sunballoon"]

@@ -23,6 +23,8 @@ pub struct Structure {
     pub stock: i32,
     /// Whether units deliver crystals here.
     pub is_temple: bool,
+    /// An Outpost: takes in crystals and holds its island.
+    pub is_outpost: bool,
     pub owner: u8,
     /// Hit points left; `max_hp` 0 means it cannot be damaged.
     pub hp: i32,
@@ -74,6 +76,7 @@ impl Structure {
             drop_blocking: false,
             stock: 0,
             is_temple: false,
+            is_outpost: false,
             owner: 0,
             hp: 0,
             max_hp: 0,

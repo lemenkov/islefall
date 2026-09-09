@@ -125,6 +125,7 @@ pub struct Attacker {
 pub struct Production {
     pub workshop_slots: usize,
     pub temple_types: Vec<String>,
+    pub outpost_types: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]

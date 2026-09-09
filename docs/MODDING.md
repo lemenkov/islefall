@@ -74,7 +74,8 @@ many sounds start at once, and `ISLEFALL_VOLUME=0` silences a run.
 
 ## Maps
 
-Cells are `[x, y]` with y growing downwards. A structure's position is its
+Cells are `[x, y]` with y growing downwards. An island without an `owner`
+is neutral. A structure's position is its
 hotspot cell, the bottom-right cell of its footprint. The layout is placed
 with costs and Energy switched off, then the reserves are set to
 `start_power` and the rules apply.

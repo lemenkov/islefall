@@ -248,8 +248,19 @@ a piece must touch the builder's own island edge or open bridge end, and
 may also touch other players' ground, which is how you connect to an enemy
 island or enemy open end without being able to build off them. A drop on
 land needs every footprint cell to be the dropper's; a drop in the sky needs
-the touched open end to be the dropper's. Neutral islands and the Outpost
-rule for building off them are not modelled yet.
+the touched open end to be the dropper's.
+
+Neutral islands (the manual: the archipelago between opponents, with
+Geysers and Obelisks) have no owner. Anyone may build units and buildings
+on one and connect bridges to it, but nobody may build bridges off it
+until they have erected an Outpost there. An Outpost gives its builder the
+island: bridges may leave it, no enemy may build on it, and Transports may
+bring crystals to the Outpost instead of the Temple. Destroy the Outpost
+and the island is neutral again. An island holding an enemy Temple or
+Outpost takes no construction from you. In Islefall a map island without
+an `owner` is neutral; `production.outpost_types` names the Outpost. Not
+modelled: two Outposts raised at once cancelling each other (there is no
+construction time), Obelisks, and the Outpost's Storm Power stream.
 
 ## Knowledge
 

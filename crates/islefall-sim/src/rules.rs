@@ -99,6 +99,8 @@ pub struct TypeRules {
     pub tech_bit: Option<u8>,
     /// A Workshop: holds production slots.
     pub is_workshop: bool,
+    /// Claims and wards the island it stands on; takes in crystals.
+    pub is_outpost: bool,
     /// An aerial attacker (`flyer` flag): launched by a base, never a Transport.
     pub is_flyer: bool,
     /// Flies: an attacker or an Aerial Transport; needs no ground and never falls.
@@ -185,6 +187,7 @@ impl TypeRules {
             produces,
             tech_bit: def.get_i64("techBit").filter(|b| (0..=255).contains(b)).map(|b| b as u8),
             is_workshop: has(&f.workshop),
+            is_outpost: cfg.production.outpost_types.iter().any(|t| t.eq_ignore_ascii_case(&def.name)),
             is_flyer,
             is_air,
             air_attack,
@@ -223,6 +226,7 @@ impl TypeRules {
             produces: None,
             tech_bit: None,
             is_workshop: false,
+            is_outpost: false,
             is_flyer: false,
             is_air: false,
             air_attack: None,

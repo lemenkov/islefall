@@ -402,7 +402,10 @@ fn setup_map(
         }
         let theme = Theme::parse(&isl.theme).unwrap_or(Theme::Sun);
         world::spawn_island(commands, install, lib, palette, images, layouts, &island, theme, false, data.grid());
-        w.push_island(island, isl.owner);
+        match isl.owner {
+            Some(owner) => w.push_island(island, owner),
+            None => w.push_neutral_island(island),
+        }
     }
     for b in &data.map.bridges {
         for c in &b.cells {
