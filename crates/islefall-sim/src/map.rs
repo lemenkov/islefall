@@ -55,6 +55,9 @@ pub struct PlacementDef {
     /// The Spell an Obelisk holds; drawn from the rules' pool when omitted.
     #[serde(default)]
     pub spell: Option<String>,
+    /// Which of a type's variant frames to show (a tree's shape), else one is chosen per cell.
+    #[serde(default)]
+    pub frame: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]

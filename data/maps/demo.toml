@@ -52,11 +52,14 @@ at = [13, 6]
 owner = 0
 kind = "treetwo"
 at = [2, 3]
+frame = 3
 
+# A bush, not a tall clump, right beside the Temple.
 [[structures]]
 owner = 0
 kind = "treetwo"
 at = [12, 8]
+frame = 1
 
 [[structures]]
 owner = 0

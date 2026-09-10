@@ -49,8 +49,11 @@ Temple's window lights are),
 `P` frames of a Disc Thrower are its 32 bearings, and a cannon's `L`,
 `M`, `N` and `O` frames are its north, east, south and west firing
 animations (the letters are from the files' own comments). Types flagged
-`randframe` show one of their default frame's group, chosen per cell, so
-no two trees look alike. `[animation]` in the rules names the labels and
+`randframe` show one of their default frame's group, chosen per cell
+unless the map pins one with `frame` (the original saved the choice with
+`saveFrame`), so no two trees look alike. A geyser's 49 idle frames are
+three runs of the spout, full, half and low; `[animation].stages` says
+so and the run shown follows the stock left. `[animation]` in the rules names the labels and
 flags. An Energy source's reach is shown as the original showed it: a ring
 of small stars drifting round it, not a drawn circle.
 

@@ -230,7 +230,8 @@ defeat = "Defeat. Your High Priest was sacrificed."
 # How a structure's frames animate. Frames labelled `idle_label` loop
 # (geysers spout, batteries turn, Workshops work); a type flagged
 # `variant_flag` shows one frame of its default's group, chosen per cell
-# (trees differ). Shooters with `turret_min_frames` frames of `turret_label`
+# unless the map pins one with `frame` (trees differ: bushes, dead trees,
+# rocks, tall clumps). Shooters with `turret_min_frames` frames of `turret_label`
 # turn to their target (the Disc Thrower's 32); cannons, which aim only
 # along the axes, play the direction's label once when they fire. `tag_flags`
 # mark a frame's role, not its look, and are ignored when grouping.
@@ -243,6 +244,9 @@ turret_min_frames = 8
 turret_first = "north"
 turret_clockwise = true
 cardinal = { north = "L", east = "M", south = "N", west = "O" }
+# Types whose idle frames are several runs from full to empty, shown by the
+# share of stock left: a geyser's spout is tall, then half, then low.
+stages = { geyser = 3 }
 
 [controls]
 # Keys for the piece slots, as in the original Production window.

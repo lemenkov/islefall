@@ -208,7 +208,7 @@ pub fn spawn_structures(
 ) {
     for (i, st) in world.structures.iter().enumerate() {
         let Some(shape) = lib.get_or_load(install, palette, &st.kind, images, layouts) else { continue };
-        let plan = structure_frames(shape, &world.cfg.animation, install.type_def(&st.kind).map(|d| d.flags.as_slice()).unwrap_or(&[]), st.cell);
+        let plan = structure_frames(shape, &world.cfg.animation, install.type_def(&st.kind).map(|d| d.flags.as_slice()).unwrap_or(&[]), st.cell, &st.kind, st.variant);
         let z = Z_STRUCTURE + st.cell.y as f32 * 0.01;
         let pos = cell_to_world(st.cell, &world.cfg.grid);
         if let Some(base) = plan.base {
@@ -235,6 +235,8 @@ pub struct StructureFrames {
     pub turret: Vec<usize>,
     /// Frames of each cardinal firing animation, by direction name.
     pub cardinal: HashMap<String, Vec<usize>>,
+    /// How many runs the idle splits into, full to empty; 1 for one loop.
+    pub stages: u32,
 }
 
 /// A frame's flags without the role tags, for grouping frames that share a look.
@@ -244,7 +246,7 @@ fn look_flags(flags: &[String], tags: &[String]) -> Vec<String> {
     v
 }
 
-pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Animation, type_flags: &[String], cell: Cell) -> StructureFrames {
+pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Animation, type_flags: &[String], cell: Cell, kind: &str, pinned: Option<u32>) -> StructureFrames {
     let n = shape.labels.len();
     let default = (0..n).find(|&i| shape.flags[i].iter().any(|f| f.eq_ignore_ascii_case("default"))).unwrap_or(0);
     let default_look = look_flags(shape.flags.get(default).map(Vec::as_slice).unwrap_or(&[]), &rules.tag_flags);
@@ -265,7 +267,8 @@ pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Anima
         let overlay = !idle.contains(&default);
         (idle, overlay.then_some(default))
     } else if variants.len() >= 2 {
-        (vec![variants[variation(cell, variants.len())]], None)
+        let pick = pinned.map(|f| f as usize % variants.len()).unwrap_or_else(|| variation(cell, variants.len()));
+        (vec![variants[pick]], None)
     } else {
         (vec![default], None)
     };
@@ -274,7 +277,8 @@ pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Anima
         if t.len() >= rules.turret_min_frames { t } else { Vec::new() }
     };
     let cardinal = rules.cardinal.iter().map(|(dir, label)| (dir.clone(), group(label, &Vec::new()))).filter(|(_, f)| !f.is_empty()).collect();
-    StructureFrames { sequence, base, frames: shape.frames.clone(), turret, cardinal }
+    let stages = rules.stages.get(kind).copied().unwrap_or(1).max(1);
+    StructureFrames { sequence, base, frames: shape.frames.clone(), turret, cardinal, stages }
 }
 
 /// Marks a bridge tile sprite so the layer can be rebuilt.

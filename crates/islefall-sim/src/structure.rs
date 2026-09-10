@@ -63,6 +63,8 @@ pub struct Structure {
     pub paralysed: u32,
     /// Where the last shot went, for turning the turret.
     pub aim: Option<Cell>,
+    /// The variant frame the map pinned, as the original saved with `saveFrame`.
+    pub variant: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -123,6 +125,7 @@ impl Structure {
             spell: None,
             paralysed: 0,
             aim: None,
+            variant: None,
         }
     }
 

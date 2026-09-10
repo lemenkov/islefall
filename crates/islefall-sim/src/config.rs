@@ -53,6 +53,10 @@ pub struct Animation {
     /// Shooters that aim only north, east, south and west play the label
     /// of that direction once when they fire.
     pub cardinal: BTreeMap<String, String>,
+    /// Types whose idle frames are so many runs, full to empty, chosen by
+    /// the share of stock left (a geyser's three spouts).
+    #[serde(default)]
+    pub stages: BTreeMap<String, u32>,
 }
 
 /// The on-screen text: templates with `{power}`, `{knowledge}`, `{techs}`,

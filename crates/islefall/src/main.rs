@@ -810,11 +810,13 @@ fn setup_map(
     }
     for st in &data.map.structures {
         match w.drop_structure_for(st.owner, &st.kind, &data.rules(&st.kind), map::cell(st.at)) {
-            Ok(i) if w.structures[i].is_obelisk => {
-                w.structures[i].spell = st.spell.clone();
-                w.assign_obelisk_spell(i);
+            Ok(i) => {
+                w.structures[i].variant = st.frame;
+                if w.structures[i].is_obelisk {
+                    w.structures[i].spell = st.spell.clone();
+                    w.assign_obelisk_spell(i);
+                }
             }
-            Ok(_) => {}
             Err(e) => warn!("map: {} at {:?}: {e}", st.kind, st.at),
         }
     }
@@ -1906,6 +1908,18 @@ fn animate_structures(
     let g = data.grid();
     for (s, plan, mut shape, mut sprite, mut anchor) in &mut turrets {
         let Some(st) = w.structures.get(s.0) else { continue };
+        if plan.stages > 1 && plan.sequence.len() >= plan.stages as usize {
+            // A well shows the run of its remaining stock: full, then half, then low.
+            let share = if st.cost > 0 { st.stock as f32 / st.cost as f32 } else { 1.0 };
+            let stage = (((1.0 - share.clamp(0.0, 1.0)) * plan.stages as f32).floor() as usize).min(plan.stages as usize - 1);
+            let run = plan.sequence.len() / plan.stages as usize;
+            let frames = &plan.sequence[stage * run..(stage + 1) * run];
+            if shape.sequence != frames {
+                shape.sequence = frames.to_vec();
+                shape.step = 0;
+                shape.playing = frames.len() > 1;
+            }
+        }
         let Some(aim) = st.aim else { continue };
         let (cx, cy) = st.centre().centre_px(g);
         let (ax, ay) = aim.centre_px(g);
