@@ -227,8 +227,9 @@ lines = [
 victory = "Victory! The enemy High Priests have been sacrificed."
 defeat = "Defeat. Your High Priest was sacrificed."
 
-# How a structure's frames animate. Frames labelled `idle_label` loop
-# (geysers spout, batteries turn, Workshops work); a type flagged
+# How a structure's frames animate. Frames labelled `idle_label` (or the
+# label of the structure's level) loop: geysers spout, batteries turn,
+# window lights flicker over a Temple or Workshop; a type flagged
 # `variant_flag` shows one frame of its default's group, chosen per cell
 # unless the map pins one with `frame` (trees differ: bushes, dead trees,
 # rocks, tall clumps). Shooters with `turret_min_frames` frames of `turret_label`
@@ -237,7 +238,14 @@ defeat = "Defeat. Your High Priest was sacrificed."
 # mark a frame's role, not its look, and are ignored when grouping.
 [animation]
 idle_label = "A"
+# A Workshop's `A`, `B` and `C` frames are its Levels One to Three.
+levels = ["A", "B", "C"]
+# Within a label, frames smaller than this share of the biggest one are
+# overlays drawn on top of it (window lights), not pictures of their own.
+overlay_share = 0.6
 tag_flags = ["default", "baseframe", "help", "gumpframe"]
+# Frames with these flags are pictures for menus and help, never the map.
+hidden_flags = ["help", "gumpframe"]
 variant_flag = "randframe"
 turret_label = "P"
 turret_min_frames = 8

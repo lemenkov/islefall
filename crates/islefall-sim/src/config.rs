@@ -40,8 +40,18 @@ pub struct Config {
 pub struct Animation {
     /// Frames with this label loop while the structure stands.
     pub idle_label: String,
+    /// Labels of a structure's looks by level, Level One first (a
+    /// Workshop's `A`, `B`, `C`); a level with no frames falls back to `idle_label`.
+    #[serde(default)]
+    pub levels: Vec<String>,
+    /// Frames of a group smaller than this share of its biggest frame's
+    /// area are overlays drawn on top of it (window lights) rather than
+    /// whole pictures of their own.
+    pub overlay_share: f32,
     /// Frame flags that mark a frame's role rather than its look.
     pub tag_flags: Vec<String>,
+    /// Frames with these flags are never drawn on the map (help pictures).
+    pub hidden_flags: Vec<String>,
     /// Types with this flag show one frame of the default's group, picked per cell.
     pub variant_flag: String,
     /// Shooters with at least `turret_min_frames` frames of this label turn

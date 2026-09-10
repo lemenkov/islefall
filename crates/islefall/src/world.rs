@@ -208,7 +208,7 @@ pub fn spawn_structures(
 ) {
     for (i, st) in world.structures.iter().enumerate() {
         let Some(shape) = lib.get_or_load(install, palette, &st.kind, images, layouts) else { continue };
-        let plan = structure_frames(shape, &world.cfg.animation, install.type_def(&st.kind).map(|d| d.flags.as_slice()).unwrap_or(&[]), st.cell, &st.kind, st.variant);
+        let plan = structure_frames(shape, &world.cfg.animation, install.type_def(&st.kind).map(|d| d.flags.as_slice()).unwrap_or(&[]), st.cell, &st.kind, st.variant, st.level);
         let z = Z_STRUCTURE + st.cell.y as f32 * 0.01;
         let pos = cell_to_world(st.cell, &world.cfg.grid);
         if let Some(base) = plan.base {
@@ -246,26 +246,43 @@ fn look_flags(flags: &[String], tags: &[String]) -> Vec<String> {
     v
 }
 
-pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Animation, type_flags: &[String], cell: Cell, kind: &str, pinned: Option<u32>) -> StructureFrames {
+pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Animation, type_flags: &[String], cell: Cell, kind: &str, pinned: Option<u32>, level: u8) -> StructureFrames {
     let n = shape.labels.len();
     let default = (0..n).find(|&i| shape.flags[i].iter().any(|f| f.eq_ignore_ascii_case("default"))).unwrap_or(0);
     let default_look = look_flags(shape.flags.get(default).map(Vec::as_slice).unwrap_or(&[]), &rules.tag_flags);
-    let untagged = |i: usize| !shape.flags[i].iter().any(|f| rules.tag_flags.iter().any(|t| t.eq_ignore_ascii_case(f)) && !f.eq_ignore_ascii_case("default"));
+    let untagged = |i: usize| !shape.flags[i].iter().any(|f| rules.hidden_flags.iter().any(|t| t.eq_ignore_ascii_case(f)));
     let group = |label: &str, look: &Vec<String>| -> Vec<usize> {
         (0..n).filter(|&i| shape.labels[i].eq_ignore_ascii_case(label) && untagged(i) && look_flags(&shape.flags[i], &rules.tag_flags) == *look).collect()
     };
+    // The idle label: the structure's level's, when that label has frames.
+    let idle_label = rules
+        .levels
+        .get(level.max(1) as usize - 1)
+        .filter(|l| (0..n).any(|i| shape.labels[i].eq_ignore_ascii_case(l) && untagged(i)))
+        .cloned()
+        .unwrap_or_else(|| rules.idle_label.clone());
     let idle = {
-        let same = group(&rules.idle_label, &default_look);
-        if same.len() >= 2 { same } else { group(&rules.idle_label, &Vec::new()) }
+        let same = group(&idle_label, &default_look);
+        if same.len() >= 2 { same } else { group(&idle_label, &Vec::new()) }
     };
     let variants = if type_flags.iter().any(|f| f.eq_ignore_ascii_case(&rules.variant_flag)) {
         group(&shape.labels[default], &default_look)
     } else {
         Vec::new()
     };
+    let area = |i: usize| shape.frames[i].size.x as f32 * shape.frames[i].size.y as f32;
     let (sequence, base) = if idle.len() >= 2 {
-        let overlay = !idle.contains(&default);
-        (idle, overlay.then_some(default))
+        // A group's biggest frame with the rest much smaller is a picture
+        // with overlays: draw it underneath and loop the overlays.
+        let big = idle.iter().copied().max_by(|&a, &b| area(a).total_cmp(&area(b))).unwrap_or(default);
+        let big = if idle.contains(&default) && area(default) >= area(big) * rules.overlay_share { default } else { big };
+        let overlays: Vec<usize> = idle.iter().copied().filter(|&i| i != big && area(i) < area(big) * rules.overlay_share).collect();
+        if overlays.len() == idle.len() - 1 {
+            (overlays, Some(big))
+        } else {
+            let overlay = !idle.contains(&default);
+            (idle, overlay.then_some(default))
+        }
     } else if variants.len() >= 2 {
         let pick = pinned.map(|f| f as usize % variants.len()).unwrap_or_else(|| variation(cell, variants.len()));
         (vec![variants[pick]], None)

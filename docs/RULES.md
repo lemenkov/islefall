@@ -43,9 +43,11 @@ corner of a blocked cell. Movement is fixed point (256 steps per cell) at
 
 The original's structures move: geysers spout, batteries turn, Workshops
 work, the Disc Thrower turns to its target and a cannon rises to fire. The
-type files carry it all as frame labels: `A` frames loop for an idle
-(drawn over the default frame when that frame is not one of them, as a
-Temple's window lights are),
+type files carry it all as frame labels: `A` frames loop for an idle,
+and a Workshop's `A`, `B` and `C` are its three levels. Within a label,
+one big picture followed by small frames means window lights drawn over
+the picture (a Temple, a Workshop), while frames all of a size are whole
+pictures that loop (a battery turning);
 `P` frames of a Disc Thrower are its 32 bearings, and a cannon's `L`,
 `M`, `N` and `O` frames are its north, east, south and west firing
 animations (the letters are from the files' own comments). Types flagged
