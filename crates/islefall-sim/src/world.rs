@@ -428,7 +428,11 @@ impl World {
             self.units[i].waited = 0;
             let sub = self.subcell();
             let Some(goal) = self.units[i].path.back().map(|p| p.cell(sub)) else { continue };
-            if let Some(path) = find_path_costed(from, goal, |c| self.walk_cost_round(c, i)) {
+            if self.standing_on(goal, Some(i)).is_some() {
+                // Someone stands where this unit was going: stop here, and a
+                // task will look for another cell to go to.
+                self.units[i].path.clear();
+            } else if let Some(path) = find_path_costed(from, goal, |c| self.walk_cost_round(c, i)) {
                 self.units[i].path = path.into_iter().map(|c| Pos::cell_centre(c, sub)).collect();
             }
         }
@@ -1278,7 +1282,7 @@ impl World {
             self.units[unit].path.clear();
             return true;
         }
-        let mut targets: Vec<Cell> = [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().map(|&(dx, dy)| target.offset(dx, dy)).filter(|&c| self.can_stand(unit, c)).collect();
+        let mut targets: Vec<Cell> = [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().map(|&(dx, dy)| target.offset(dx, dy)).filter(|&c| self.can_stand(unit, c) && self.standing_on(c, Some(unit)).is_none()).collect();
         targets.sort_by_key(|c| (c.x - from.x).abs() + (c.y - from.y).abs());
         for t in targets {
             if self.order_move(unit, t) {
@@ -1714,7 +1718,7 @@ impl World {
             self.units[unit].path.clear();
             return true;
         }
-        let mut targets: Vec<Cell> = s.adjacent_cells().into_iter().filter(|&c| self.can_stand(unit, c)).collect();
+        let mut targets: Vec<Cell> = s.adjacent_cells().into_iter().filter(|&c| self.can_stand(unit, c) && self.standing_on(c, Some(unit)).is_none()).collect();
         targets.sort_by_key(|c| (c.x - from.x).abs() + (c.y - from.y).abs());
         for t in targets {
             if self.order_move(unit, t) {
@@ -2273,6 +2277,37 @@ mod tests {
         assert_eq!(w.structures[g].kind, "emptygeyser");
         assert!(!w.order_harvest(u, g), "nothing left to harvest");
         let _ = t;
+    }
+
+    #[test]
+    fn two_golems_share_a_geyser_without_jamming() {
+        let mut w = world();
+        w.push_island(IslandMap::rect(Cell::new(10, 0), 6, 6), 0);
+        for x in 8..10 {
+            w.place_bridge(Cell::new(x, 1));
+        }
+        let geyser = TypeRules { foot_x: 3, foot_y: 3, cost: 800, is_geyser: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        let g = w.drop_structure("geyser", &geyser, Cell::new(14, 4)).unwrap();
+        w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
+        let a = w.spawn_unit("sunwalker", &golem, Cell::new(4, 1)).unwrap();
+        let b = w.spawn_unit("sunwalker", &golem, Cell::new(4, 3)).unwrap();
+        assert!(w.order_harvest(a, g) && w.order_harvest(b, g));
+        let mut carried = [false, false];
+        for _ in 0..9000 {
+            w.step(&test_scripts());
+            for (k, &u) in [a, b].iter().enumerate() {
+                if let Task::Harvest { carrying, .. } = w.units[u].task {
+                    carried[k] |= carrying > 0;
+                }
+            }
+            if w.units[a].task == Task::Idle && w.units[b].task == Task::Idle {
+                break;
+            }
+        }
+        assert_eq!(w.powers[0], 800, "everything came home");
+        assert!(carried[0] && carried[1], "both golems carried crystals ({carried:?}), neither jammed behind the other");
     }
 
     fn cannon() -> TypeRules {
