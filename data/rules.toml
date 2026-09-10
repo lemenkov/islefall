@@ -278,7 +278,16 @@ flash_seconds = 0.3
 # Fire and smoke on a damaged structure, generated as the original's
 # particle system did: flames start once health falls below
 # `burning_below`, more below `blazing_below`, rise and fade.
+# The `anim` container holds the original's explosions: `A` a great
+# fireball, `B` a white blast, `C` a short bang, `D` a small puff; `flare`
+# holds sparkles. A missile's landing shows `impact`, a structure's end
+# `destroyed`, and a structure under construction sparkles with `building`.
 [effects]
+fps = 20.0
+impact = { type = "anim", label = "D" }
+destroyed = { type = "anim", label = "A" }
+building = { type = "flare", label = "A" }
+sparkles_per_cell = 0.6
 burning_below = 0.5
 blazing_below = 0.25
 flames_per_cell = 1.5

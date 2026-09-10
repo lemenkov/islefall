@@ -523,6 +523,111 @@ struct Projectile {
 #[derive(Resource, Default)]
 struct Landed(Vec<Vec2>);
 
+/// The world's events of this frame, drained once for every system that reacts to them.
+#[derive(Resource, Default)]
+struct Happenings(Vec<islefall_sim::Event>);
+
+fn collect_events(mut sim: ResMut<Sim>, mut happenings: ResMut<Happenings>) {
+    happenings.0.clear();
+    if let Some(world) = sim.world.as_mut() {
+        happenings.0 = world.take_events();
+    }
+}
+
+/// A one-shot animation from the sprite cache, stepped at the effects' own
+/// pace and gone when it ends.
+#[derive(Component)]
+struct Effect {
+    sequence: Vec<usize>,
+    frames: Vec<FrameInfo>,
+    step: usize,
+    clock: f32,
+}
+
+/// Start an effect animation at `pos`; none when the type or label is missing.
+fn spawn_effect(commands: &mut Commands, data: &GameData, lib: &mut ShapeLibrary, images: &mut Assets<Image>, layouts: &mut Assets<TextureAtlasLayout>, fx: &islefall_sim::config::EffectSprite, pos: Vec2, z: f32) {
+    let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+    let Some(shape) = lib.get_or_load(&data.install, palette, &fx.kind, images, layouts) else { return };
+    let sequence: Vec<usize> = (0..shape.labels.len())
+        .filter(|&i| shape.labels[i].eq_ignore_ascii_case(&fx.label) && !shape.flags[i].iter().any(|f| data.cfg.animation.hidden_flags.iter().any(|h| h.eq_ignore_ascii_case(f))))
+        .collect();
+    let Some(&first) = sequence.first() else { return };
+    commands.spawn((
+        Sprite::from_atlas_image(shape.image.clone(), TextureAtlas { layout: shape.layout.clone(), index: first }),
+        shape.frames[first].anchor(),
+        Transform::from_translation(pos.extend(z)),
+        Effect { sequence, frames: shape.frames.clone(), step: 0, clock: 0.0 },
+    ));
+}
+
+/// Step every effect and remove the ones that have ended.
+fn run_effects(mut commands: Commands, data: Res<GameData>, time: Res<Time>, mut effects: Query<(Entity, &mut Effect, &mut Sprite, &mut Anchor)>) {
+    let frame_time = 1.0 / data.cfg.effects.fps.max(1.0);
+    for (e, mut fx, mut sprite, mut anchor) in &mut effects {
+        fx.clock += time.delta_secs();
+        while fx.clock >= frame_time {
+            fx.clock -= frame_time;
+            fx.step += 1;
+        }
+        if fx.step >= fx.sequence.len() {
+            commands.entity(e).despawn();
+            continue;
+        }
+        let frame = fx.sequence[fx.step];
+        if let Some(atlas) = sprite.texture_atlas.as_mut() {
+            if atlas.index != frame {
+                atlas.index = frame;
+                *anchor = fx.frames[frame].anchor();
+            }
+        }
+    }
+}
+
+/// Explosions where structures die, and sparkles over the ones being built.
+#[allow(clippy::too_many_arguments)]
+fn structure_effects(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    time: Res<Time>,
+    happenings: Res<Happenings>,
+    mut lib: ResMut<ShapeLibrary>,
+    mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    mut rng: Local<u64>,
+) {
+    let g = data.grid();
+    let fx = &data.cfg.effects;
+    if let Some(boom) = &fx.destroyed {
+        for e in happenings.0.iter().filter(|e| e.what == islefall_sim::EventKind::Destroyed) {
+            spawn_effect(&mut commands, &data, &mut lib, &mut images, &mut layouts, boom, cell_to_world(e.at, g), Z_UNIT + 3.0);
+        }
+    }
+    let Some(sparkle) = &fx.building else { return };
+    let Some(w) = sim.world.as_ref() else { return };
+    if *rng == 0 {
+        *rng = 0x5851_F42D_4C95_7F2D;
+    }
+    let mut next = || {
+        *rng ^= *rng << 13;
+        *rng ^= *rng >> 7;
+        *rng ^= *rng << 17;
+        (*rng % 10_000) as f32 / 10_000.0
+    };
+    let dt = time.delta_secs();
+    for s in w.structures.iter().filter(|s| !s.complete()) {
+        let expected = fx.sparkles_per_cell * (s.foot_x * s.foot_y) as f32 * dt;
+        if next() > expected.min(1.0) {
+            continue;
+        }
+        let (hx, hy) = s.cell.top_left_px(g);
+        let left = hx as f32 - ((s.foot_x - 1) * g.cell_w) as f32;
+        let top = hy as f32 - ((s.foot_y - 1) * g.cell_h) as f32;
+        let pos = Vec2::new(left + next() * (s.foot_x * g.cell_w) as f32, -(top + next() * (s.foot_y * g.cell_h) as f32));
+        spawn_effect(&mut commands, &data, &mut lib, &mut images, &mut layouts, sparkle, pos, Z_UNIT + 1.5);
+    }
+}
+
 /// Player-side interaction state.
 #[derive(Resource)]
 struct Player {
@@ -709,8 +814,10 @@ fn main() {
         (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
-    .add_systems(Update, (tint_shells, animate_structures, drift_stars, burning, projectiles.before(overlays)).after(sync_structures).run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, (tint_shells, animate_structures, drift_stars, burning, projectiles.before(overlays), structure_effects, run_effects).after(sync_structures).run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, collect_events.after(mouse_actions).after(bridge_keys).after(tool_keys).before(play_sounds).before(structure_effects).run_if(resource_equals(Mode::Island)))
     .init_resource::<Landed>()
+    .init_resource::<Happenings>()
     .add_systems(Update, (play_sounds.after(mouse_actions).after(bridge_keys), sync_loops, ambient, footsteps.after(animate), drift_sky.after(camera_keys)).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
@@ -1007,19 +1114,19 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>, mut 
 /// rules' fallback file. The world's events are drained here.
 fn play_sounds(
     mut commands: Commands,
-    mut sim: ResMut<Sim>,
+    sim: Res<Sim>,
     data: Res<GameData>,
     mut bank: ResMut<SoundBank>,
     mut sources: ResMut<Assets<AudioSource>>,
     volume: Res<GlobalVolume>,
     cameras: Query<(&Camera, &GlobalTransform, &Projection), With<Camera2d>>,
     mut turns: Local<HashMap<String, usize>>,
+    happenings: Res<Happenings>,
 ) {
-    let Some(world) = sim.world.as_mut() else { return };
-    let events = world.take_events();
-    if volume.volume == Volume::Linear(0.0) {
+    if sim.world.is_none() || volume.volume == Volume::Linear(0.0) {
         return;
     }
+    let events = happenings.0.clone();
     let Some(view) = View::of(&cameras) else { return };
     let snd = &data.cfg.sounds;
     let mut started = 0;
@@ -1987,10 +2094,14 @@ fn projectiles(
         }
     }
     let dt = time.delta_secs();
+    let rules_fx = &data.cfg.effects;
     for (e, mut p, mut tf, mut sprite, mut anchor, shape) in &mut flying {
         p.progress += dt / p.seconds;
         if p.progress >= 1.0 {
-            landed.0.push(p.to);
+            match &rules_fx.impact {
+                Some(hit) => spawn_effect(&mut commands, &data, &mut lib, &mut images, &mut layouts, hit, p.to, Z_UNIT + 2.5),
+                None => landed.0.push(p.to),
+            }
             commands.entity(e).despawn();
             continue;
         }

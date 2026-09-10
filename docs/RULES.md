@@ -60,7 +60,10 @@ one of three layouts (a well in front, a round tower, a hut on the
 left). The Temple's other frames are the same layouts on the grey, autumn and
 snow grounds of the Thunder, Wind and Rain islands, and it takes the
 ground of the island it stands on (`ground_label` and `ground_order`).
-A damaged structure burns: below half health flames rise from random
+A missile's landing shows the original's small blast and a destroyed
+structure its great fireball, both from the `anim` container, and a
+structure under construction sparkles with `flare` frames now and then
+(`[effects]`). A damaged structure burns: below half health flames rise from random
 points of its footprint and leave smoke, harder below a quarter, all
 generated as the original's particle system did (`[effects]`). An
 Energy source's stars are the original's twinkling `range` frames in the

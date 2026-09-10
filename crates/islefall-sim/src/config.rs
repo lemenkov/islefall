@@ -36,10 +36,31 @@ pub struct Config {
     pub effects: Effects,
 }
 
+/// An animation from the sprite cache: a type and the label of its frames.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct EffectSprite {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub label: String,
+}
+
 /// Generated effects: the original drew fire and smoke as particles too.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Effects {
+    /// Frames per second of effect animations (explosions, sparkles).
+    pub fps: f32,
+    /// What a missile shows where it lands, a structure when destroyed,
+    /// and a structure now and then while a stream builds it.
+    #[serde(default)]
+    pub impact: Option<EffectSprite>,
+    #[serde(default)]
+    pub destroyed: Option<EffectSprite>,
+    #[serde(default)]
+    pub building: Option<EffectSprite>,
+    /// Sparkles per second per footprint cell while building.
+    pub sparkles_per_cell: f32,
     /// A structure burns once its health falls below this share, harder below the second.
     pub burning_below: f32,
     pub blazing_below: f32,
@@ -568,7 +589,7 @@ impl Config {
         if self.production.workshop_slots.is_empty() || self.construction.power_per_rate <= 0.0 {
             return bad("production.workshop_slots needs a level and construction.power_per_rate must be positive");
         }
-        if self.effects.burning_below <= 0.0 || self.effects.flame_seconds <= 0.0 || self.effects.smoke_seconds <= 0.0 {
+        if self.effects.fps <= 0.0 || self.effects.burning_below <= 0.0 || self.effects.flame_seconds <= 0.0 || self.effects.smoke_seconds <= 0.0 {
             return bad("effects need positive burning_below, flame_seconds and smoke_seconds");
         }
         if self.sky.extent_tiles == 0 || self.sky.layers.iter().any(|l| !(0.0..=1.0).contains(&l.opacity) || l.tile < 16 || l.tile > 2048 || l.octaves == 0 || l.scale <= 0.0) {
