@@ -74,6 +74,14 @@ pub struct UnitDef {
 pub struct OpponentDef {
     pub owner: u8,
     pub target: Option<[i32; 2]>,
+    /// What this opponent drops, when not the rules' `ai.shooter` and `ai.generator`.
+    #[serde(default)]
+    pub shooter: Option<String>,
+    #[serde(default)]
+    pub generator: Option<String>,
+    /// Knowledge bits this opponent starts with (its faction's weapons).
+    #[serde(default)]
+    pub knowledge: Vec<u8>,
 }
 
 #[derive(Debug)]

@@ -20,9 +20,11 @@ origin = [0, 0]
 size = [24, 12]
 remove = [[23, 0], [22, 0], [23, 1]]
 
+# The enemy is the Wind faction: its own island ground, Workshop, Crossbows,
+# Generators and Devil Maker.
 [[islands]]
 owner = 1
-theme = "sun"
+theme = "wind"
 origin = [36, 4]
 size = [16, 11]
 
@@ -78,7 +80,7 @@ at = [32, 4]
 [[structures]]
 owner = 1
 kind = "geyser"
-at = [43, 8]
+at = [44, 7]
 
 [[structures]]
 owner = 0
@@ -94,7 +96,7 @@ spell = "bombexplodemedium"
 
 [[structures]]
 owner = 1
-kind = "sunarcher"
+kind = "windarcher"
 at = [39, 13]
 
 [[structures]]
@@ -102,10 +104,10 @@ owner = 1
 kind = "residence"
 at = [40, 9]
 
-# A Whirlibase: its Whirligig hunts anything within 35 cells.
+# A Devil Maker: its Dust Devils hunt anything within 45 cells.
 [[structures]]
 owner = 1
-kind = "sunaviary"
+kind = "windaviary"
 at = [50, 7]
 
 # The opponent's Temple stands near the west edge it bridges from, so its
@@ -113,7 +115,7 @@ at = [50, 7]
 # Its Workshop puts the shooters and batteries into production.
 [[structures]]
 owner = 1
-kind = "sunfactory"
+kind = "windfactory"
 at = [50, 13]
 
 # A Sun Disc Thrower guards the Workshop against the Whirligig.
@@ -141,10 +143,15 @@ at = [42, 12]
 
 [[units]]
 owner = 1
-kind = "sunwalker"
+kind = "windwalker"
 at = [42, 10]
 
 # Computer players: bridge towards a target cell, or the enemy altar when
 # `target` is omitted.
 [[opponents]]
 owner = 1
+shooter = "windarcher"
+generator = "windbattery"
+# The Wind Generator is Knowledge 4 and the Crossbow 7: the Wind faction
+# starts with both.
+knowledge = [4, 7]

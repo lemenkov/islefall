@@ -2,14 +2,22 @@
 // numbers they work with come from rules.toml. Scripts must be
 // deterministic: same inputs, same result, no randomness, no time.
 
-// Energy a type needs at its placement site, from its `level`, `theme` and
-// `mana` string. Returns #{ theme: "sun"|"wind"|"rain"|"thunder", themed: n, any: n }
+// Energy a type needs at its placement site, from its `level`, `theme`,
+// `mana` string and `class` ("" when the type has none). Returns #{ theme: "sun"|"wind"|"rain"|"thunder", themed: n, any: n }
 // or () when the type needs none.
 //
 // The manual's examples: a Level One Bulf needs one Thunder, a Level Two
 // Whirlibase two Sun, a Level Three Thunder Cannon two Thunder and one Sun,
 // an Air Ship (Level Three, Wind) two Wind and one Sun.
-fn energy_need(level, theme, mana, has_class) {
+fn energy_need(level, theme, mana, class) {
+    let has_class = class != "";
+    // A generator brings its own Fury's Energy, so it asks for any Energy
+    // rather than its own theme's: the first Wind Generator stands on the
+    // Temple's Sun, and the next on the first (the tutorial's Sun Workshop
+    // producing a Wind Generator).
+    if class == "Source of Energy" && level > 0 {
+        return #{ theme: "sun", themed: 0, any: level };
+    }
     if mana != "" {
         let need = #{ theme: "sun", themed: 0, any: 0 };
         for ch in mana.to_lower().chars() {

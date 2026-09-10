@@ -175,6 +175,9 @@ range_px = 128
 # The reach is shown as stars drifting round it, this many, one turn in so many seconds.
 stars = 12
 star_seconds = 9.0
+# The original's twinkling range stars, coloured by the source's theme.
+star_type = "range"
+star_labels = { sun = "A", thunder = "B", rain = "C", wind = "G" }
 
 [ai]
 # Seconds between opponent moves.
@@ -254,6 +257,10 @@ cardinal = { north = "L", east = "M", south = "N", west = "O" }
 # Types whose idle frames are several runs from full to empty, shown by the
 # share of stock left: a geyser's spout is tall, then half, then low.
 stages = { geyser = 3 }
+# A Temple's `A` frames repeat its layouts on the other islands' grounds,
+# in this order of themes; its default `P` frames are the Sun's green.
+ground_label = "A"
+ground_order = ["thunder", "wind", "rain"]
 
 # What flies when a shooter fires: the missile type by shooter (the data
 # never links them; the sun disc, the crossbow bolt and the two cannons'
@@ -267,6 +274,20 @@ speed_px = 260.0
 arc_px = 14.0
 bearing_min_frames = 16
 flash_seconds = 0.3
+
+# Fire and smoke on a damaged structure, generated as the original's
+# particle system did: flames start once health falls below
+# `burning_below`, more below `blazing_below`, rise and fade.
+[effects]
+burning_below = 0.5
+blazing_below = 0.25
+flames_per_cell = 1.5
+blaze_per_cell = 4.0
+flame_seconds = 0.5
+flame_rise_px = 18.0
+smoke_per_flame = 0.5
+smoke_seconds = 1.6
+smoke_rise_px = 14.0
 
 [controls]
 # Keys for the piece slots, as in the original Production window.

@@ -33,6 +33,26 @@ pub struct Config {
     pub hud: Hud,
     pub animation: Animation,
     pub projectiles: Projectiles,
+    pub effects: Effects,
+}
+
+/// Generated effects: the original drew fire and smoke as particles too.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Effects {
+    /// A structure burns once its health falls below this share, harder below the second.
+    pub burning_below: f32,
+    pub blazing_below: f32,
+    /// Flames a burning and a blazing structure start per second per footprint cell.
+    pub flames_per_cell: f32,
+    pub blaze_per_cell: f32,
+    /// How long a flame lives and how fast it rises, in source pixels per second.
+    pub flame_seconds: f32,
+    pub flame_rise_px: f32,
+    /// Smoke puffs per flame, their life and rise.
+    pub smoke_per_flame: f32,
+    pub smoke_seconds: f32,
+    pub smoke_rise_px: f32,
 }
 
 /// What flies from a shooter to its target.
@@ -84,6 +104,13 @@ pub struct Animation {
     /// the share of stock left (a geyser's three spouts).
     #[serde(default)]
     pub stages: BTreeMap<String, u32>,
+    /// For variant types, the label whose frames repeat the variants on
+    /// other grounds, in `ground_order` of island themes (a Temple's grey,
+    /// autumn and snow); the default's label is the first theme's ground.
+    #[serde(default)]
+    pub ground_label: Option<String>,
+    #[serde(default)]
+    pub ground_order: Vec<String>,
 }
 
 /// The on-screen text: templates with `{power}`, `{knowledge}`, `{techs}`,
@@ -425,6 +452,12 @@ pub struct Energy {
     /// Stars drifting round an Energy source's reach, and their orbit time.
     pub stars: u32,
     pub star_seconds: f32,
+    /// The type whose frames draw the stars, by the source's theme; a
+    /// generated star when missing.
+    #[serde(default)]
+    pub star_type: Option<String>,
+    #[serde(default)]
+    pub star_labels: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -534,6 +567,9 @@ impl Config {
         }
         if self.production.workshop_slots.is_empty() || self.construction.power_per_rate <= 0.0 {
             return bad("production.workshop_slots needs a level and construction.power_per_rate must be positive");
+        }
+        if self.effects.burning_below <= 0.0 || self.effects.flame_seconds <= 0.0 || self.effects.smoke_seconds <= 0.0 {
+            return bad("effects need positive burning_below, flame_seconds and smoke_seconds");
         }
         if self.sky.extent_tiles == 0 || self.sky.layers.iter().any(|l| !(0.0..=1.0).contains(&l.opacity) || l.tile < 16 || l.tile > 2048 || l.octaves == 0 || l.scale <= 0.0) {
             return bad("sky layers need a tile of 16..2048, octaves, a positive scale and opacity 0.0..1.0");

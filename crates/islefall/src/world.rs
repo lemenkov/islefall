@@ -208,7 +208,13 @@ pub fn spawn_structures(
 ) {
     for (i, st) in world.structures.iter().enumerate() {
         let Some(shape) = lib.get_or_load(install, palette, &st.kind, images, layouts) else { continue };
-        let plan = structure_frames(shape, &world.cfg.animation, install.type_def(&st.kind).map(|d| d.flags.as_slice()).unwrap_or(&[]), st.cell, &st.kind, st.variant, st.level);
+        let ground = match world.island_theme_at(st.centre()) {
+            Theme::Sun => "sun",
+            Theme::Thunder => "thunder",
+            Theme::Wind => "wind",
+            Theme::Rain => "rain",
+        };
+        let plan = structure_frames(shape, &world.cfg.animation, install.type_def(&st.kind).map(|d| d.flags.as_slice()).unwrap_or(&[]), st.cell, &st.kind, st.variant, st.level, ground);
         let z = Z_STRUCTURE + st.cell.y as f32 * 0.01;
         let pos = cell_to_world(st.cell, &world.cfg.grid);
         if let Some(base) = plan.base {
@@ -246,7 +252,7 @@ fn look_flags(flags: &[String], tags: &[String]) -> Vec<String> {
     v
 }
 
-pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Animation, type_flags: &[String], cell: Cell, kind: &str, pinned: Option<u32>, level: u8) -> StructureFrames {
+pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Animation, type_flags: &[String], cell: Cell, kind: &str, pinned: Option<u32>, level: u8, ground: &str) -> StructureFrames {
     let n = shape.labels.len();
     let default = (0..n).find(|&i| shape.flags[i].iter().any(|f| f.eq_ignore_ascii_case("default"))).unwrap_or(0);
     let default_look = look_flags(shape.flags.get(default).map(Vec::as_slice).unwrap_or(&[]), &rules.tag_flags);
@@ -266,7 +272,19 @@ pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Anima
         if same.len() >= 2 { same } else { group(&idle_label, &Vec::new()) }
     };
     let variants = if type_flags.iter().any(|f| f.eq_ignore_ascii_case(&rules.variant_flag)) {
-        group(&shape.labels[default], &default_look)
+        let own = group(&shape.labels[default], &default_look);
+        // On another theme's ground, the same variants from the ground label's run for it.
+        let other = rules.ground_label.as_deref().and_then(|label| {
+            let k = rules.ground_order.iter().position(|t| t.eq_ignore_ascii_case(ground))?;
+            let all = group(label, &default_look);
+            let runs = rules.ground_order.len().max(1);
+            if all.is_empty() || all.len() % runs != 0 {
+                return None;
+            }
+            let run = all.len() / runs;
+            Some(all[k * run..(k + 1) * run].to_vec())
+        });
+        other.unwrap_or(own)
     } else {
         Vec::new()
     };

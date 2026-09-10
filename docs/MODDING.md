@@ -25,7 +25,7 @@ Changing a flag list under `[flags]` changes which types the simulation
 treats as walk-blocking, island-creating, geysers, Temples and so on.
 Adding a piece to `[bridges].pieces` puts it into every player's queue.
 `[production]` sets the slots per Workshop and the types a Temple provides
-without one. `[spells]` names the prayer Spell, the Obelisk pool and each Spell's effect. `[ai]` names the opponent's shooter and generator and its pace. `[air]` names the base classes, which attacker each base
+without one. `[effects]` shapes the generated fire and smoke on damaged structures. `[spells]` names the prayer Spell, the Obelisk pool and each Spell's effect. `[ai]` names the opponent's shooter and generator and its pace. `[air]` names the base classes, which attacker each base
 launches, the respawn wait and strike reach, and per attacker its flight
 time and habits (refuelling, hunting Transports, cracking bridges, feeding
 on kills).
@@ -42,7 +42,7 @@ once at start-up; a syntax error stops the game with the message.
 
 Available hooks:
 
-- `energy_need(level, theme, mana, has_class)` -> `#{ theme, themed, any }` or `()`
+- `energy_need(level, theme, mana, class)` -> `#{ theme, themed, any }` or `()`
 - `fires_straight(name, flags)` -> bool
 - `damage_per_shot(hp_per_sec, delay_seconds)` -> int
 - `salvage_refund(cost, hp, max_hp, refund_percent)` -> int
@@ -137,7 +137,10 @@ repository, as with all NetStorm data.
 ## Maps
 
 Cells are `[x, y]` with y growing downwards. An island without an `owner`
-is neutral. A structure's position is its
+is neutral; its `theme` (sun, thunder, wind, rain) chooses its ground and
+the Temple's look on it. An opponent may name its own `shooter` and
+`generator` types and the `knowledge` bits it starts with, so each
+faction fights with its own weapons. A structure's position is its
 hotspot cell, the bottom-right cell of its footprint. The layout is placed
 with costs and Energy switched off, then the reserves are set to
 `start_power` and the rules apply.

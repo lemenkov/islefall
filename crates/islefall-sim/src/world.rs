@@ -191,6 +191,8 @@ pub struct World {
     /// Owner of each natural island, parallel to `islands`.
     /// Owner of each natural island; `None` for a neutral one.
     pub island_owners: Vec<Option<u8>>,
+    /// Theme of each natural island, for its look.
+    pub island_themes: Vec<Theme>,
     /// Which islands were neutral to begin with: an Outpost claims them
     /// and its loss lets them go again.
     pub island_neutral: Vec<bool>,
@@ -251,6 +253,7 @@ impl World {
             tick: 0,
             islands: Vec::new(),
             island_owners: Vec::new(),
+            island_themes: Vec::new(),
             island_neutral: Vec::new(),
             platforms: IslandMap::new(),
             platform_owners: BTreeMap::new(),
@@ -328,13 +331,27 @@ impl World {
     pub fn push_neutral_island(&mut self, island: IslandMap) {
         self.islands.push(island);
         self.island_owners.push(None);
+        self.island_themes.push(Theme::Sun);
         self.island_neutral.push(true);
+    }
+
+    /// Give the last-added island a theme.
+    pub fn set_island_theme(&mut self, index: usize, theme: Theme) {
+        if let Some(t) = self.island_themes.get_mut(index) {
+            *t = theme;
+        }
+    }
+
+    /// The theme of the natural island under `cell`, Sun in the sky.
+    pub fn island_theme_at(&self, cell: Cell) -> Theme {
+        self.island_at(cell).and_then(|i| self.island_themes.get(i).copied()).unwrap_or(Theme::Sun)
     }
 
     /// Add a natural island with its owner.
     pub fn push_island(&mut self, island: IslandMap, owner: u8) {
         self.islands.push(island);
         self.island_owners.push(Some(owner));
+        self.island_themes.push(Theme::Sun);
         self.island_neutral.push(false);
         self.terrain_version += 1;
     }

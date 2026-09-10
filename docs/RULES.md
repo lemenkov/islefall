@@ -57,8 +57,14 @@ settles back to its default look. Types flagged
 chosen per cell unless the map pins one with `frame` (the original saved
 the choice with `saveFrame`), so no two trees look alike and a Temple has
 one of three layouts (a well in front, a round tower, a hut on the
-left). The Temple's other frames are the same layouts, lit, and on the
-grey, autumn and snow grounds of the other island themes, not yet used. A geyser's 49 idle frames are
+left). The Temple's other frames are the same layouts on the grey, autumn and
+snow grounds of the Thunder, Wind and Rain islands, and it takes the
+ground of the island it stands on (`ground_label` and `ground_order`).
+A damaged structure burns: below half health flames rise from random
+points of its footprint and leave smoke, harder below a quarter, all
+generated as the original's particle system did (`[effects]`). An
+Energy source's stars are the original's twinkling `range` frames in the
+source's theme colour (`energy.star_type` and `star_labels`). A geyser's 49 idle frames are
 three runs of the spout, full, half and low; `[animation].stages` says
 so and the run shown follows the stock left. `[animation]` in the rules names the labels and
 flags. An Energy source's reach is shown as the original showed it: a ring
@@ -187,7 +193,10 @@ Islefall reads a type's requirement from `mana` when present (`s` any, `w`,
 any kind; a themed type needs one of its theme at level one, and its theme
 for all but one unit from level two up. Types without a class (trees, the
 altar, geysers) need none. Generators (`class` "Source of Energy") radiate
-their theme; the Temple (`residence`) radiates Sun. The circle radius, 128
+their theme and ask for `level` units of any Energy, so the first Wind
+Generator stands on the Temple's Sun and the next on the first (the
+tutorial's Sun Workshop produces a Wind Generator); the Temple
+(`residence`) radiates Sun. The circle radius, 128
 source pixels, is a guess. Only the local player is checked; enemies place
 freely for now.
 
@@ -311,7 +320,9 @@ production at any Workshop it owns, and either drops a shooter at the open
 end nearest its target (every `shooter_every`th move), drops a generator
 at the nearest site with Energy when every shooter site lacked it, or lays
 the bridge piece from its own queue that brings it closest to its target.
-An opponent without a Workshop only bridges and harvests.
+An opponent without a Workshop only bridges and harvests. A map may give
+an opponent its own `shooter` and `generator`, so a Wind opponent drops
+Crossbows and Wind Generators.
 
 ## Ownership
 

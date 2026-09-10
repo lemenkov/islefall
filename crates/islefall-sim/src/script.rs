@@ -63,9 +63,9 @@ impl Scripts {
             .map_err(|e| ScriptError::Call { hook, message: e.to_string() })
     }
 
-    /// `energy_need(level, theme, mana, has_class)` -> map or unit.
-    pub fn energy_need(&self, level: i64, theme: Theme, mana: &str, has_class: bool) -> Result<Option<EnergyNeed>, ScriptError> {
-        let r = self.call("energy_need", (level, theme_name(theme).to_string(), mana.to_string(), has_class))?;
+    /// `energy_need(level, theme, mana, class)` -> map or unit.
+    pub fn energy_need(&self, level: i64, theme: Theme, mana: &str, class: &str) -> Result<Option<EnergyNeed>, ScriptError> {
+        let r = self.call("energy_need", (level, theme_name(theme).to_string(), mana.to_string(), class.to_string()))?;
         if r.is_unit() {
             return Ok(None);
         }
@@ -171,11 +171,12 @@ mod tests {
     #[test]
     fn hooks_follow_the_manual_examples() {
         let s = test_scripts();
-        assert_eq!(s.energy_need(3, Theme::Thunder, "", true).unwrap(), Some(EnergyNeed { theme: Theme::Thunder, themed: 2, any: 1 }));
-        assert_eq!(s.energy_need(1, Theme::Thunder, "", true).unwrap(), Some(EnergyNeed { theme: Theme::Thunder, themed: 1, any: 0 }));
-        assert_eq!(s.energy_need(2, Theme::Sun, "", true).unwrap(), Some(EnergyNeed { theme: Theme::Sun, themed: 0, any: 2 }));
-        assert_eq!(s.energy_need(1, Theme::Wind, "s", true).unwrap(), Some(EnergyNeed { theme: Theme::Sun, themed: 0, any: 1 }));
-        assert_eq!(s.energy_need(2, Theme::Sun, "", false).unwrap(), None, "no class, no need");
+        assert_eq!(s.energy_need(3, Theme::Thunder, "", "Shooter").unwrap(), Some(EnergyNeed { theme: Theme::Thunder, themed: 2, any: 1 }));
+        assert_eq!(s.energy_need(1, Theme::Thunder, "", "Ground Transport").unwrap(), Some(EnergyNeed { theme: Theme::Thunder, themed: 1, any: 0 }));
+        assert_eq!(s.energy_need(2, Theme::Sun, "", "Shooter").unwrap(), Some(EnergyNeed { theme: Theme::Sun, themed: 0, any: 2 }));
+        assert_eq!(s.energy_need(1, Theme::Wind, "s", "Shooter").unwrap(), Some(EnergyNeed { theme: Theme::Sun, themed: 0, any: 1 }));
+        assert_eq!(s.energy_need(2, Theme::Sun, "", "").unwrap(), None, "no class, no need");
+        assert_eq!(s.energy_need(1, Theme::Wind, "", "Source of Energy").unwrap(), Some(EnergyNeed { theme: Theme::Sun, themed: 0, any: 1 }), "a generator asks for any Energy");
         assert!(s.fires_straight("sunCannon", &[]).unwrap());
         assert!(!s.fires_straight("sunArcher", &[]).unwrap());
         assert_eq!(s.damage_per_shot(16, 5.0).unwrap(), 80);

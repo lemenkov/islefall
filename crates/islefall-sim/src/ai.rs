@@ -27,6 +27,9 @@ pub struct Ai {
     pub shooter_every: u32,
     pub shooter_reach: i32,
     pub queue: PieceQueue,
+    /// The types this opponent builds with.
+    pub shooter: String,
+    pub generator: String,
     ticks: u32,
     moves: u32,
 }
@@ -53,6 +56,8 @@ impl Ai {
             shooter_every: cfg.ai.shooter_every.max(1),
             shooter_reach: cfg.ai.shooter_reach,
             queue: PieceQueue::from_defs(&cfg.bridges.pieces, cfg.bridges.piece_slots, cfg.ai.queue_seed.wrapping_add(owner as u64)),
+            shooter: cfg.ai.shooter.clone(),
+            generator: cfg.ai.generator.clone(),
             ticks: 0,
             moves: 0,
         }

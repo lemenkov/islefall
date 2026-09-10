@@ -157,7 +157,7 @@ impl TypeRules {
         let delay = def.get_f64("delayBetweenShots").unwrap_or(cfg.combat.default_delay_between_shots).max(0.1);
         let theme = def.get_str("theme").and_then(Theme::parse).unwrap_or(Theme::Sun);
         let level = def.get_i64("level").unwrap_or(0).clamp(0, 9);
-        let energy = scripts.energy_need(level, theme, def.get_str("mana").unwrap_or(""), def.get_str("class").is_some())?;
+        let energy = scripts.energy_need(level, theme, def.get_str("mana").unwrap_or(""), class)?;
         let produces = if has(&f.temple) {
             Some(theme)
         } else if def.get_str("class").is_some_and(|c| f.energy_source_classes.iter().any(|e| e.eq_ignore_ascii_case(c))) {

@@ -709,7 +709,7 @@ fn main() {
         (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
-    .add_systems(Update, (tint_shells, animate_structures, drift_stars, projectiles.before(overlays)).after(sync_structures).run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, (tint_shells, animate_structures, drift_stars, burning, projectiles.before(overlays)).after(sync_structures).run_if(resource_equals(Mode::Island)))
     .init_resource::<Landed>()
     .add_systems(Update, (play_sounds.after(mouse_actions).after(bridge_keys), sync_loops, ambient, footsteps.after(animate), drift_sky.after(camera_keys)).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
@@ -817,6 +817,8 @@ fn setup_map(
             Some(owner) => w.push_island(island, owner),
             None => w.push_neutral_island(island),
         }
+        let last = w.islands.len() - 1;
+        w.set_island_theme(last, theme);
     }
     for b in &data.map.bridges {
         for c in &b.cells {
@@ -854,7 +856,17 @@ fn setup_map(
     let altar = w.structures.iter().find(|s| s.is_altar && s.owner == 0).map(|s| s.centre()).unwrap_or(data.map.camera_cell());
     for op in &data.map.opponents {
         let target = op.target.map(map::cell).unwrap_or(altar);
-        sim.ais.push(Ai::new(op.owner, target, &data.cfg));
+        let mut ai = Ai::new(op.owner, target, &data.cfg);
+        if let Some(sh) = &op.shooter {
+            ai.shooter = sh.clone();
+        }
+        if let Some(gn) = &op.generator {
+            ai.generator = gn.clone();
+        }
+        for &bit in &op.knowledge {
+            w.grant_tech(op.owner, bit);
+        }
+        sim.ais.push(ai);
     }
 
     let mut centre = w.cfg.grid.clone();
@@ -979,9 +991,8 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>, mut 
         info!("tick {} hash {:016x}", world.tick, world.hash());
     }
     world.step(&data.scripts);
-    let (shooter, generator) = (data.cfg.ai.shooter.clone(), data.cfg.ai.generator.clone());
-    let kit = islefall_sim::ai::AiKit { shooter: (shooter.clone(), data.rules(&shooter)), generator: (generator.clone(), data.rules(&generator)) };
     for ai in ais.iter_mut() {
+        let kit = islefall_sim::ai::AiKit { shooter: (ai.shooter.clone(), data.rules(&ai.shooter)), generator: (ai.generator.clone(), data.rules(&ai.generator)) };
         match ai.tick(world, &kit, &data.scripts) {
             Some(AiMove::Piece { name, at }) => info!("opponent {} lays a {name} piece at {at:?}", ai.owner),
             Some(AiMove::Shooter { kind, at }) => info!("opponent {} drops a {kind} at {at:?}", ai.owner),
@@ -1174,8 +1185,6 @@ fn online_step(world: &mut World, ais: &mut [Ai], data: &GameData, rec: &mut Rec
     use islefall_net::{ClientMsg, ServerMsg};
     let Some(net) = rec.net.as_mut() else { return };
     let messages = net.drain();
-    let (shooter, generator) = (data.cfg.ai.shooter.clone(), data.cfg.ai.generator.clone());
-    let kit = islefall_sim::ai::AiKit { shooter: (shooter.clone(), data.rules(&shooter)), generator: (generator.clone(), data.rules(&generator)) };
     for msg in messages {
         match msg {
             ServerMsg::Welcome { player: id, turn_ticks, hash_every_turns } => {
@@ -1212,6 +1221,7 @@ fn online_step(world: &mut World, ais: &mut [Ai], data: &GameData, rec: &mut Rec
                 for _ in 0..net.turn_ticks {
                     world.step(&data.scripts);
                     for ai in ais.iter_mut() {
+                        let kit = islefall_sim::ai::AiKit { shooter: (ai.shooter.clone(), data.rules(&ai.shooter)), generator: (ai.generator.clone(), data.rules(&ai.generator)) };
                         ai.tick(world, &kit, &data.scripts);
                     }
                 }
@@ -1701,12 +1711,16 @@ fn overlays(
 }
 
 /// Draw the Energy circle of every source the player owns whenever structures change.
+#[allow(clippy::too_many_arguments)]
 fn sync_energy_rings(
     mut commands: Commands,
     sim: Res<Sim>,
     data: Res<GameData>,
     player: Res<Player>,
     ring: Res<RingImage>,
+    mut lib: ResMut<ShapeLibrary>,
+    mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     existing: Query<Entity, With<EnergyRing>>,
     mut seen: Local<Option<u64>>,
 ) {
@@ -1718,12 +1732,45 @@ fn sync_energy_rings(
     for e in &existing {
         commands.entity(e).despawn();
     }
+    let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+    let energy = &data.cfg.energy;
     for s in w.structures.iter().filter(|s| s.owner == player.id && s.produces.is_some() && s.complete()) {
         let (x, y) = s.centre().centre_px(data.grid());
         let centre = Vec2::new(x as f32, -(y as f32));
-        for index in 0..data.cfg.energy.stars {
-            commands.spawn((Sprite::from_image(ring.0.clone()), Transform::from_translation(centre.extend(0.9)), EnergyRing { centre, index }));
+        // The original's twinkling stars in the theme's colour, else a generated one.
+        let theme_name = theme_name(s.produces.unwrap_or(s.theme));
+        let star = energy.star_type.as_deref().and_then(|t| {
+            let label = energy.star_labels.get(theme_name)?;
+            let shape = lib.get_or_load(&data.install, palette, t, &mut images, &mut layouts)?;
+            let seq: Vec<usize> = (0..shape.labels.len()).filter(|&i| shape.labels[i].eq_ignore_ascii_case(label)).collect();
+            (!seq.is_empty()).then(|| (shape.image.clone(), shape.layout.clone(), shape.frames.clone(), seq))
+        });
+        for index in 0..energy.stars {
+            match &star {
+                Some((image, layout, frames, seq)) => {
+                    let first = seq[(index as usize) % seq.len()];
+                    commands.spawn((
+                        Sprite::from_atlas_image(image.clone(), TextureAtlas { layout: layout.clone(), index: first }),
+                        frames[first].anchor(),
+                        Transform::from_translation(centre.extend(0.9)),
+                        ShapeSprite { sequence: seq.clone(), frames: frames.clone(), step: (index as usize) % seq.len(), playing: true, once: false, rest: None },
+                        EnergyRing { centre, index },
+                    ));
+                }
+                None => {
+                    commands.spawn((Sprite::from_image(ring.0.clone()), Transform::from_translation(centre.extend(0.9)), EnergyRing { centre, index }));
+                }
+            }
         }
+    }
+}
+
+fn theme_name(t: Theme) -> &'static str {
+    match t {
+        Theme::Sun => "sun",
+        Theme::Thunder => "thunder",
+        Theme::Wind => "wind",
+        Theme::Rain => "rain",
     }
 }
 
@@ -1964,6 +2011,79 @@ fn projectiles(
                 }
             }
         }
+    }
+}
+
+/// A flame or a puff of smoke rising from a damaged structure.
+#[derive(Component)]
+struct Ember {
+    life: f32,
+    seconds: f32,
+    rise: f32,
+    smoke: bool,
+}
+
+/// Damaged structures burn: flames start at random points of the
+/// footprint at a rate set by the damage, rise, fade, and leave smoke.
+fn burning(mut commands: Commands, sim: Res<Sim>, data: Res<GameData>, time: Res<Time>, mut embers: Query<(Entity, &mut Ember, &mut Transform, &mut Sprite)>, mut rng: Local<u64>) {
+    let w = sim.world();
+    let fx = &data.cfg.effects;
+    let g = data.grid();
+    let dt = time.delta_secs();
+    if *rng == 0 {
+        *rng = 0x2545_F491_4F6C_DD1D;
+    }
+    let mut next = || {
+        *rng ^= *rng << 13;
+        *rng ^= *rng >> 7;
+        *rng ^= *rng << 17;
+        (*rng % 10_000) as f32 / 10_000.0
+    };
+    for s in &w.structures {
+        if s.max_hp == 0 || !s.complete() {
+            continue;
+        }
+        let share = s.hp as f32 / s.max_hp as f32;
+        let per_cell = if share < fx.blazing_below { fx.blaze_per_cell } else if share < fx.burning_below { fx.flames_per_cell } else { continue };
+        let cells = (s.foot_x * s.foot_y) as f32;
+        let mut expected = per_cell * cells * dt;
+        while expected > 0.0 {
+            if next() > expected.min(1.0) {
+                break;
+            }
+            expected -= 1.0;
+            let (x0, y0) = s.cell.top_left_px(g);
+            let x = x0 as f32 + next() * (s.foot_x * g.cell_w) as f32;
+            let y = -(y0 as f32) + next() * ((s.foot_y - 1) * g.cell_h) as f32 - g.cell_h as f32 * 0.5;
+            let size = 2.0 + next() * 2.0;
+            commands.spawn((
+                Sprite::from_color(Color::srgb(1.0, 0.85, 0.3), Vec2::splat(size)),
+                Transform::from_translation(Vec3::new(x, y, Z_UNIT + 1.0)),
+                Ember { life: 0.0, seconds: fx.flame_seconds * (0.7 + next() * 0.6), rise: fx.flame_rise_px, smoke: false },
+            ));
+            if next() < fx.smoke_per_flame {
+                commands.spawn((
+                    Sprite::from_color(Color::srgba(0.3, 0.3, 0.3, 0.5), Vec2::splat(size + 2.0)),
+                    Transform::from_translation(Vec3::new(x + next() * 4.0 - 2.0, y + 6.0, Z_UNIT + 0.9)),
+                    Ember { life: 0.0, seconds: fx.smoke_seconds * (0.7 + next() * 0.6), rise: fx.smoke_rise_px, smoke: true },
+                ));
+            }
+        }
+    }
+    for (e, mut ember, mut tf, mut sprite) in &mut embers {
+        ember.life += dt;
+        let t = ember.life / ember.seconds;
+        if t >= 1.0 {
+            commands.entity(e).despawn();
+            continue;
+        }
+        tf.translation.y += ember.rise * dt;
+        sprite.color = if ember.smoke {
+            Color::srgba(0.3, 0.3, 0.3, 0.45 * (1.0 - t))
+        } else {
+            // Yellow at birth, orange, then red as it dies.
+            Color::srgba(1.0, 0.9 - 0.7 * t, 0.3 * (1.0 - t), 1.0 - t * t)
+        };
     }
 }
 
