@@ -2353,7 +2353,7 @@ fn sync_structures(
     mut lib: ResMut<ShapeLibrary>,
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-    existing: Query<Entity, With<StructureSprite>>,
+    mut existing: Query<(Entity, &world::StructureKey, &mut StructureSprite)>,
     mut seen: Local<Option<u64>>,
 ) {
     let w = sim.world();
@@ -2361,11 +2361,26 @@ fn sync_structures(
         return;
     }
     *seen = Some(w.structure_version);
-    for e in &existing {
-        commands.entity(e).despawn();
+    // Sprites of structures still standing with the same look stay, so a
+    // turret keeps its bearing and a burning shell its flames; the rest go,
+    // and structures without a sprite get one.
+    let index_of: HashMap<u32, usize> = w.structures.iter().enumerate().map(|(i, s)| (s.id, i)).collect();
+    let mut drawn: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    for (e, key, mut sprite) in &mut existing {
+        match index_of.get(&key.id) {
+            Some(&i) if world::StructureKey::of(&w.structures[i]) == *key => {
+                sprite.0 = i;
+                drawn.insert(key.id);
+            }
+            _ => commands.entity(e).despawn(),
+        }
     }
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
-    world::spawn_structures(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, w);
+    for i in 0..w.structures.len() {
+        if !drawn.contains(&w.structures[i].id) {
+            world::spawn_structure(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, w, i);
+        }
+    }
 }
 
 /// A shell under construction shows through until its stream has built it.

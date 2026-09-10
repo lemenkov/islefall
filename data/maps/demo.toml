@@ -37,21 +37,21 @@ theme = "sun"
 origin = [25, 8]
 size = [7, 5]
 
-# The Rain faction, far to the south-west: icy ground, Ice Cannon and Ice
-# Tower. The islands stand out of each other's cannon range (the Thunder
-# Cannon reaches 44 cells), so nobody fires until somebody bridges over.
+# The Rain faction, south-west: icy ground, Ice Cannon and Ice Tower. The
+# islands are close: the cannons reach the neighbours (the Thunder Cannon
+# 44 cells, the Ice Cannon 32, yours 22 along its row and column), so the
+# fight is on from the start.
 [[islands]]
 owner = 2
 theme = "rain"
-origin = [0, 60]
+origin = [0, 20]
 size = [28, 13]
 
-# The Thunder faction, far to the south-east: Thunder Cannon, Vander
-# Tower and Bulwark.
+# The Thunder faction, south-east: Thunder Cannon, Vander Tower and Bulwark.
 [[islands]]
 owner = 3
 theme = "thunder"
-origin = [70, 60]
+origin = [34, 22]
 size = [28, 13]
 
 # Bridge cells laid by the map; connections and tiles follow from adjacency.
@@ -165,83 +165,83 @@ at = [47, 7]
 [[structures]]
 owner = 2
 kind = "rainfactory"
-at = [9, 66]
+at = [9, 26]
 
 [[structures]]
 owner = 2
 kind = "rainvortex"
-at = [19, 66]
+at = [19, 26]
 
 [[structures]]
 owner = 2
 kind = "raincannon"
-at = [4, 70]
+at = [4, 30]
 
 [[structures]]
 owner = 2
 kind = "rainbattery"
-at = [8, 70]
+at = [8, 30]
 
 [[structures]]
 owner = 2
 kind = "rainblocker"
-at = [12, 70]
+at = [12, 30]
 
 [[structures]]
 owner = 2
 kind = "rainfence"
-at = [16, 70]
+at = [16, 30]
 
 [[structures]]
 owner = 2
 kind = "rainaviary"
-at = [20, 70]
+at = [20, 30]
 
 [[structures]]
 owner = 2
 kind = "residence"
-at = [25, 71]
+at = [25, 31]
 
 # The Thunder island, laid out the same way.
 [[structures]]
 owner = 3
 kind = "thunderfactory"
-at = [79, 66]
+at = [43, 28]
 
 [[structures]]
 owner = 3
 kind = "thundervortex"
-at = [89, 66]
+at = [53, 28]
 
 [[structures]]
 owner = 3
 kind = "thundercannon"
-at = [74, 70]
+at = [38, 32]
 
 [[structures]]
 owner = 3
 kind = "thunderarcher"
-at = [78, 70]
+at = [42, 32]
 
 [[structures]]
 owner = 3
 kind = "thunderbattery"
-at = [82, 70]
+at = [46, 32]
 
 [[structures]]
 owner = 3
 kind = "thunderblocker"
-at = [86, 70]
+at = [50, 32]
 
 [[structures]]
 owner = 3
 kind = "thunderfence"
-at = [90, 70]
+at = [54, 32]
 
 [[structures]]
 owner = 3
 kind = "residence"
-at = [95, 71]
+at = [59, 33]
 
 [[units]]
 owner = 0
@@ -268,22 +268,22 @@ at = [42, 10]
 [[units]]
 owner = 2
 kind = "rainwalker"
-at = [22, 62]
+at = [22, 22]
 
 [[units]]
 owner = 2
 kind = "priest"
-at = [24, 62]
+at = [24, 22]
 
 [[units]]
 owner = 3
 kind = "bulf"
-at = [92, 62]
+at = [56, 24]
 
 [[units]]
 owner = 3
 kind = "priest"
-at = [94, 62]
+at = [58, 24]
 
 # Computer players: bridge towards a target cell, or the enemy altar when
 # `target` is omitted.

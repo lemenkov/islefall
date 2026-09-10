@@ -80,7 +80,11 @@ turn in `turn_seconds`, fires on arrival and stays there. The Sun Cannon's
 frames are not in play order, so `fire_sequences` spells its shot out: it
 rests with the barrel up (its default frame), lowers it towards the
 target, fires and raises it again. The `range` map is a shooting range for
-checking all this. An Energy source's reach is shown as the original showed it: a ring
+checking all this. A shooter stays on the target it is firing at while
+that remains in range (the `target_priority` hook's `is_current`), so it
+does not swing to every newcomer; and a structure's sprite survives
+changes elsewhere in the world, so a turret keeps its bearing when the
+opponent drops a building or something is destroyed. An Energy source's reach is shown as the original showed it: a ring
 of small stars drifting round it, not a drawn circle.
 
 ## Bridges

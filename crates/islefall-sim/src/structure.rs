@@ -65,6 +65,19 @@ pub struct Structure {
     pub aim: Option<Cell>,
     /// The variant frame the map pinned, as the original saved with `saveFrame`.
     pub variant: Option<u32>,
+    /// A number that stays with the structure while it stands, unlike its
+    /// index; 0 until the world takes it in.
+    pub id: u32,
+    /// What it shot at last, kept while that stays a valid target.
+    pub target: Option<Aim>,
+}
+
+/// What a shooter is trained on, by identities that survive removals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Aim {
+    Structure(u32),
+    Unit(usize),
+    Bridge(Cell),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +139,8 @@ impl Structure {
             paralysed: 0,
             aim: None,
             variant: None,
+            id: 0,
+            target: None,
         }
     }
 

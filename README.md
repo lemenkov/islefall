@@ -59,8 +59,9 @@ own islet, a neutral Storm Geyser island, a Wind island to the east, and
 Rain and Thunder islands far to the south, each with its Workshop, Temple,
 shooters, Generator, tower, barricade, air base, walker and High Priest.
 The three computer players bridge towards your altar and drop shooters on
-the way; the islands start out of cannon range of each other, so click the
-minimap to visit them. Two of your units walk under the simulation's control. Structures shoot enemies in range; damaged things
+the way; the islands are close enough for the cannons to reach their
+neighbours, so the fight is on from the start. Click the minimap to jump
+between them. Two of your units walk under the simulation's control. Structures shoot enemies in range; damaged things
 show a health bar, destroyed ones explode and crack nearby bridges.
 Left-click on a unit selects it, left-click elsewhere sends the selected unit
 there along a path around obstacles, left-click on a Storm Geyser sets it

@@ -196,8 +196,25 @@ pub fn spawn_island(
     }
 }
 
-/// Draw every structure of the world with its default frame.
-pub fn spawn_structures(
+/// Which structure a sprite was drawn for, and the look it was drawn
+/// with; a sprite outlives list changes while these still match.
+#[derive(Component, Clone, Debug, PartialEq, Eq)]
+pub struct StructureKey {
+    pub id: u32,
+    pub kind: String,
+    pub level: u8,
+}
+
+impl StructureKey {
+    pub fn of(st: &islefall_sim::structure::Structure) -> Self {
+        StructureKey { id: st.id, kind: st.kind.clone(), level: st.level }
+    }
+}
+
+/// Draw one structure: its picture underneath, if it has one, and its
+/// animated frames.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_structure(
     commands: &mut Commands,
     install: &Installation,
     lib: &mut ShapeLibrary,
@@ -205,9 +222,11 @@ pub fn spawn_structures(
     images: &mut Assets<Image>,
     layouts: &mut Assets<TextureAtlasLayout>,
     world: &World,
+    i: usize,
 ) {
-    for (i, st) in world.structures.iter().enumerate() {
-        let Some(shape) = lib.get_or_load(install, palette, &st.kind, images, layouts) else { continue };
+    let st = &world.structures[i];
+    {
+        let Some(shape) = lib.get_or_load(install, palette, &st.kind, images, layouts) else { return };
         let ground = match world.island_theme_at(st.centre()) {
             Theme::Sun => "sun",
             Theme::Thunder => "thunder",
@@ -219,10 +238,10 @@ pub fn spawn_structures(
         let pos = cell_to_world(st.cell, &world.cfg.grid);
         if let Some(base) = plan.base {
             let b = spawn_frame(commands, shape, base, pos, z);
-            commands.entity(b).insert((StructureSprite(i), StructureBase));
+            commands.entity(b).insert((StructureSprite(i), StructureKey::of(st), StructureBase));
         }
         let e = spawn_frame(commands, shape, plan.sequence[0], pos, z + 0.001);
-        commands.entity(e).insert((StructureSprite(i), plan));
+        commands.entity(e).insert((StructureSprite(i), StructureKey::of(st), plan));
     }
 }
 

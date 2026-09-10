@@ -13,7 +13,7 @@ use crate::path::find_path_costed;
 use crate::pieces::PieceQueue;
 use crate::rules::{AirAttack, TypeRules, Walk};
 use crate::script::Scripts;
-use crate::structure::{Structure, Weapon};
+use crate::structure::{Aim, Structure, Weapon};
 use crate::unit::{Pos, Task, Unit};
 
 /// Condition of a bridge cell.
@@ -211,6 +211,8 @@ pub struct World {
     pub structures: Vec<Structure>,
     /// Incremented whenever `structures` changes.
     pub structure_version: u64,
+    /// The id the next structure taken in gets.
+    pub next_structure_id: u32,
     pub units: Vec<Unit>,
     /// Bridge cells that lost their support, with ticks left before they crumble.
     pub doomed: BTreeMap<Cell, u32>,
@@ -263,6 +265,7 @@ impl World {
             bridge_version: 0,
             structures: Vec::new(),
             structure_version: 0,
+            next_structure_id: 1,
             units: Vec::new(),
             doomed: BTreeMap::new(),
             queue,
@@ -911,6 +914,9 @@ impl World {
             s.build_ticks = build_ticks;
             s.hp = 1.max(s.max_hp.min(1));
         }
+        let mut s = s;
+        s.id = self.next_structure_id;
+        self.next_structure_id += 1;
         self.structures.push(s);
         self.structure_version += 1;
         if claims {
@@ -1634,7 +1640,8 @@ impl World {
                 if !w.ground || t.owner == s.owner || t.max_hp == 0 || !in_range(t.centre()) {
                     continue;
                 }
-                let key = scripts.target_priority(t.threat as i64, s.distance_to(t.centre()) as i64, false).unwrap_or(0);
+                let current = s.target == Some(Aim::Structure(t.id));
+                let key = scripts.target_priority(t.threat as i64, s.distance_to(t.centre()) as i64, false, current).unwrap_or(0);
                 if best.as_ref().is_none_or(|b| b.0 < key) {
                     best = Some((key, Target::Structure(j)));
                 }
@@ -1645,7 +1652,8 @@ impl World {
                     if state == BridgeState::Hard || self.bridge_owners.get(&c).is_none_or(|&o| o == s.owner) || !in_range(c) {
                         continue;
                     }
-                    let key = scripts.target_priority(0, s.distance_to(c) as i64, false).unwrap_or(0);
+                    let current = s.target == Some(Aim::Bridge(c));
+                    let key = scripts.target_priority(0, s.distance_to(c) as i64, false, current).unwrap_or(0);
                     if best.as_ref().is_none_or(|b| b.0 < key) {
                         best = Some((key, Target::Bridge(c)));
                     }
@@ -1660,7 +1668,8 @@ impl World {
                 if !reachable {
                     continue;
                 }
-                let key = scripts.target_priority(u.threat as i64, s.distance_to(u.cell()) as i64, true).unwrap_or(0);
+                let current = s.target == Some(Aim::Unit(j));
+                let key = scripts.target_priority(u.threat as i64, s.distance_to(u.cell()) as i64, true, current).unwrap_or(0);
                 if best.as_ref().is_none_or(|b| b.0 < key) {
                     best = Some((key, Target::Unit(j)));
                 }
@@ -1673,6 +1682,11 @@ impl World {
         for (i, target) in shots.into_iter().rev() {
             let Some(w) = self.structures.get(i).and_then(|s| s.weapon) else { continue };
             self.structures[i].cooldown = w.delay;
+            self.structures[i].target = Some(match target {
+                Target::Structure(j) => Aim::Structure(self.structures.get(j).map(|t| t.id).unwrap_or(0)),
+                Target::Unit(j) => Aim::Unit(j),
+                Target::Bridge(c) => Aim::Bridge(c),
+            });
             self.last_shots.push((i, target));
             let (kind, from, owner) = (self.structures[i].kind.clone(), self.structures[i].centre(), self.structures[i].owner);
             let hit = match target {

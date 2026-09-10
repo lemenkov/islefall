@@ -73,9 +73,11 @@ fn knowledge_grant(known, all) {
 }
 
 // Targeting priority for a shooter: higher is preferred. Structures use
-// their `threat`, units theirs; ties go to the nearest target.
-fn target_priority(threat, distance, is_unit) {
-    threat * 1000 - distance
+// their `threat`, units theirs; ties go to the nearest target. A shooter
+// stays on the target it is already firing at (`is_current`) while that
+// remains in range, rather than swinging to every newcomer.
+fn target_priority(threat, distance, is_unit, is_current) {
+    threat * 1000 - distance + if is_current { 1000000 } else { 0 }
 }
 
 // Whether a Workshop of `workshop_theme` may put a type of `type_theme` and

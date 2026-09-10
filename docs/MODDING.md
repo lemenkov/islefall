@@ -47,7 +47,7 @@ Available hooks:
 - `damage_per_shot(hp_per_sec, delay_seconds)` -> int
 - `salvage_refund(cost, hp, max_hp, refund_percent)` -> int
 - `knowledge_grant(known_bits, all_bits)` -> int or `()`
-- `target_priority(threat, distance, is_unit)` -> int, higher wins
+- `target_priority(threat, distance, is_unit, is_current)` -> int, higher wins; `is_current` marks the target the shooter fired at last
 - `workshop_can_produce(workshop_theme, type_theme, type_level)` -> bool
 - `air_attack(class, use_air_damage, air_range, air_damage, range, hp_per_sec)` -> `#{ air_range, air_damage, ground }` or `()`
 - `air_target_priority(distance, is_unit, is_transport, hunts_transports)` -> int or `()` to refuse

@@ -152,8 +152,8 @@ impl Scripts {
         v.into_string().map_err(|t| ScriptError::Call { hook: "bridge_hit", message: format!("expected a string, got {t}") })
     }
 
-    pub fn target_priority(&self, threat: i64, distance: i64, is_unit: bool) -> Result<i64, ScriptError> {
-        let v = self.call("target_priority", (threat, distance, is_unit))?;
+    pub fn target_priority(&self, threat: i64, distance: i64, is_unit: bool, is_current: bool) -> Result<i64, ScriptError> {
+        let v = self.call("target_priority", (threat, distance, is_unit, is_current))?;
         v.as_int().map_err(|t| ScriptError::Call { hook: "target_priority", message: format!("expected int, got {t}") })
     }
 }
@@ -183,7 +183,8 @@ mod tests {
         assert_eq!(s.salvage_refund(400, 50, 100, 25).unwrap(), 50);
         assert_eq!(s.knowledge_grant(&[0, 2], &[0, 2, 3, 4]).unwrap(), Some(3));
         assert_eq!(s.knowledge_grant(&[0], &[0]).unwrap(), None);
-        assert!(s.target_priority(25, 3, true).unwrap() > s.target_priority(5, 1, false).unwrap());
+        assert!(s.target_priority(25, 3, true, false).unwrap() > s.target_priority(5, 1, false, false).unwrap());
+        assert!(s.target_priority(5, 9, false, true).unwrap() > s.target_priority(25, 1, true, false).unwrap(), "a shooter stays on its target");
         assert!(s.workshop_can_produce(Theme::Sun, Theme::Wind, 1).unwrap(), "a Sun Workshop builds a Wind Generator");
         assert!(!s.workshop_can_produce(Theme::Sun, Theme::Wind, 2).unwrap());
         assert!(s.workshop_can_produce(Theme::Wind, Theme::Wind, 3).unwrap());
