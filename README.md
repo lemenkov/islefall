@@ -67,7 +67,10 @@ the way; the islands are close enough for the cannons to reach their
 neighbours, so the fight is on from the start. Click the minimap to jump
 between them. Two of your units walk under the simulation's control. Structures shoot enemies in range; damaged things
 show a health bar, destroyed ones explode and crack nearby bridges.
-Left-click on a unit selects it, left-click elsewhere sends the selected unit
+The controls follow the original: take something in hand, left-click
+to put it down, right-click to turn a bridge piece, `Escape` to put it
+back; the hand is empty again once it is placed. With an empty hand,
+left-click on a unit selects it, left-click elsewhere sends the selected unit
 there along a path around obstacles, left-click on a Storm Geyser sets it
 harvesting crystals to the Temple, left-click on a stunned enemy priest sends
 the selected golem to capture him, left-click on an Obelisk sends it to
@@ -79,12 +82,14 @@ tool) and a minimap (click to look there). The corner text and the window title 
 reserve, Knowledge, the tool in hand and the last thing the game had to
 say; sacrifice the enemy High Priest to win; drops cost their type's price and stand as translucent shells
 until a stream of Storm Power from your Temple, Workshop or Outpost has
-built them, which needs connected ground. Right-click acts with the current tool:
-`Q`, `W`, `A`, `S` pick one of the four bridge pieces on offer (`R` rotates
-it), `1` to `6` drop a sun cannon, archer, battery, factory, tree or wind
-generator (the last needs Knowledge from a sacrifice) and `7` an Outpost
-for claiming the neutral island, `U`
-places a golem and `I` a balloon, which flies anywhere. `Delete` destroys the bridge cell under the cursor, `C`
+built them, which needs connected ground. To take something in hand:
+`Q`, `W`, `A`, `S` (or a click on the slot) pick one of the four bridge
+pieces on offer (`R` or the right button rotates it), `1` to `6` a sun
+cannon, archer, battery, factory, tree or wind generator (the last needs
+Knowledge from a sacrifice) and `7` an Outpost for claiming the neutral
+island, `U` a golem and `I` a balloon, which flies anywhere; then
+left-click where it goes. A piece must touch the edge of your own island
+or the open end of your bridge. `Delete` destroys the bridge cell under the cursor, `C`
 cracks it, `H` hardens it, `V` salvages your structure under the cursor, `G` upgrades the Workshop under it; unsupported bridges crack and crumble, taking
 whatever stands on them. Drops follow the rules in `docs/RULES.md`, including Energy: the rings
 around the Temple and Generators show where units can be placed. Arrow

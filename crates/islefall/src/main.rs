@@ -70,6 +70,8 @@ enum Mode {
 /// What a right-click does.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Tool {
+    /// Nothing in hand: clicks select and order units.
+    Empty,
     /// A bridge piece taken from queue slot `.0`, turned `.1` quarter turns.
     Bridge(usize, u8),
     Drop(String),
@@ -761,7 +763,6 @@ fn main() {
     let tick_hz = cfg.sim.tick_hz;
     let frame_seconds = 1.0 / cfg.controls.animation_fps.max(0.1);
     let screenshot_at = std::env::var("ISLEFALL_SCREENSHOT_AT").ok().and_then(|s| s.parse().ok()).unwrap_or(cfg.controls.screenshot_seconds);
-    let unit_tool = cfg.controls.unit_tools[0].clone();
     let volume = std::env::var("ISLEFALL_VOLUME").ok().and_then(|s| s.parse().ok()).unwrap_or(cfg.sounds.volume);
     let sky_first = cfg.sounds.ambient.sky_seconds[0];
     let background = cfg.sky.background;
@@ -812,7 +813,7 @@ fn main() {
     .init_resource::<Sim>()
     .init_resource::<Status>()
     .insert_resource(recording)
-    .insert_resource(Player { tool: Tool::Spawn(unit_tool), selected: 0, id: 0 })
+    .insert_resource(Player { tool: Tool::Empty, selected: 0, id: 0 })
     .insert_resource(Viewer {
         type_index: 0,
         animation: 0,
@@ -1046,6 +1047,7 @@ fn sidebar_update(
     mut texts: Query<&mut Text, With<PowerText>>,
     boxes: Query<Entity, With<PieceBox>>,
     slots: Query<Entity, With<PieceSlotButton>>,
+    mut slot_buttons: Query<(&PieceSlotButton, &mut BackgroundColor), Without<BuildButton>>,
     mut buttons: Query<(&BuildButton, &mut BackgroundColor)>,
     mut last_queue: Local<Vec<String>>,
 ) {
@@ -1095,8 +1097,16 @@ fn sidebar_update(
         let chosen = match &player.tool {
             Tool::Drop(stem) => !b.spawn && *stem == b.stem,
             Tool::Spawn(stem) => b.spawn && *stem == b.stem,
-            Tool::Bridge(..) => false,
+            Tool::Bridge(..) | Tool::Empty => false,
         };
+        let wanted = if chosen { Color::srgba(1.0, 0.9, 0.4, 0.35) } else { Color::srgba(0.0, 0.0, 0.0, 0.25) };
+        if bg.0 != wanted {
+            bg.0 = wanted;
+        }
+    }
+    // The piece in hand lights its slot up.
+    for (slot, mut bg) in &mut slot_buttons {
+        let chosen = matches!(&player.tool, Tool::Bridge(i, _) if *i == slot.0);
         let wanted = if chosen { Color::srgba(1.0, 0.9, 0.4, 0.35) } else { Color::srgba(0.0, 0.0, 0.0, 0.25) };
         if bg.0 != wanted {
             bg.0 = wanted;
@@ -1897,7 +1907,8 @@ fn title(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, mut windows: Q
 fn hud(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, status: Res<Status>, mut texts: Query<&mut Text, With<Hud>>) {
     let w = sim.world();
     let tool = match &player.tool {
-        Tool::Bridge(slot, _) => format!("bridge piece {} (slot {})", w.queue.slots.get(*slot).map(|p| p.name.as_str()).unwrap_or("?"), slot + 1),
+        Tool::Empty => "nothing in hand".to_string(),
+        Tool::Bridge(slot, _) => format!("bridge piece {} (slot {}); left-click drops it, right-click turns it", w.queue.slots.get(*slot).map(|p| p.name.as_str()).unwrap_or("?"), slot + 1),
         Tool::Drop(stem) | Tool::Spawn(stem) => stem.clone(),
     };
     let me = player.id as usize % data.cfg.sim.max_players;
@@ -2046,6 +2057,29 @@ fn mouse_actions(
     }
     let Some(cell) = cursor_cell(&windows, &cameras, data.grid()) else { return };
     let w = sim.world_mut();
+    // Something in hand: the left button drops it, the right turns a piece.
+    if !matches!(player.tool, Tool::Empty) {
+        if right {
+            if let Tool::Bridge(slot, rotations) = &player.tool {
+                player.tool = Tool::Bridge(*slot, (rotations + 1) % 4);
+            }
+            return;
+        }
+        let cmd = match player.tool.clone() {
+            Tool::Bridge(slot, rotations) => Command::PlacePiece { slot, rotations, at: cell },
+            Tool::Drop(stem) => Command::Drop { kind: stem, at: cell },
+            Tool::Spawn(stem) => Command::PlaceUnit { kind: stem, at: cell },
+            Tool::Empty => return,
+        };
+        if let Some(applied) = rec.issue(w, &data.scripts, &mut status, cmd) {
+            if let Some(i) = applied.unit {
+                player.selected = i;
+            }
+            // Placed: the hand is empty again, as the original's was.
+            player.tool = Tool::Empty;
+        }
+        return;
+    }
     if left {
         let sel = player.selected;
         // Selecting is local; everything else is a command.
@@ -2067,15 +2101,6 @@ fn mouse_actions(
             Command::Move { unit: sel, to: cell }
         };
         rec.issue(w, &data.scripts, &mut status, cmd);
-        return;
-    }
-    let cmd = match player.tool.clone() {
-        Tool::Bridge(slot, rotations) => Command::PlacePiece { slot, rotations, at: cell },
-        Tool::Drop(stem) => Command::Drop { kind: stem, at: cell },
-        Tool::Spawn(stem) => Command::PlaceUnit { kind: stem, at: cell },
-    };
-    if let Some(Applied { unit: Some(i), .. }) = rec.issue(w, &data.scripts, &mut status, cmd) {
-        player.selected = i;
     }
 }
 
@@ -2105,6 +2130,13 @@ fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<Ga
     if keys.just_pressed(KeyCode::KeyR) {
         if let Tool::Bridge(slot, rotations) = &player.tool {
             player.tool = Tool::Bridge(*slot, (rotations + 1) % 4);
+        }
+        return;
+    }
+    if keys.just_pressed(KeyCode::Escape) {
+        if !matches!(player.tool, Tool::Empty) {
+            player.tool = Tool::Empty;
+            status.say("put back".to_string());
         }
         return;
     }
@@ -2185,6 +2217,7 @@ fn ghost(
     let Some(cell) = cursor_cell(&windows, &cameras, g) else { return };
     let w = sim.world();
     let (cells, ok) = match &player.tool {
+        Tool::Empty => return,
         Tool::Bridge(slot, rotations) => {
             let Some(mut piece) = w.queue.slots.get(*slot).cloned() else { return };
             for _ in 0..(*rotations % 4) {
