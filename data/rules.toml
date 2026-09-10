@@ -9,7 +9,7 @@
 # Simulation ticks per second. Rendering samples; the simulation never sees wall-clock time.
 tick_hz = 30
 # Players the world keeps reserves and Knowledge for.
-max_players = 4
+max_players = 8
 
 [grid]
 # Cell size in source pixels (NetStorm's map is a plain 16 x 11 grid).
@@ -47,7 +47,7 @@ flyer = ["flyer"]
 balloon = ["balloon"]
 priest = ["priest"]
 geyser = ["geyser"]
-temple = ["residence"]
+temple = ["residence", "vortex"]
 altar = ["dais"]
 workshop = ["factory"]
 # Obelisks hold a Spell; `bomb` types are the Spells themselves.
@@ -451,3 +451,45 @@ raincannon = "raincannonmissile"
 # built with more of Bevy's audio decoders.
 [sounds.overrides]
 # "explosion.wav" = "mods/boom.wav"
+
+# The original's campaign scenarios (`ISLEFALL_MAP=<name>` for a `.fort`
+# in netstorm.tarc, see docs/FORT.md). A scenario names its things by
+# type codes that no shipped file explains; these were read off the
+# missions' own texts (six Disc Throwers here, a Sun Barricade of four
+# posts there) and are open to correction. An empty name skips a code.
+[fort]
+codes = { "47" = "sunarcher", "48" = "sunaviary", "4b" = "windbattery", "4c" = "rainbattery", "4d" = "thunderbattery", "4e" = "sunbattery", "4f" = "thunderblocker", "55" = "sunfactory", "56" = "windfactory", "57" = "rainfactory", "58" = "thunderfactory", "5e" = "", "6f" = "sunblocker", "80" = "suncannon", "81" = "rainblocker", "83" = "thundercannon", "85" = "outpost", "87" = "thunderfence", "88" = "sunfence", "89" = "windarcher", "8c" = "windballoon", "8d" = "windaviary", "8e" = "windblocker", "8f" = "treetwo", "92" = "rainfence", "93" = "rainaviary", "94" = "thunderarcher", "9c" = "raincannon" }
+units = { "59" = "priest", "70" = "sunwalker", "8b" = "windwalker" }
+# A ground cell's byte picks the island's look.
+ground_themes = ["sun", "thunder", "wind", "rain", "sun"]
+# Altar codes 7c and 7d went with the Rain and Thunder players; 7b with Sun and Wind.
+altar_themes = { "7b" = "", "7c" = "rain", "7d" = "thunder" }
+# The Temple each faction gets; the data has no Sun vortex, so the Sun's is the Residence.
+temples = { sun = "residence", wind = "windvortex", rain = "rainvortex", thunder = "thundervortex" }
+altar = "dais"
+priest = "priest"
+geyser = "geyser"
+# The tutorials say the player's Temple is a Wind Temple.
+human_theme = "wind"
+# Fortresses stand on a ring this far outside the scenario's islands.
+ring_margin = 28
+start_power = 2000
+ai_power = 5000
+bridge_owner = 0
+
+# Maps made up on the spot: `ISLEFALL_MAP=random` (or `random:<seed>`),
+# `ISLEFALL_PLAYERS=n`. Fortresses sit on a ring round the middle, the
+# first at the top, with geyser islands and bare islets between.
+[generate]
+players = 2
+world = [256, 256]
+fortress = [32, 48]
+fill = 0.7
+ring_radius = 60
+geysers_per_player = 4
+geyser_spacing = 6
+geyser_theme = "sun"
+islets = 3
+islet = [12, 9]
+themes = ["sun", "wind", "rain", "thunder"]
+start_power = 2000

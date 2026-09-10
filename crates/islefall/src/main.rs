@@ -22,7 +22,11 @@
 //! - `NETSTORM_DIR`: directory containing the game's `d/` and `netstorm.tarc`.
 //! - `ISLEFALL_DATA`: the data directory (default `data` next to the
 //!   working directory, or the repository's).
-//! - `ISLEFALL_MAP`: map name inside `maps/` (default `demo`).
+//! - `ISLEFALL_MAP`: map name inside `maps/` (default `demo`); else a
+//!   campaign scenario of that name from `netstorm.tarc` (`bridgethegap`,
+//!   `capturethepriest`, ...); `random` or `random:<seed>` makes one up
+//!   for `ISLEFALL_PLAYERS` players. `ISLEFALL_MAP_EXPORT=file.toml`
+//!   writes whatever was loaded as a map file of our own.
 //! - `ISLEFALL_PALETTE`: palette file stem from `d/`, overriding the rules.
 //! - `ISLEFALL_SCREENSHOT=file.png`: save a screenshot after start-up,
 //!   after `ISLEFALL_SCREENSHOT_AT` seconds (default from the rules).
@@ -737,10 +741,15 @@ fn main() {
     let data = data_dir();
     let cfg = Config::load(data.join("rules.toml")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("rules.toml").display())));
     let scripts = Scripts::load(data.join("scripts/rules.rhai")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("scripts/rules.rhai").display())));
-    let map_name = std::env::var("ISLEFALL_MAP").unwrap_or_else(|_| "demo".into());
-    let map_path = data.join("maps").join(format!("{map_name}.toml"));
-    let map = MapDef::load(&map_path).unwrap_or_else(|e| fail(format!("{}: {e}", map_path.display())));
     let install = Installation::load(&dir).unwrap_or_else(|e| fail(format!("failed to load NetStorm data from {}: {e}", dir.display())));
+    let map_name = std::env::var("ISLEFALL_MAP").unwrap_or_else(|_| "demo".into());
+    let map = load_map(&data, &cfg, &scripts, &install).unwrap_or_else(|e| fail(e));
+    if let Ok(out) = std::env::var("ISLEFALL_MAP_EXPORT") {
+        match std::fs::write(&out, map.to_toml()) {
+            Ok(()) => info!("wrote the map as {out}"),
+            Err(e) => warn!("cannot write {out}: {e}"),
+        }
+    }
     let palette = std::env::var("ISLEFALL_PALETTE").unwrap_or_else(|_| cfg.controls.palette.clone());
     if install.palette(&palette).is_none() {
         fail(format!("palette {palette} not found in {}/d; available: {:?}", dir.display(), install.palettes.keys().collect::<Vec<_>>()));
@@ -761,7 +770,8 @@ fn main() {
         let name = std::env::var("ISLEFALL_NAME").unwrap_or_else(|_| whoami());
         let mut bytes = std::fs::read(data.join("rules.toml")).unwrap_or_default();
         bytes.extend(std::fs::read(data.join("scripts/rules.rhai")).unwrap_or_default());
-        bytes.extend(std::fs::read(&map_path).unwrap_or_default());
+        // The map as loaded, so a scenario or a seeded map agrees between clients too.
+        bytes.extend(format!("{map:?}").into_bytes());
         let hello = islefall_net::ClientMsg::Hello { protocol: islefall_net::PROTOCOL, name: name.clone(), map: map_name.clone(), data_hash: islefall_net::fnv64(&bytes) };
         let net = Net::connect(&addr, hello).unwrap_or_else(|e| fail(format!("cannot join {addr}: {e}")));
         net.send(islefall_net::ClientMsg::Ready(true));
@@ -1317,6 +1327,42 @@ fn zoomed_projection(zoom: f32) -> Projection {
     Projection::Orthographic(OrthographicProjection { scale: 1.0 / zoom.max(0.1), ..OrthographicProjection::default_2d() })
 }
 
+/// The map named by `ISLEFALL_MAP`: a file in `maps/`, a made-up one, or
+/// a campaign scenario from the archive.
+fn load_map(data: &Path, cfg: &Config, scripts: &Scripts, install: &Installation) -> Result<MapDef, String> {
+    let name = std::env::var("ISLEFALL_MAP").unwrap_or_else(|_| "demo".into());
+    let path = data.join("maps").join(format!("{name}.toml"));
+    if path.exists() {
+        return MapDef::load(&path).map_err(|e| format!("{}: {e}", path.display()));
+    }
+    let foot = |kind: &str| -> (i32, i32) {
+        install.type_def(kind).and_then(|d| TypeRules::from_type(d, cfg, scripts).ok()).map(|r| (r.foot_x, r.foot_y)).unwrap_or((1, 1))
+    };
+    if let Some(rest) = name.strip_prefix("random") {
+        let seed = rest.strip_prefix(':').and_then(|s| s.parse().ok()).unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(1));
+        let players = std::env::var("ISLEFALL_PLAYERS").ok().and_then(|p| p.parse().ok()).unwrap_or(cfg.generate.players);
+        info!("making a map up: seed {seed}, {players} players (ISLEFALL_MAP=random:{seed} brings it back)");
+        return Ok(islefall_sim::generate::skirmish(cfg, seed, players, &foot));
+    }
+    let stem = name.to_ascii_lowercase();
+    let Some(index) = install.archive.find(&format!("{stem}.fort")) else {
+        return Err(format!("{}: no such map, and no {stem}.fort in the archive", path.display()));
+    };
+    let fortfile = islefall_data::fort::Fort::parse(&install.archive.read(index)).map_err(|e| format!("{stem}.fort: {e}"))?;
+    let mission = islefall_data::mission::Mission::for_fort(&install.archive, &stem);
+    let (map, report) = islefall_sim::campaign::fort_to_map(&fortfile, mission.as_ref(), cfg, &stem, &foot);
+    for note in &report.notes {
+        info!("{stem}.fort: {note}");
+    }
+    if !report.unknown_codes.is_empty() {
+        warn!("{stem}.fort: skipped things with codes the rules do not name: {}", report.unknown_codes.iter().map(|(c, n)| format!("{c:02x} x{n}")).collect::<Vec<_>>().join(", "));
+    }
+    if fortfile.skipped_chunks > 0 {
+        warn!("{stem}.fort: {} record chunks could not be read", fortfile.skipped_chunks);
+    }
+    Ok(map)
+}
+
 /// Build the scene from the map file. The layout is free and needs no
 /// Energy; costs and Energy apply once it stands.
 fn setup_map(
@@ -1337,9 +1383,13 @@ fn setup_map(
     }
     w.powers = vec![i32::MAX / 2; data.cfg.sim.max_players];
     w.energy_enforced = false;
+    w.rims_enforced = false;
 
     for isl in &data.map.islands {
-        let mut island = IslandMap::rect(map::cell(isl.origin), isl.size[0], isl.size[1]);
+        let mut island = if isl.cells.is_empty() { IslandMap::rect(map::cell(isl.origin), isl.size[0], isl.size[1]) } else { IslandMap::new() };
+        for c in &isl.cells {
+            island.insert(map::cell(*c));
+        }
         for c in &isl.remove {
             island.remove(map::cell(*c));
         }
@@ -1353,14 +1403,43 @@ fn setup_map(
         w.set_island_theme(last, theme);
     }
     for b in &data.map.bridges {
-        for c in &b.cells {
-            if !w.place_map_bridge(b.owner, map::cell(*c)) {
-                warn!("map bridge cell {c:?} could not be placed");
+        // Cells that touch nothing yet may be reached by later ones: keep
+        // trying until a pass places nothing more.
+        let mut left: Vec<Cell> = b.cells.iter().map(|c| map::cell(*c)).collect();
+        loop {
+            let before = left.len();
+            left.retain(|&c| !w.place_map_bridge(b.owner, c));
+            if left.is_empty() || left.len() == before {
+                break;
             }
+        }
+        if !left.is_empty() {
+            warn!("map: {} bridge cells of owner {} touch no island or bridge and were left out (first at {:?})", left.len(), b.owner, left[0]);
         }
     }
     for st in &data.map.structures {
-        match w.drop_structure_for(st.owner, &st.kind, &data.rules(&st.kind), map::cell(st.at)) {
+        // A map may stack things the way the original did (its Temple
+        // rose from the altar): nudge to the nearest free cell.
+        let rules = data.rules(&st.kind);
+        let wanted = map::cell(st.at);
+        let reach = rules.foot_x.max(rules.foot_y).max(4);
+        let mut spots: Vec<Cell> = (-reach..=reach).flat_map(|dy| (-reach..=reach).map(move |dx| wanted.offset(dx, dy))).collect();
+        spots.sort_by_key(|c| (c.x - wanted.x).abs() + (c.y - wanted.y).abs());
+        let mut placed = Err(String::new());
+        for at in spots {
+            match w.drop_structure_for(st.owner, &st.kind, &rules, at) {
+                Ok(i) => {
+                    if at != wanted {
+                        info!("map: {} moved from {:?} to {:?}", st.kind, wanted, at);
+                    }
+                    placed = Ok(i);
+                    break;
+                }
+                Err(e) if placed.is_err() && placed.as_ref().err().is_some_and(String::is_empty) => placed = Err(e.to_string()),
+                Err(_) => {}
+            }
+        }
+        match placed {
             Ok(i) => {
                 w.structures[i].variant = st.frame;
                 if w.structures[i].is_obelisk {
@@ -1373,16 +1452,29 @@ fn setup_map(
     }
     w.powers = vec![data.map.start_power; data.cfg.sim.max_players];
     w.energy_enforced = true;
+    w.rims_enforced = true;
     // The layout was placed, not built: nothing to hear.
     w.take_events();
     for u in &data.map.units {
-        match w.spawn_unit_for(u.owner, &u.kind, &data.rules(&u.kind), map::cell(u.at)) {
-            Some(i) => {
+        let rules = data.rules(&u.kind);
+        let wanted = map::cell(u.at);
+        let mut spots: Vec<Cell> = (-4..=4).flat_map(|dy| (-4..=4).map(move |dx| wanted.offset(dx, dy))).collect();
+        spots.sort_by_key(|c| (c.x - wanted.x).abs() + (c.y - wanted.y).abs());
+        match spots.iter().find_map(|&at| w.spawn_unit_for(u.owner, &u.kind, &rules, at).map(|i| (i, at))) {
+            Some((i, at)) => {
+                if at != wanted {
+                    info!("map: unit {} moved from {:?} to {:?}", u.kind, wanted, at);
+                }
                 if let Some(to) = u.move_to {
                     w.order_move(i, map::cell(to));
                 }
             }
             None => warn!("map: unit {} at {:?} could not be placed", u.kind, u.at),
+        }
+    }
+    for t in &data.map.player_tech {
+        if let Some(bit) = data.rules(t).tech_bit {
+            w.grant_tech(0, bit);
         }
     }
     let altar = w.structures.iter().find(|s| s.is_altar && s.owner == 0).map(|s| s.centre()).unwrap_or(data.map.camera_cell());
@@ -1397,6 +1489,15 @@ fn setup_map(
         }
         for &bit in &op.knowledge {
             w.grant_tech(op.owner, bit);
+        }
+        for t in &op.tech {
+            if let Some(bit) = data.rules(t).tech_bit {
+                w.grant_tech(op.owner, bit);
+            }
+        }
+        if let Some(p) = op.power {
+            let slot = op.owner as usize % data.cfg.sim.max_players;
+            w.powers[slot] = p;
         }
         sim.ais.push(ai);
     }

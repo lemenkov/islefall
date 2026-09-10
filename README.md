@@ -51,7 +51,11 @@ NETSTORM_DIR=~/games/NetStorm cargo run --release
 Rules, scripts and maps are loaded from `data/` (or `ISLEFALL_DATA`); see
 `docs/MODDING.md`. By default this shows the `demo` map (`ISLEFALL_MAP`
 picks another from `maps/`; `range` is a shooting range for turret
-animations), with all four
+animations; a name that is no file loads the original's campaign scenario
+of that name from the archive, `capturethepriest` say, see `docs/FORT.md`;
+`random` or `random:<seed>` makes a battlefield up for `ISLEFALL_PLAYERS`
+players, and `ISLEFALL_MAP_EXPORT=file.toml` writes whatever was loaded
+as a map file), with all four
 factions on it: your Sun home island with the altar, the Temple, a Sun
 Workshop (picking a building tool puts that unit into production there),
 a Disc Thrower, a Cannon and a Stone Tower, a bridge to a battery on its

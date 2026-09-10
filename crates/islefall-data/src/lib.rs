@@ -12,9 +12,11 @@
 
 pub mod bridge;
 pub mod col;
+pub mod fort;
 pub mod gif;
 pub mod install;
 pub mod isle;
+pub mod mission;
 pub mod shapes;
 pub mod sheet;
 pub mod shp;

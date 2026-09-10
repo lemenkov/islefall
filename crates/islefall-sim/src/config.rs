@@ -35,6 +35,152 @@ pub struct Config {
     pub projectiles: Projectiles,
     pub effects: Effects,
     pub sidebar: Sidebar,
+    /// Reading the original's campaign scenarios.
+    #[serde(default)]
+    pub fort: FortRules,
+    /// Making maps up.
+    #[serde(default)]
+    pub generate: Generate,
+}
+
+/// How a `.fort` scenario's type codes and seats are read (see
+/// `islefall_data::fort`).
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FortRules {
+    /// Structure type by two-digit hex code; an empty name skips the code.
+    #[serde(default)]
+    pub codes: BTreeMap<String, String>,
+    /// Unit type by code.
+    #[serde(default)]
+    pub units: BTreeMap<String, String>,
+    /// Island theme by a ground cell's byte.
+    #[serde(default)]
+    pub ground_themes: Vec<String>,
+    /// A player's theme by the code of its altar, where the code tells.
+    #[serde(default)]
+    pub altar_themes: BTreeMap<String, String>,
+    /// Temple type by theme.
+    #[serde(default)]
+    pub temples: BTreeMap<String, String>,
+    #[serde(default = "default_altar")]
+    pub altar: String,
+    #[serde(default = "default_priest")]
+    pub priest: String,
+    #[serde(default = "default_geyser")]
+    pub geyser: String,
+    /// The player's theme when nothing in the file says.
+    #[serde(default = "default_human_theme")]
+    pub human_theme: String,
+    /// Cells between the scenario's islands and the fortress ring.
+    #[serde(default = "default_ring_margin")]
+    pub ring_margin: i32,
+    #[serde(default = "default_start_power")]
+    pub start_power: i32,
+    #[serde(default = "default_start_power")]
+    pub ai_power: i32,
+    /// Who owns the bridges the file lays.
+    #[serde(default)]
+    pub bridge_owner: u8,
+}
+
+impl Default for FortRules {
+    fn default() -> Self {
+        toml::from_str("").expect("all fields default")
+    }
+}
+
+/// Making maps up: fortresses round a ring with geyser islands between.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Generate {
+    /// Players when nothing else says.
+    #[serde(default = "default_players")]
+    pub players: usize,
+    /// World size in cells.
+    #[serde(default = "default_world")]
+    pub world: [i32; 2],
+    /// A fortress island's canvas in cells.
+    #[serde(default = "default_fortress")]
+    pub fortress: [i32; 2],
+    /// Share of a canvas the island fills.
+    #[serde(default = "default_fill")]
+    pub fill: f32,
+    /// Cells from the world's middle to the fortress seats.
+    #[serde(default = "default_ring_radius")]
+    pub ring_radius: i32,
+    #[serde(default = "default_geysers_per_player")]
+    pub geysers_per_player: usize,
+    /// Cells kept clear round every island.
+    #[serde(default = "default_geyser_spacing")]
+    pub geyser_spacing: i32,
+    #[serde(default = "default_geyser_theme")]
+    pub geyser_theme: String,
+    /// Bare islands, and their canvas.
+    #[serde(default)]
+    pub islets: usize,
+    #[serde(default = "default_islet")]
+    pub islet: [i32; 2],
+    /// Player themes in seat order, cycling.
+    #[serde(default = "default_themes")]
+    pub themes: Vec<String>,
+    #[serde(default = "default_start_power")]
+    pub start_power: i32,
+}
+
+impl Default for Generate {
+    fn default() -> Self {
+        toml::from_str("").expect("all fields default")
+    }
+}
+
+fn default_altar() -> String {
+    "dais".into()
+}
+fn default_priest() -> String {
+    "priest".into()
+}
+fn default_geyser() -> String {
+    "geyser".into()
+}
+fn default_human_theme() -> String {
+    "wind".into()
+}
+fn default_ring_margin() -> i32 {
+    28
+}
+fn default_start_power() -> i32 {
+    2000
+}
+fn default_players() -> usize {
+    2
+}
+fn default_world() -> [i32; 2] {
+    [256, 256]
+}
+fn default_fortress() -> [i32; 2] {
+    [32, 48]
+}
+fn default_fill() -> f32 {
+    0.7
+}
+fn default_ring_radius() -> i32 {
+    60
+}
+fn default_geysers_per_player() -> usize {
+    4
+}
+fn default_geyser_spacing() -> i32 {
+    6
+}
+fn default_geyser_theme() -> String {
+    "sun".into()
+}
+fn default_islet() -> [i32; 2] {
+    [12, 9]
+}
+fn default_themes() -> Vec<String> {
+    ["sun", "wind", "rain", "thunder"].map(String::from).to_vec()
 }
 
 /// The panel down the left of the screen, built from the original's art.

@@ -6,8 +6,10 @@
 //! crate reads this state and draws it; it never drives it.
 
 pub mod ai;
+pub mod campaign;
 pub mod command;
 pub mod config;
+pub mod generate;
 pub mod grid;
 pub mod map;
 pub mod island;

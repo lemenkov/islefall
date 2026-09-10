@@ -87,6 +87,15 @@ changes elsewhere in the world, so a turret keeps its bearing when the
 opponent drops a building or something is destroyed. An Energy source's reach is shown as the original showed it: a ring
 of small stars drifting round it, not a drawn circle.
 
+## Maps
+
+Skirmish maps are made up (`[generate]`): players' fortresses sit on a
+ring round the middle of a 256-cell world, the first at the top, each an
+island of 3 x 3 pieces like the original's, shaped round its Temple,
+altar and High Priest; geyser islands and bare islets lie between. The
+original's campaign scenarios load from the archive and are read by
+`[fort]`; `docs/FORT.md` has the format and what of it is known.
+
 ## Bridges
 
 From the manual and the tutorial texts:

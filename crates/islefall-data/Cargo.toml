@@ -23,6 +23,10 @@ required-features = ["png"]
 name = "tarcdump"
 path = "src/bin/tarcdump.rs"
 
+[[bin]]
+name = "fortdump"
+path = "src/bin/fortdump.rs"
+
 [features]
 default = ["png"]
 png = ["dep:png"]

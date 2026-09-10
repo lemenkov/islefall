@@ -243,6 +243,14 @@ pub struct World {
     pub pending_knowledge: Vec<u8>,
     /// Whether the player's drops need Energy; off while a map is laid out.
     pub energy_enforced: bool,
+    /// Whether island rims refuse structures; off while a map is laid
+    /// out, since the original's geyser islands are all rim.
+    #[serde(default = "yes")]
+    pub rims_enforced: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 impl World {
@@ -281,6 +289,7 @@ impl World {
             knowledge: 0,
             pending_knowledge: Vec::new(),
             energy_enforced: true,
+            rims_enforced: true,
         }
     }
 
@@ -759,7 +768,7 @@ impl World {
             if self.structure_at(c).is_some() {
                 return Err(DropError::Occupied(c));
             }
-            if !rules.may_drop_on_rim && self.is_rim(c) {
+            if !rules.may_drop_on_rim && self.rims_enforced && self.is_rim(c) {
                 return Err(DropError::OnRim(c));
             }
             if self.units.iter().any(|u| u.alive && u.cell() == c) {

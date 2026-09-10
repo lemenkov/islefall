@@ -4,16 +4,19 @@
 
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::grid::Cell;
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct MapDef {
     pub name: String,
     pub start_power: i32,
     pub camera: [i32; 2],
+    /// Type stems whose Knowledge the player starts with.
+    #[serde(default)]
+    pub player_tech: Vec<String>,
     #[serde(default)]
     pub islands: Vec<IslandDef>,
     #[serde(default)]
@@ -26,7 +29,7 @@ pub struct MapDef {
     pub opponents: Vec<OpponentDef>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IslandDef {
     /// Omitted for a neutral island.
@@ -37,16 +40,20 @@ pub struct IslandDef {
     pub size: [i32; 2],
     #[serde(default)]
     pub remove: Vec<[i32; 2]>,
+    /// The island's cells outright, when it is no rectangle; `origin`,
+    /// `size` and `remove` are ignored then.
+    #[serde(default)]
+    pub cells: Vec<[i32; 2]>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct BridgeDef {
     pub owner: u8,
     pub cells: Vec<[i32; 2]>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlacementDef {
     pub owner: u8,
@@ -60,7 +67,7 @@ pub struct PlacementDef {
     pub frame: Option<u32>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct UnitDef {
     pub owner: u8,
@@ -69,7 +76,7 @@ pub struct UnitDef {
     pub move_to: Option<[i32; 2]>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpponentDef {
     pub owner: u8,
@@ -82,6 +89,12 @@ pub struct OpponentDef {
     /// Knowledge bits this opponent starts with (its faction's weapons).
     #[serde(default)]
     pub knowledge: Vec<u8>,
+    /// Type stems whose Knowledge it starts with, by name.
+    #[serde(default)]
+    pub tech: Vec<String>,
+    /// Storm Power it starts with instead of the map's.
+    #[serde(default)]
+    pub power: Option<i32>,
 }
 
 #[derive(Debug)]
@@ -110,6 +123,11 @@ impl MapDef {
         MapDef::parse(&std::fs::read_to_string(path).map_err(MapError::Io)?)
     }
 
+    /// The map as a TOML file that `load` reads back.
+    pub fn to_toml(&self) -> String {
+        toml::to_string_pretty(self).unwrap_or_default()
+    }
+
     pub fn camera_cell(&self) -> Cell {
         Cell::new(self.camera[0], self.camera[1])
     }
@@ -131,5 +149,14 @@ mod tests {
         assert_eq!(m.units.len(), 8);
         assert_eq!(m.opponents.len(), 3, "Wind, Rain and Thunder are computer players");
         assert_eq!(m.camera_cell(), Cell::new(11, 5));
+    }
+
+    #[test]
+    fn maps_survive_a_round_trip_through_toml() {
+        let m = MapDef::parse(include_str!("../../../data/maps/demo.toml")).unwrap();
+        let again = MapDef::parse(&m.to_toml()).unwrap();
+        assert_eq!(again, m);
+        let odd = MapDef { name: "odd".into(), islands: vec![IslandDef { owner: Some(1), theme: "rain".into(), cells: vec![[3, 4], [4, 4]], ..IslandDef::default() }], ..MapDef::default() };
+        assert_eq!(MapDef::parse(&odd.to_toml()).unwrap(), odd);
     }
 }

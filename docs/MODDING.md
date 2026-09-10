@@ -160,3 +160,13 @@ Facts about NetStorm's file formats (the sprite container order, the RLE
 opcodes, the palette file) live in `crates/islefall-data`, because they
 describe the files rather than the game. Rendering details such as draw
 order and overlay colours live in the Bevy crate.
+
+## Campaign scenarios and made-up maps
+
+`ISLEFALL_MAP=<scenario>` reads a `.fort` from the installation's archive
+(`fortdump list` names them); `[fort]` in `rules.toml` maps its type codes
+to type names, its altar codes to themes and its themes to Temple types,
+and says how far out the fortresses are seated. `ISLEFALL_MAP=random:<seed>`
+builds a map from `[generate]`. `ISLEFALL_MAP_EXPORT=file.toml` writes the
+loaded map as TOML; an island may then be given as `cells = [[x, y], ...]`
+instead of a rectangle, and an opponent `tech = [...]` and `power`.
