@@ -2563,16 +2563,16 @@ fn camera_keys(
 ) {
     let Ok((mut tf, mut proj)) = cameras.single_mut() else { return };
     let mut d = Vec2::ZERO;
-    if keys.any_pressed([KeyCode::ArrowLeft, KeyCode::KeyA]) {
+    if keys.any_pressed([KeyCode::ArrowLeft]) {
         d.x -= 1.0;
     }
-    if keys.any_pressed([KeyCode::ArrowRight, KeyCode::KeyD]) {
+    if keys.any_pressed([KeyCode::ArrowRight]) {
         d.x += 1.0;
     }
-    if keys.any_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) {
+    if keys.any_pressed([KeyCode::ArrowUp]) {
         d.y += 1.0;
     }
-    if keys.any_pressed([KeyCode::ArrowDown, KeyCode::KeyS]) {
+    if keys.any_pressed([KeyCode::ArrowDown]) {
         d.y -= 1.0;
     }
     if d != Vec2::ZERO {

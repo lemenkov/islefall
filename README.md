@@ -93,7 +93,7 @@ or the open end of your bridge. `Delete` destroys the bridge cell under the curs
 cracks it, `H` hardens it, `V` salvages your structure under the cursor, `G` upgrades the Workshop under it; unsupported bridges crack and crumble, taking
 whatever stands on them. Drops follow the rules in `docs/RULES.md`, including Energy: the rings
 around the Temple and Generators show where units can be placed. Arrow
-keys or WASD pan the camera and `-` / `=` zoom.
+keys pan the camera (the letter keys are for the piece slots) and `-` / `=` zoom.
 `ISLEFALL_MODE=viewer` instead
 animates one object type at a time: `[` and `]` step through types, `,` and
 `.` through its animations. In both modes `Space` pauses and `P` saves a
