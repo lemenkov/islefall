@@ -25,6 +25,11 @@ subcell = 256
 # footprint is impassable unless its type carries a `walk_free` flag. With
 # this off, only `walk_blocked` types block and `walk_avoid` ones cost.
 structures_block = true
+# A unit standing still blocks its cell: a walker that runs into one waits
+# `wait_seconds`, then finds a way round. Units on the move pass each
+# other, so two walkers meeting on a one-cell bridge never jam.
+units_block = true
+wait_seconds = 1.0
 
 # Which type flags mean what. Flag names are matched case-insensitively.
 [flags]

@@ -389,6 +389,49 @@ impl World {
         self.walk_cost(cell).is_some()
     }
 
+    /// A ground unit standing still on `cell`, other than `except`.
+    pub fn standing_on(&self, cell: Cell, except: Option<usize>) -> Option<usize> {
+        if !self.cfg.walking.units_block {
+            return None;
+        }
+        self.units.iter().position(|u| u.alive && !u.is_air && u.carried_by.is_none() && !u.is_moving() && u.cell() == cell).filter(|&i| Some(i) != except)
+    }
+
+    /// Path cost with standing units in the way, for going round them.
+    fn walk_cost_round(&self, cell: Cell, except: usize) -> Option<u32> {
+        if self.standing_on(cell, Some(except)).is_some() {
+            return None;
+        }
+        self.walk_cost(cell)
+    }
+
+    /// Every unit takes its step, unless a standing unit holds the cell it
+    /// would enter: then it waits, and after `wait_seconds` looks for a way
+    /// round. Units on the move pass through each other.
+    fn walk(&mut self) {
+        let wait = self.cfg.ticks(self.cfg.walking.wait_seconds);
+        for i in 0..self.units.len() {
+            let Some(next) = self.units[i].peek() else { continue };
+            let u = &self.units[i];
+            let (from, into) = (u.cell(), next.cell(u.subcell));
+            if u.is_air || into == from || self.standing_on(into, Some(i)).is_none() {
+                self.units[i].waited = 0;
+                self.units[i].step();
+                continue;
+            }
+            self.units[i].waited += 1;
+            if self.units[i].waited < wait {
+                continue;
+            }
+            self.units[i].waited = 0;
+            let sub = self.subcell();
+            let Some(goal) = self.units[i].path.back().map(|p| p.cell(sub)) else { continue };
+            if let Some(path) = find_path_costed(from, goal, |c| self.walk_cost_round(c, i)) {
+                self.units[i].path = path.into_iter().map(|c| Pos::cell_centre(c, sub)).collect();
+            }
+        }
+    }
+
     /// Whether `unit` may occupy `cell`: flyers go anywhere, walkers need ground.
     pub fn can_stand(&self, unit: usize, cell: Cell) -> bool {
         self.units.get(unit).is_some_and(|u| u.is_air) || self.is_walkable(cell)
@@ -867,7 +910,7 @@ impl World {
     }
 
     pub fn spawn_unit_for(&mut self, owner: u8, kind: &str, rules: &TypeRules, cell: Cell) -> Option<usize> {
-        if !rules.is_air && !self.is_walkable(cell) {
+        if !rules.is_air && (!self.is_walkable(cell) || self.standing_on(cell, None).is_some()) {
             return None;
         }
         let mut u = Unit::new(kind, cell, speed_per_tick(&self.cfg, rules.speed), self.subcell());
@@ -914,6 +957,9 @@ impl World {
     pub fn place_unit_for(&mut self, owner: u8, kind: &str, rules: &TypeRules, cell: Cell) -> Result<usize, DropError> {
         if !rules.is_air && !self.is_walkable(cell) {
             return Err(DropError::NotGround(cell));
+        }
+        if !rules.is_air && self.standing_on(cell, None).is_some() {
+            return Err(DropError::UnitInTheWay(cell));
         }
         if self.energy_enforced {
             if let Some(bit) = rules.tech_bit {
@@ -1813,9 +1859,7 @@ impl World {
 
     /// Advance the simulation by one tick.
     pub fn step(&mut self, scripts: &Scripts) {
-        for u in &mut self.units {
-            u.step();
-        }
+        self.walk();
         self.run_priests();
         self.run_spells();
         self.run_tasks();
@@ -2580,6 +2624,31 @@ mod tests {
             }
         }
         assert_eq!(w.units[g].cell(), Cell::new(10, 2), "it went round");
+    }
+
+    #[test]
+    fn a_standing_unit_blocks_and_walkers_go_round_it() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 12, 5), 0);
+        let scripts = test_scripts();
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 6.0, ..TypeRules::plain() };
+        w.register_type("sunwalker", golem.clone());
+        let post = w.spawn_unit("sunwalker", &golem, Cell::new(5, 2)).unwrap();
+        assert!(w.spawn_unit("sunwalker", &golem, Cell::new(5, 2)).is_none(), "no second unit on that cell");
+        assert!(matches!(w.place_unit_for(0, "sunwalker", &golem, Cell::new(5, 2)), Err(DropError::UnitInTheWay(_))));
+        let g = w.spawn_unit("sunwalker", &golem, Cell::new(1, 2)).unwrap();
+        assert!(w.command_move(g, Cell::new(9, 2)));
+        let mut shared = false;
+        for _ in 0..900 {
+            w.step(&scripts);
+            shared |= w.units[g].cell() == w.units[post].cell();
+            if !w.units[g].is_moving() {
+                break;
+            }
+        }
+        assert!(!shared, "never in the standing unit's cell");
+        assert_eq!(w.units[g].cell(), Cell::new(9, 2), "went round and arrived");
+        assert_eq!(w.units[post].cell(), Cell::new(5, 2), "the standing unit was not pushed");
     }
 
     #[test]

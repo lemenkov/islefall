@@ -28,6 +28,13 @@ it, and sacrifices from beside the altar. The flags then only refine it:
 | `yuckWalk` | With `structures_block` off, units may cross but avoid it: path cost x5. Factories, trees, ruins, monuments, outposts, vortexes and residences have it. | Medium: it may mean fully blocked, which is the default reading now. |
 | a `walk_free` flag | Units cross freely; no type in the data has one. | - |
 
+A ground unit standing still blocks its cell (`walking.units_block`): no
+unit may be placed there, and a walker about to enter it waits
+`wait_seconds`, then finds a way round with standing units treated as
+walls. Units on the move pass through each other, so two walkers meeting
+on a one-cell bridge never jam; whether the original blocked units is not
+known.
+
 Paths are found with A* over eight neighbours; diagonal steps never cut the
 corner of a blocked cell. Movement is fixed point (256 steps per cell) at
 30 ticks per second, with `speed` read as cells per second.

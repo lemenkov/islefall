@@ -147,11 +147,13 @@ pub struct Unit {
     pub paralysed: u32,
     /// Ticks of invisibility left: cannot be targeted or picked up.
     pub invisible: u32,
+    /// Ticks spent waiting behind a unit standing in the way.
+    pub waited: u32,
 }
 
 impl Unit {
     pub fn new(kind: impl Into<String>, cell: Cell, speed: i32, subcell: i32) -> Unit {
-        Unit { kind: kind.into(), pos: Pos::cell_centre(cell, subcell), facing: Dir8::S, path: VecDeque::new(), speed, subcell, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1, threat: 0, is_priest: false, is_transport: false, stunned: false, floating: false, carrying: None, carried_by: None, is_air: false, is_flyer: false, base: None, life: 0, returning: false, strike: 0, range: 0, delay: 1, cooldown: 0, spell: None, casting: 0, praying: 0, paralysed: 0, invisible: 0 }
+        Unit { kind: kind.into(), pos: Pos::cell_centre(cell, subcell), facing: Dir8::S, path: VecDeque::new(), speed, subcell, alive: true, task: Task::Idle, owner: 0, hp: 1, max_hp: 1, threat: 0, is_priest: false, is_transport: false, stunned: false, floating: false, carrying: None, carried_by: None, is_air: false, is_flyer: false, base: None, life: 0, returning: false, strike: 0, range: 0, delay: 1, cooldown: 0, spell: None, casting: 0, praying: 0, paralysed: 0, invisible: 0, waited: 0 }
     }
 
     /// The cell the unit stands in.
@@ -176,8 +178,27 @@ impl Unit {
         self.casting > 0 || self.praying > 0 || self.paralysed > 0
     }
 
+    /// Whether the unit would move this tick at all.
+    pub fn can_step(&self) -> bool {
+        self.alive && !self.stunned && self.carried_by.is_none() && !self.held() && !self.path.is_empty()
+    }
+
+    /// Where this tick's step would land, without taking it.
+    pub fn peek(&self) -> Option<Pos> {
+        if !self.can_step() {
+            return None;
+        }
+        let t = *self.path.front()?;
+        let (dx, dy) = ((t.x - self.pos.x) as i64, (t.y - self.pos.y) as i64);
+        let dist = ((dx * dx + dy * dy) as u64).isqrt() as i64;
+        if dist <= self.speed as i64 {
+            return Some(t);
+        }
+        Some(Pos { x: self.pos.x + (dx * self.speed as i64 / dist) as i32, y: self.pos.y + (dy * self.speed as i64 / dist) as i32 })
+    }
+
     pub fn step(&mut self) {
-        if !self.alive || self.stunned || self.carried_by.is_some() || self.held() {
+        if !self.can_step() {
             return;
         }
         let Some(&t) = self.path.front() else { return };

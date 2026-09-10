@@ -296,6 +296,10 @@ pub struct Walking {
     /// Every structure's footprint blocks walking (and unit placement)
     /// unless its type carries a `walk_free` flag.
     pub structures_block: bool,
+    /// A standing ground unit blocks its cell; a walker behind it waits
+    /// `wait_seconds`, then paths round it.
+    pub units_block: bool,
+    pub wait_seconds: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
