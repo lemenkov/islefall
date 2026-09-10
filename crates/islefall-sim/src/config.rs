@@ -119,12 +119,12 @@ pub struct Attenuation {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Footsteps {
-    /// Type property naming the step (or, for flyers, the flight loop).
-    pub property: String,
     /// Steps heard per walk cycle.
     pub per_cycle: u32,
-    /// Cycle through sibling files that differ only by a number.
-    pub variants: bool,
+    /// The step sound of each type that has one, by type stem; numbered
+    /// siblings of the file are cycled through. Types not listed walk silently.
+    #[serde(default)]
+    pub steps: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -145,6 +145,10 @@ pub struct SoundCue {
     pub property: Option<String>,
     #[serde(default)]
     pub file: Option<String>,
+    /// Play one of the file's numbered siblings in turn (golemMove1 to 5)
+    /// rather than the same file every time.
+    #[serde(default)]
+    pub variants: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

@@ -253,7 +253,7 @@ placed = { file = "apStart.wav" }
 built = { property = "buildDoneSound", file = "buildDone.wav" }
 destroyed = { file = "explosion.wav" }
 salvaged = { file = "dissolve.wav" }
-moved = { property = "moveSound" }
+moved = { property = "moveSound", variants = true }
 pickup = { property = "pickupSound", file = "priestPickUp.wav" }
 sacrificed = { file = "priestSacrifice2.WAV" }
 harvested = { file = "geyserMined1.WAV" }
@@ -288,14 +288,13 @@ max_loops = 8
 loop_property = "activeSound"
 building_loop = "apBuilding.wav"
 
-# Walkers step to their walk animation: `per_cycle` steps per cycle of the
-# `property` sound, cycling through its numbered siblings on disk
-# (golemMove1 to golemMove5). Flyers and balloons play the same property
-# as a loop while they move instead.
+# Walkers with step sounds step to their walk animation, `per_cycle` steps
+# per cycle, cycling through the file's numbered siblings (bulfWalk1 to 5).
+# A type's `moveSound` is its voice answering an order, played once by the
+# `moved` event above, so only types listed here make a sound walking.
 [sounds.footsteps]
-property = "moveSound"
 per_cycle = 2
-variants = true
+steps = { bulf = "bulfWalk1.WAV" }
 
 # A bed that never stops, and sky noises at random intervals (seconds,
 # least and most); both play at their base gain wherever the camera is.

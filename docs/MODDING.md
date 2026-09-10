@@ -86,10 +86,11 @@ decibel, as the original engine read it. Objects whose type names a
 play it as a loop while in view, nearest the centre first up to
 `max_loops`. `[sounds.ambient]` names a bed that never stops and sky
 noises played at random intervals; both ignore the camera.
-`[sounds.footsteps]` ties a walker's steps to its walk animation: so many
-steps per cycle of the type's `moveSound`, cycling through the numbered
-siblings on disk (the five Golem steps); flyers and balloons play the
-same property as a loop while they move.
+A cue with `variants = true` plays one of the file's numbered siblings in
+turn, which is how a Golem answers an order with a different line each
+time (`golemMove1` to `5`). `[sounds.footsteps]` lists the walkers that
+have true step sounds (the Bulf's `bulfWalk1` to `5`) and how many steps
+a walk cycle carries; everything else walks silently.
 
 ## Screen text
 

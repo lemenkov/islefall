@@ -979,6 +979,7 @@ fn play_sounds(
     mut sources: ResMut<Assets<AudioSource>>,
     volume: Res<GlobalVolume>,
     cameras: Query<(&Camera, &GlobalTransform, &Projection), With<Camera2d>>,
+    mut turns: Local<HashMap<String, usize>>,
 ) {
     let Some(world) = sim.world.as_mut() else { return };
     let events = world.take_events();
@@ -995,7 +996,14 @@ fn play_sounds(
         let cue = snd.events.cue(e.what);
         let named = |stem: &str| cue.property.as_deref().and_then(|p| data.install.type_def(stem).and_then(|d| d.get_str(p))).map(str::to_string);
         let from_type = named(&e.kind).or_else(|| snd.projectiles.get(&e.kind).and_then(|p| named(p)));
-        let Some(name) = from_type.or_else(|| cue.file.clone()).filter(|n| !n.is_empty()) else { continue };
+        let Some(mut name) = from_type.or_else(|| cue.file.clone()).filter(|n| !n.is_empty()) else { continue };
+        if cue.variants {
+            // One of the numbered siblings in turn, so a voice does not say the same line twice running.
+            let names = bank.variants(&name);
+            let n = turns.entry(name.to_lowercase()).or_insert(0);
+            name = names[*n % names.len()].clone();
+            *n += 1;
+        }
         let Some((handle, base_db)) = bank.get_or_load(&name, &mut sources) else { continue };
         // Out of view, out of earshot.
         let Some(gain) = gain_at(&view, cell_to_world(e.at, data.grid()), base_db, &data) else { continue };
@@ -1029,19 +1037,11 @@ fn sync_loops(
             wanted.push((LoopKey::Structure(s.kind.clone(), s.cell), name, pos, view.edge(pos)));
         }
     }
-    let fs = &data.cfg.sounds.footsteps;
     for (i, u) in world.units.iter().enumerate() {
         if !u.alive || u.carried_by.is_some() {
             continue;
         }
-        // A flyer on the move hums its move sound; anything standing, its active sound.
-        let moving_air = u.is_air && u.is_moving();
-        let name = if moving_air {
-            data.install.type_def(&u.kind).and_then(|d| d.get_str(&fs.property)).map(str::to_string).or_else(|| names(&u.kind))
-        } else {
-            names(&u.kind)
-        };
-        if let Some(name) = name {
+        if let Some(name) = names(&u.kind) {
             let pos = unit_to_world(u, g);
             wanted.push((LoopKey::Unit(i), name, pos, view.edge(pos)));
         }
@@ -1100,8 +1100,8 @@ fn footsteps(
         if shape.step % stride != 0 {
             continue;
         }
-        let Some(name) = data.install.type_def(&unit.kind).and_then(|d| d.get_str(&fs.property)).map(str::to_string) else { continue };
-        let names = if fs.variants { bank.variants(&name) } else { vec![name] };
+        let Some(name) = fs.steps.get(&unit.kind).cloned() else { continue };
+        let names = bank.variants(&name);
         let pick = names[entry.1 % names.len()].clone();
         entry.1 += 1;
         let Some((handle, base_db)) = bank.get_or_load(&pick, &mut sources) else { continue };
