@@ -198,7 +198,7 @@ fn spawn_sky(commands: &mut Commands, data: &GameData, images: &mut Assets<Image
 
 /// Drift each cloud layer with time and keep it centred on the camera, in
 /// whole tiles so the texture never jumps.
-fn drift_sky(time: Res<Time>, cameras: Query<&Transform, (With<Camera2d>, Without<SkyLayer>)>, mut layers: Query<(&SkyLayer, &mut Transform)>) {
+fn drift_sky(time: Res<Time>, cameras: Query<&Transform, (With<WorldCamera>, Without<SkyLayer>)>, mut layers: Query<(&SkyLayer, &mut Transform)>) {
     let Ok(cam) = cameras.single() else { return };
     let t = time.elapsed_secs();
     for (layer, mut tf) in layers.iter_mut() {
@@ -228,7 +228,7 @@ struct View {
 }
 
 impl View {
-    fn of(cameras: &Query<(&Camera, &GlobalTransform, &Projection), With<Camera2d>>) -> Option<View> {
+    fn of(cameras: &Query<(&Camera, &GlobalTransform, &Projection), With<WorldCamera>>) -> Option<View> {
         let (camera, tf, proj) = cameras.single().ok()?;
         let size = camera.logical_viewport_size()?;
         let scale = match proj {
@@ -816,7 +816,7 @@ fn main() {
     )
     .add_systems(
         Update,
-        (fit_viewport, sidebar_update, sidebar_clicks.before(mouse_actions), minimap.after(camera_keys)).run_if(resource_equals(Mode::Island)),
+        (sidebar_update, sidebar_clicks.before(mouse_actions), minimap.after(camera_keys)).run_if(resource_equals(Mode::Island)),
     )
     .add_systems(Update, (tint_shells, animate_structures, drift_stars, burning, projectiles.before(overlays), structure_effects, run_effects).after(sync_structures).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, collect_events.after(mouse_actions).after(bridge_keys).after(tool_keys).before(play_sounds).before(structure_effects).run_if(resource_equals(Mode::Island)))
@@ -861,6 +861,10 @@ fn frame_image(data: &GameData, stem: &str, frame: usize, images: &mut Assets<Im
     image.sampler = bevy::image::ImageSampler::nearest();
     Some((images.add(image), UVec2::new(w, h)))
 }
+
+/// The camera that draws the world (the UI has one of its own).
+#[derive(Component)]
+struct WorldCamera;
 
 /// The panel and its parts.
 #[derive(Component)]
@@ -1121,7 +1125,7 @@ fn minimap(
     mut frame: ResMut<MinimapFrame>,
     mut map: Query<(&mut ImageNode, &bevy::ui::RelativeCursorPosition), With<MinimapNode>>,
     mut view_box: Query<&mut Node, With<ViewBox>>,
-    mut cameras: Query<(&Camera, &mut Transform, &Projection), With<Camera2d>>,
+    mut cameras: Query<(&Camera, &mut Transform, &Projection), With<WorldCamera>>,
     mut timer: Local<f32>,
 ) {
     let w = sim.world();
@@ -1230,24 +1234,6 @@ fn minimap(
     }
 }
 
-/// Keep the world's camera to the right of the panel.
-fn fit_viewport(data: Res<GameData>, windows: Query<&Window, With<PrimaryWindow>>, mut cameras: Query<&mut Camera, With<Camera2d>>) {
-    let Ok(window) = windows.single() else { return };
-    let sf = window.scale_factor();
-    let left = (data.cfg.sidebar.width * sf) as u32;
-    let (pw, ph) = (window.physical_width(), window.physical_height());
-    if pw <= left + 1 || ph == 0 {
-        return;
-    }
-    let wanted = bevy::camera::Viewport { physical_position: UVec2::new(left, 0), physical_size: UVec2::new(pw - left, ph), ..default() };
-    for mut cam in &mut cameras {
-        let same = cam.viewport.as_ref().is_some_and(|v| v.physical_position == wanted.physical_position && v.physical_size == wanted.physical_size);
-        if !same {
-            cam.viewport = Some(wanted.clone());
-        }
-    }
-}
-
 /// Whether the cursor is over the panel rather than the world.
 fn over_sidebar(windows: &Query<&Window, With<PrimaryWindow>>, data: &GameData) -> bool {
     windows.single().ok().and_then(|w| w.cursor_position()).is_some_and(|c| c.x < data.cfg.sidebar.width)
@@ -1310,7 +1296,7 @@ fn setup(
             ));
         }
         Mode::Viewer => {
-            commands.spawn((Camera2d, zoomed_projection(data.cfg.controls.zoom)));
+            commands.spawn((Camera2d, zoomed_projection(data.cfg.controls.zoom), WorldCamera, IsDefaultUiCamera));
             spawn_viewer_shape(&mut commands, &data, &viewer, &mut lib, &mut images, &mut layouts);
         }
     }
@@ -1413,7 +1399,7 @@ fn setup_map(
         }
     }
     let centre = world::cell_to_world(cam, data.grid());
-    commands.spawn((Camera2d, zoomed_projection(data.cfg.controls.zoom), Transform::from_translation(centre.extend(0.0))));
+    commands.spawn((Camera2d, zoomed_projection(data.cfg.controls.zoom), Transform::from_translation(centre.extend(0.0)), WorldCamera, IsDefaultUiCamera));
     info!(
         "map {}: {} islands, {} structures, {} bridge cells, {} Storm Power, {} opponents",
         data.map.name,
@@ -1547,7 +1533,7 @@ fn play_sounds(
     mut bank: ResMut<SoundBank>,
     mut sources: ResMut<Assets<AudioSource>>,
     volume: Res<GlobalVolume>,
-    cameras: Query<(&Camera, &GlobalTransform, &Projection), With<Camera2d>>,
+    cameras: Query<(&Camera, &GlobalTransform, &Projection), With<WorldCamera>>,
     mut turns: Local<HashMap<String, usize>>,
     happenings: Res<Happenings>,
 ) {
@@ -1589,7 +1575,7 @@ fn sync_loops(
     data: Res<GameData>,
     mut bank: ResMut<SoundBank>,
     mut sources: ResMut<Assets<AudioSource>>,
-    cameras: Query<(&Camera, &GlobalTransform, &Projection), With<Camera2d>>,
+    cameras: Query<(&Camera, &GlobalTransform, &Projection), With<WorldCamera>>,
     mut existing: Query<(Entity, &ObjectLoop, Option<&mut AudioSink>)>,
 ) {
     let Some(world) = sim.world.as_ref() else { return };
@@ -1647,7 +1633,7 @@ fn footsteps(
     data: Res<GameData>,
     mut bank: ResMut<SoundBank>,
     mut sources: ResMut<Assets<AudioSource>>,
-    cameras: Query<(&Camera, &GlobalTransform, &Projection), With<Camera2d>>,
+    cameras: Query<(&Camera, &GlobalTransform, &Projection), With<WorldCamera>>,
     layers: Query<(&UnitLayer, &ShapeSprite)>,
     mut last: Local<HashMap<usize, (usize, usize)>>,
 ) {
@@ -1923,7 +1909,7 @@ fn sync_units(
 }
 
 /// Cell under the mouse cursor, if it is over the window.
-fn cursor_cell(windows: &Query<&Window, With<PrimaryWindow>>, cameras: &Query<(&Camera, &GlobalTransform)>, g: &Grid) -> Option<Cell> {
+fn cursor_cell(windows: &Query<&Window, With<PrimaryWindow>>, cameras: &Query<(&Camera, &GlobalTransform), With<WorldCamera>>, g: &Grid) -> Option<Cell> {
     let (Ok(window), Ok((camera, cam_tf))) = (windows.single(), cameras.single()) else { return None };
     let cursor = window.cursor_position()?;
     let world_pos = camera.viewport_to_world_2d(cam_tf, cursor).ok()?;
@@ -1933,7 +1919,7 @@ fn cursor_cell(windows: &Query<&Window, With<PrimaryWindow>>, cameras: &Query<(&
 fn mouse_actions(
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<(&Camera, &GlobalTransform)>,
+    cameras: Query<(&Camera, &GlobalTransform), With<WorldCamera>>,
     data: Res<GameData>,
     mut player: ResMut<Player>,
     mut sim: ResMut<Sim>,
@@ -2038,7 +2024,7 @@ fn bridge_keys(
     player: Res<Player>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<(&Camera, &GlobalTransform)>,
+    cameras: Query<(&Camera, &GlobalTransform), With<WorldCamera>>,
     data: Res<GameData>,
     mut sim: ResMut<Sim>,
 ) {
@@ -2070,7 +2056,7 @@ fn bridge_keys(
 fn ghost(
     mut commands: Commands,
     windows: Query<&Window, With<PrimaryWindow>>,
-    cameras: Query<(&Camera, &GlobalTransform)>,
+    cameras: Query<(&Camera, &GlobalTransform), With<WorldCamera>>,
     data: Res<GameData>,
     player: Res<Player>,
     sim: Res<Sim>,
@@ -2412,7 +2398,7 @@ fn camera_keys(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     data: Res<GameData>,
-    mut cameras: Query<(&mut Transform, &mut Projection), With<Camera2d>>,
+    mut cameras: Query<(&mut Transform, &mut Projection), With<WorldCamera>>,
 ) {
     let Ok((mut tf, mut proj)) = cameras.single_mut() else { return };
     let mut d = Vec2::ZERO;
