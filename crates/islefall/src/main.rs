@@ -2525,6 +2525,16 @@ fn projectiles(
             if sequence.is_empty() {
                 continue;
             }
+            // Four runs of frames, one per direction: keep the run of this flight's.
+            let sequence = match rules.cardinal_frames.get(&missile) {
+                Some(&per) if per > 0 && sequence.len() >= per * rules.cardinal_order.len() => {
+                    let d = to - from;
+                    let dir = if d.x.abs() >= d.y.abs() { if d.x >= 0.0 { "east" } else { "west" } } else if d.y >= 0.0 { "north" } else { "south" };
+                    let run = rules.cardinal_order.iter().position(|o| o.eq_ignore_ascii_case(dir)).unwrap_or(0);
+                    sequence[run * per..(run + 1) * per].to_vec()
+                }
+                _ => sequence,
+            };
             let bearings = sequence.len() >= rules.bearing_min_frames;
             let seconds = ((to - from).length() / rules.speed_px.max(1.0)).max(0.05);
             let first = sequence[0];

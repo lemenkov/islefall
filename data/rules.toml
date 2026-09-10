@@ -289,6 +289,10 @@ default = "blankmissile"
 speed_px = 260.0
 arc_px = 14.0
 bearing_min_frames = 16
+# The Thunder Cannon's bolt has four runs of three frames, one per
+# direction in this order; the run of the flight's direction loops.
+cardinal_frames = { thundercannonmissile = 3 }
+cardinal_order = ["north", "east", "south", "west"]
 flash_seconds = 0.3
 
 # Fire and smoke on a damaged structure, generated as the original's

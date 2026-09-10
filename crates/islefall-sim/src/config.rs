@@ -111,6 +111,13 @@ pub struct Projectiles {
     /// A missile with at least this many frames turns to its bearing
     /// instead of spinning through them.
     pub bearing_min_frames: usize,
+    /// Missiles whose frames are four runs, one per direction in
+    /// `cardinal_order`, of this many animation frames each: the run of
+    /// the flight's direction loops (the Thunder Cannon's bolt).
+    #[serde(default)]
+    pub cardinal_frames: BTreeMap<String, usize>,
+    #[serde(default = "default_cardinal_order")]
+    pub cardinal_order: Vec<String>,
     /// Seconds the flash where it lands stays.
     pub flash_seconds: f32,
 }
@@ -163,6 +170,10 @@ pub struct Animation {
     pub ground_label: Option<String>,
     #[serde(default)]
     pub ground_order: Vec<String>,
+}
+
+fn default_cardinal_order() -> Vec<String> {
+    ["north", "east", "south", "west"].map(String::from).to_vec()
 }
 
 fn default_turn_seconds() -> f32 {

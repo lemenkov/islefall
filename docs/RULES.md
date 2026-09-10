@@ -230,8 +230,10 @@ From the type properties and the manual:
   "cannon". Everything else fires in any direction.
 - A shot is a missile in flight: `[projectiles]` names each shooter's
   missile type (the data never links them); its frames spin, or turn to
-  its bearing when there are many, as it lobs from muzzle to target at
-  `speed_px`, and a flash marks where it lands.
+  its bearing when there are many, or, for a missile listed in
+  `cardinal_frames`, loop the run drawn for the flight's direction (the
+  Thunder Cannon's bolt has four runs of three), as it lobs from muzzle
+  to target at `speed_px`, and a flash marks where it lands.
 - Targets are enemies within range, highest `threat` first, nearest second.
   Units count below any structure. Enemy bridge cells are targets too, at
   no threat, so a cannon with nothing else in reach shoots the bridge: a
