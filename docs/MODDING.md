@@ -52,6 +52,7 @@ Available hooks:
 - `air_attack(class, use_air_damage, air_range, air_damage, range, hp_per_sec)` -> `#{ air_range, air_damage, ground }` or `()`
 - `air_target_priority(distance, is_unit, is_transport, hunts_transports)` -> int or `()` to refuse
 - `bridge_hit(state, damage)` -> "crack", "destroy" or "none"
+- `shot_delay(name, class, range, hp_per_sec, usual)` -> seconds between shots for a type without `delayBetweenShots`
 - `construction_seconds(cost, construction_rate, power_per_rate)` -> seconds
 - `kill_reward(cost, percent)` -> int
 - `sound_gain(edge, zoom, base_db, edge_db, reference_zoom, db_per_halving)` -> decibels (presentation only)

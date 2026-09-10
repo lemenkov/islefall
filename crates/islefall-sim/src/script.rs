@@ -136,6 +136,13 @@ impl Scripts {
         v.as_float().map_err(|t| ScriptError::Call { hook: "sound_gain", message: format!("expected float, got {t}") })
     }
 
+    /// `shot_delay(name, class, range, hp_per_sec, usual)` -> seconds
+    /// between shots for a type without `delayBetweenShots`.
+    pub fn shot_delay(&self, name: &str, class: &str, range: i64, hp_per_sec: i64, default: f64) -> Result<f64, ScriptError> {
+        let v = self.call("shot_delay", (name.to_string(), class.to_string(), range, hp_per_sec, default))?;
+        v.as_float().map_err(|t| ScriptError::Call { hook: "shot_delay", message: format!("expected float, got {t}") })
+    }
+
     pub fn construction_seconds(&self, cost: i64, construction_rate: f64, power_per_rate: f64) -> Result<f64, ScriptError> {
         let v = self.call("construction_seconds", (cost, construction_rate, power_per_rate))?;
         v.as_float().map_err(|t| ScriptError::Call { hook: "construction_seconds", message: format!("expected float, got {t}") })

@@ -222,9 +222,13 @@ freely for now.
 From the type properties and the manual:
 
 - A shooting type has `range` (cells), `hpPerSec` (damage per second) and
-  `delayBetweenShots` (seconds, 1 when absent); one shot deals
-  `hpPerSec x delayBetweenShots`. Sun Cannon: range 22, 80 damage every 5
-  seconds. Sun Disc Thrower: range 8, 12 damage every second.
+  `delayBetweenShots` (seconds); one shot deals `hpPerSec x
+  delayBetweenShots`. Sun Cannon: range 22, 80 damage every 5 seconds. Sun
+  Disc Thrower: range 8, 12 damage every second. Only the Sun Cannon and
+  the Vander Tower carry a delay in the data; for the rest the `shot_delay`
+  hook decides, giving the other cannons the Sun Cannon's five seconds
+  (Thunder Cannon 200 a shot, Ice Cannon 100) and everything else the
+  rules' default second, so cannons are heavy and slow rather than a hail.
 - Cannons fire only straight north, south, east or west (the manual); no
   flag says so, so Islefall applies it to types whose name contains
   "cannon". Everything else fires in any direction.

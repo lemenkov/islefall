@@ -49,6 +49,14 @@ fn fires_straight(name, flags) {
     name.to_lower().contains("cannon")
 }
 
+// Seconds between shots of a shooter whose type has no `delayBetweenShots`.
+// The data gives the Sun Cannon five seconds and the Vander Tower one;
+// the other cannons fire at the Sun Cannon's pace, heavy and slow, and
+// everything else (throwers, crossbows) at the rules' default second.
+fn shot_delay(name, class, range, hp_per_sec, usual) {
+    if name.to_lower().contains("cannon") { 5.0 } else { usual }
+}
+
 // Damage of one shot from `hpPerSec` and the delay between shots in seconds.
 fn damage_per_shot(hp_per_sec, delay) {
     (hp_per_sec * delay).round().to_int()

@@ -2537,6 +2537,7 @@ fn projectiles(
             };
             let bearings = sequence.len() >= rules.bearing_min_frames;
             let seconds = ((to - from).length() / rules.speed_px.max(1.0)).max(0.05);
+            debug!("tick {}: {} fires {} at {:?}", w.tick, s.kind, missile, target);
             let first = sequence[0];
             commands.spawn((
                 Sprite::from_atlas_image(shape.image.clone(), TextureAtlas { layout: shape.layout.clone(), index: first }),

@@ -160,7 +160,8 @@ power_per_rate = 5.0
 explosion_radius = 2
 # Damage an explosion deals to everything within the radius (guess).
 explosion_damage = 150
-# Seconds between shots when a type has no `delayBetweenShots`.
+# Seconds between shots when a type has no `delayBetweenShots`, as handed
+# to the `shot_delay` hook (which gives cannons five seconds).
 default_delay_between_shots = 1.0
 
 [priest]

@@ -154,7 +154,11 @@ impl TypeRules {
         let is_air_base = cfg.air.base_classes.iter().any(|c| c.eq_ignore_ascii_case(class));
         let launches = if is_air_base { cfg.air.launches.get(&def.name.to_lowercase()).cloned() } else { None };
         let hp_per_sec = def.get_i64("hpPerSec").unwrap_or(0).max(0);
-        let delay = def.get_f64("delayBetweenShots").unwrap_or(cfg.combat.default_delay_between_shots).max(0.1);
+        let delay = match def.get_f64("delayBetweenShots") {
+            Some(d) => d,
+            None => scripts.shot_delay(&def.name, class, def.get_i64("range").unwrap_or(0), hp_per_sec, cfg.combat.default_delay_between_shots)?,
+        }
+        .max(0.1);
         let theme = def.get_str("theme").and_then(Theme::parse).unwrap_or(Theme::Sun);
         let level = def.get_i64("level").unwrap_or(0).clamp(0, 9);
         let energy = scripts.energy_need(level, theme, def.get_str("mana").unwrap_or(""), class)?;
@@ -300,6 +304,11 @@ mod tests {
         let r = rules_of("typename sunCannon\ntypeflags emplacement;\n{\n maxHitPoints = 600;\n range = 22;\n hpPerSec = 16;\n delayBetweenShots = 5.0;\n threat = 5;\n}\nA00 : : \"a.gif\" #0;\n");
         assert_eq!((r.max_hit_points, r.range, r.damage_per_shot), (600, 22, 80));
         assert!(r.cardinal_only);
+        // No delay in the data: the script gives cannons the Sun Cannon's five seconds, others the default second.
+        let r = rules_of("typename thunderCannon\ntypeflags emplacement;\n{\n class=\"Shooter\";\n range = 44;\n hpPerSec = 40;\n}\nA00 : : \"a.gif\" #0;\n");
+        assert_eq!((r.delay_between_shots, r.damage_per_shot), (5.0, 200));
+        let r = rules_of("typename sunArcher\ntypeflags emplacement;\n{\n class=\"Shooter\";\n range = 8;\n hpPerSec = 12;\n}\nA00 : : \"a.gif\" #0;\n");
+        assert_eq!((r.delay_between_shots, r.damage_per_shot), (1.0, 12));
     }
 
     #[test]
