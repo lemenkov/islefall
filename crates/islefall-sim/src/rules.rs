@@ -134,15 +134,20 @@ impl TypeRules {
     pub fn from_type(def: &TypeDef, cfg: &Config, scripts: &Scripts) -> Result<TypeRules, ScriptError> {
         let f = &cfg.flags;
         let has = |names: &[String]| Config::has_any(names, &def.flags);
+        let is_priest = has(&f.priest);
+        let is_unit = has(&f.unit);
+        // A structure's footprint is impassable unless its type says otherwise.
         let walk = if has(&f.walk_blocked) {
+            Walk::Blocked
+        } else if has(&f.walk_free) || is_unit {
+            Walk::Free
+        } else if cfg.walking.structures_block {
             Walk::Blocked
         } else if has(&f.walk_avoid) {
             Walk::Avoid
         } else {
             Walk::Free
         };
-        let is_priest = has(&f.priest);
-        let is_unit = has(&f.unit);
         let is_flyer = has(&f.flyer);
         let is_air = is_flyer || has(&f.balloon);
         let class = def.get_str("class").unwrap_or("");
@@ -280,8 +285,12 @@ mod tests {
     fn reads_flags_and_footprint() {
         let r = rules_of("typename x\ntypeflags yuckWalk dropBlocking factory;\n{\n foot_x = 8;\n foot_y = 6;\n}\nA00 : : \"a.gif\" #0;\n");
         assert_eq!((r.foot_x, r.foot_y), (8, 6));
-        assert_eq!(r.walk, Walk::Avoid);
+        assert_eq!(r.walk, Walk::Blocked, "a building's footprint is impassable");
         assert!(r.drop_blocking && !r.creates_island && !r.is_unit);
+        let mut open = crate::config::test_config();
+        open.walking.structures_block = false;
+        let r = TypeRules::from_type(&typefile::parse("typename x\ntypeflags yuckWalk;\n{\n}\nA00 : : \"a.gif\" #0;\n").unwrap(), &open, &crate::script::test_scripts()).unwrap();
+        assert_eq!(r.walk, Walk::Avoid, "with structures_block off, yuckWalk only costs");
         let r = rules_of("typename y\ntypeflags walker shadow;\n{\n speed = 1.8;\n}\nA00 : : \"a.gif\" #0;\n");
         assert!(r.is_unit);
         assert_eq!(r.speed, 1.8);

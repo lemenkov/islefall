@@ -293,6 +293,9 @@ pub struct Grid {
 pub struct Walking {
     pub avoid_cost: u32,
     pub subcell: i32,
+    /// Every structure's footprint blocks walking (and unit placement)
+    /// unless its type carries a `walk_free` flag.
+    pub structures_block: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -300,6 +303,7 @@ pub struct Walking {
 pub struct Flags {
     pub walk_blocked: Vec<String>,
     pub walk_avoid: Vec<String>,
+    pub walk_free: Vec<String>,
     pub drop_blocking: Vec<String>,
     pub creates_island: Vec<String>,
     pub may_drop_on_rim: Vec<String>,

@@ -1215,8 +1215,8 @@ impl World {
         if !u.alive || u.carrying.is_none() || !a.is_altar || a.owner != u.owner {
             return false;
         }
-        let centre = a.centre();
-        if !self.order_move(unit, centre) {
+        // The altar is a building: the carrier brings the priest to its side.
+        if !self.walk_to_adjacent(unit, altar) {
             return false;
         }
         self.units[unit].task = Task::Sacrifice { altar };
@@ -1696,11 +1696,12 @@ impl World {
                 }
                 Task::Sacrifice { altar } => {
                     let owner = u.owner;
-                    let (Some(centre), Some(p)) = (self.structures.get(altar).map(|a| a.centre()), u.carrying) else {
+                    let (Some(a), Some(p)) = (self.structures.get(altar), u.carrying) else {
                         self.units[i].task = Task::Idle;
                         continue;
                     };
-                    if centre == at {
+                    let (centre, beside) = (a.centre(), a.is_adjacent(at) || a.covers(at));
+                    if beside {
                         self.units[p].alive = false;
                         self.units[p].carried_by = None;
                         self.units[i].carrying = None;
@@ -1712,7 +1713,7 @@ impl World {
                         let (kind, victim) = (self.units[p].kind.clone(), self.units[p].owner);
                         self.emit(EventKind::Sacrificed, &kind, centre, owner);
                         self.judge(victim, centre);
-                    } else if !self.order_move(i, centre) {
+                    } else if !self.walk_to_adjacent(i, altar) {
                         self.units[i].task = Task::Idle;
                     }
                     continue;
@@ -2555,6 +2556,33 @@ mod tests {
     }
 
     #[test]
+    fn nothing_stands_on_or_walks_through_a_building() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 12, 5), 0);
+        let scripts = test_scripts();
+        // A cannon as the real rules read it: no walk flag, yet a building.
+        let cannon = TypeRules { foot_x: 3, foot_y: 3, walk: Walk::Blocked, max_hit_points: 600, ..TypeRules::plain() };
+        let c = w.drop_structure("suncannon", &cannon, Cell::new(6, 3)).unwrap();
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 8.0, ..TypeRules::plain() };
+        w.register_type("sunwalker", golem.clone());
+        for cell in w.structures[c].cells().collect::<Vec<_>>() {
+            assert!(w.place_unit_for(0, "sunwalker", &golem, cell).is_err(), "no unit on {cell:?}");
+            assert!(w.spawn_unit("sunwalker", &golem, cell).is_none());
+        }
+        let g = w.spawn_unit("sunwalker", &golem, Cell::new(1, 2)).unwrap();
+        assert!(w.command_move(g, Cell::new(10, 2)));
+        for _ in 0..600 {
+            w.step(&scripts);
+            let at = w.units[g].cell();
+            assert!(!w.structures[c].covers(at), "the golem stepped onto the cannon at {at:?}");
+            if !w.units[g].is_moving() {
+                break;
+            }
+        }
+        assert_eq!(w.units[g].cell(), Cell::new(10, 2), "it went round");
+    }
+
+    #[test]
     fn balloons_fly_over_the_sky_and_walkers_do_not() {
         let mut w = World::new(test_config());
         w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 4), 0);
@@ -2624,7 +2652,7 @@ mod tests {
         }
         assert!(!w.units[p].alive, "sacrificed");
         assert_eq!(w.knowledge, 1);
-        assert_eq!(w.units[g].cell(), w.structures[a].centre());
+        assert!(w.structures[a].is_adjacent(w.units[g].cell()), "the carrier stands beside the altar, never on it");
     }
 
     #[test]

@@ -21,11 +21,17 @@ cell_h = 11
 avoid_cost = 5
 # Fixed-point steps per cell for unit positions.
 subcell = 256
+# Nothing walks over a building or stands on one: every structure's
+# footprint is impassable unless its type carries a `walk_free` flag. With
+# this off, only `walk_blocked` types block and `walk_avoid` ones cost.
+structures_block = true
 
 # Which type flags mean what. Flag names are matched case-insensitively.
 [flags]
 walk_blocked = ["walkBlocking"]
 walk_avoid = ["yuckWalk"]
+# Types units may cross even though they are structures (none in the data).
+walk_free = []
 drop_blocking = ["dropBlocking"]
 creates_island = ["createsisland"]
 may_drop_on_rim = ["mayDropOnRim"]

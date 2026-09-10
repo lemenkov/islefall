@@ -18,11 +18,15 @@ that reading is. The numbers live in `data/rules.toml` and the formulas in
 
 ## Walking
 
+Every structure's footprint is impassable, and no unit may be placed on
+one (`walking.structures_block`): a Golem walks around a cannon, not over
+it, and sacrifices from beside the altar. The flags then only refine it:
+
 | Flag | Reading | Confidence |
 |------|---------|------------|
-| `walkBlocking` | Units cannot enter the footprint. Only `edgefarm` has it. | High |
-| `yuckWalk` | Units may cross but avoid it: path cost x5. Factories, trees, ruins, monuments, outposts, vortexes and residences have it. | Medium: it may mean fully blocked. |
-| none (emplacements, the altar) | Freely walkable. Priests must reach the altar, and 3x3 emplacements sit on 1-cell bridges that units travel along. | Medium |
+| `walkBlocking` | Units cannot enter the footprint even with `structures_block` off. Only `edgefarm` has it. | High |
+| `yuckWalk` | With `structures_block` off, units may cross but avoid it: path cost x5. Factories, trees, ruins, monuments, outposts, vortexes and residences have it. | Medium: it may mean fully blocked, which is the default reading now. |
+| a `walk_free` flag | Units cross freely; no type in the data has one. | - |
 
 Paths are found with A* over eight neighbours; diagonal steps never cut the
 corner of a blocked cell. Movement is fixed point (256 steps per cell) at
