@@ -508,6 +508,21 @@ impl Status {
 #[derive(Component)]
 struct Hud;
 
+/// A missile in flight from a shooter to its target.
+#[derive(Component)]
+struct Projectile {
+    from: Vec2,
+    to: Vec2,
+    /// 0 at the muzzle, 1 at the target.
+    progress: f32,
+    seconds: f32,
+    bearings: bool,
+}
+
+/// Where missiles landed this frame, for the overlay's flashes.
+#[derive(Resource, Default)]
+struct Landed(Vec<Vec2>);
+
 /// Player-side interaction state.
 #[derive(Resource)]
 struct Player {
@@ -693,7 +708,8 @@ fn main() {
         (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
-    .add_systems(Update, (tint_shells, animate_structures, drift_stars).after(sync_structures).run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, (tint_shells, animate_structures, drift_stars, projectiles.before(overlays)).after(sync_structures).run_if(resource_equals(Mode::Island)))
+    .init_resource::<Landed>()
     .add_systems(Update, (play_sounds.after(mouse_actions).after(bridge_keys), sync_loops, ambient, footsteps.after(animate), drift_sky.after(camera_keys)).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
@@ -1574,7 +1590,7 @@ fn overlays(
     existing: Query<Entity, With<Overlay>>,
     time: Res<Time>,
     mut tracers: Local<Vec<(Vec2, Vec2, f32)>>,
-    mut seen_tick: Local<Option<u64>>,
+    mut landed: ResMut<Landed>,
 ) {
     for e in &existing {
         commands.entity(e).despawn();
@@ -1668,35 +1684,18 @@ fn overlays(
             ));
         }
     }
-    // Shots: a tracer from the muzzle to the target that lingers a moment, and a flash where it lands.
-    if *seen_tick != Some(w.tick) {
-        *seen_tick = Some(w.tick);
-        for &(shooter, target) in &w.last_shots {
-            let to = match target {
-                islefall_sim::world::Target::Structure(j) => w.structures.get(j).map(|s| cell_to_world(s.centre(), g)),
-                islefall_sim::world::Target::Unit(j) => w.units.get(j).map(|u| unit_to_world(u, g)),
-                islefall_sim::world::Target::Bridge(c) => Some(cell_to_world(c, g)),
-            };
-            if let (Some(from), Some(to)) = (w.structures.get(shooter).map(|s| cell_to_world(s.centre(), g)), to) {
-                tracers.push((from, to, data.cfg.controls.tracer_seconds));
-            }
-        }
-    }
+    // Flashes where shots have landed.
     let dt = time.delta_secs();
     tracers.retain_mut(|t| {
         t.2 -= dt;
         t.2 > 0.0
     });
-    for &(from, to, left) in tracers.iter() {
-        let d = to - from;
-        let len = d.length().max(1.0);
-        let alpha = (left / data.cfg.controls.tracer_seconds.max(0.01)).clamp(0.0, 1.0);
-        commands.spawn((
-            Sprite::from_color(Color::srgba(1.0, 0.95, 0.5, 0.9 * alpha), Vec2::new(len, 1.5)),
-            Transform::from_translation(((from + to) / 2.0).extend(60.5)).with_rotation(Quat::from_rotation_z(d.y.atan2(d.x))),
-            Overlay,
-        ));
+    for &(_, to, left) in tracers.iter() {
+        let alpha = (left / data.cfg.projectiles.flash_seconds.max(0.01)).clamp(0.0, 1.0);
         commands.spawn((Sprite::from_color(Color::srgba(1.0, 0.8, 0.3, alpha), Vec2::new(7.0, 7.0)), Transform::from_translation(to.extend(61.0)), Overlay));
+    }
+    for hit in landed.0.drain(..) {
+        tracers.push((hit, hit, data.cfg.projectiles.flash_seconds));
     }
 }
 
@@ -1879,6 +1878,85 @@ fn animate(
         let frame = shape.sequence[shape.step];
         atlas.index = frame;
         *anchor = shape.frames[frame].anchor();
+    }
+}
+
+/// Launch a missile for every shot of a new tick and fly the ones in the
+/// air: a lob from muzzle to target, spinning through its frames or turned
+/// to its bearing, and a flash where it lands.
+#[allow(clippy::too_many_arguments)]
+fn projectiles(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    time: Res<Time>,
+    mut lib: ResMut<ShapeLibrary>,
+    mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    mut landed: ResMut<Landed>,
+    mut flying: Query<(Entity, &mut Projectile, &mut Transform, &mut Sprite, &mut Anchor, &ShapeSprite)>,
+    mut seen_tick: Local<Option<u64>>,
+) {
+    let w = sim.world();
+    let g = data.grid();
+    let rules = &data.cfg.projectiles;
+    if *seen_tick != Some(w.tick) {
+        *seen_tick = Some(w.tick);
+        let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+        for &(shooter, target) in &w.last_shots {
+            let Some(s) = w.structures.get(shooter) else { continue };
+            let to = match target {
+                islefall_sim::world::Target::Structure(j) => w.structures.get(j).map(|t| cell_to_world(t.centre(), g)),
+                islefall_sim::world::Target::Unit(j) => w.units.get(j).map(|u| unit_to_world(u, g)),
+                islefall_sim::world::Target::Bridge(c) => Some(cell_to_world(c, g)),
+            };
+            let Some(to) = to else { continue };
+            let from = cell_to_world(s.centre(), g) + Vec2::new(0.0, g.cell_h as f32);
+            let missile = rules.types.get(&s.kind).cloned().unwrap_or_else(|| rules.default.clone());
+            let Some(shape) = lib.get_or_load(&data.install, palette, &missile, &mut images, &mut layouts) else { continue };
+            let sequence: Vec<usize> = (0..shape.labels.len())
+                .filter(|&i| !shape.flags[i].iter().any(|f| data.cfg.animation.hidden_flags.iter().any(|h| h.eq_ignore_ascii_case(f))))
+                .collect();
+            if sequence.is_empty() {
+                continue;
+            }
+            let bearings = sequence.len() >= rules.bearing_min_frames;
+            let seconds = ((to - from).length() / rules.speed_px.max(1.0)).max(0.05);
+            let first = sequence[0];
+            commands.spawn((
+                Sprite::from_atlas_image(shape.image.clone(), TextureAtlas { layout: shape.layout.clone(), index: first }),
+                shape.frames[first].anchor(),
+                Transform::from_translation(from.extend(Z_UNIT + 2.0)),
+                ShapeSprite { sequence, frames: shape.frames.clone(), step: 0, playing: !bearings, once: false },
+                Projectile { from, to, progress: 0.0, seconds, bearings },
+            ));
+        }
+    }
+    let dt = time.delta_secs();
+    for (e, mut p, mut tf, mut sprite, mut anchor, shape) in &mut flying {
+        p.progress += dt / p.seconds;
+        if p.progress >= 1.0 {
+            landed.0.push(p.to);
+            commands.entity(e).despawn();
+            continue;
+        }
+        let d = p.to - p.from;
+        let lob = rules.arc_px * 4.0 * p.progress * (1.0 - p.progress);
+        let at = p.from + d * p.progress + Vec2::new(0.0, lob);
+        tf.translation.x = at.x;
+        tf.translation.y = at.y;
+        if p.bearings {
+            // Frame 0 points north; the rest turn clockwise on screen.
+            let n = shape.sequence.len() as f32;
+            let bearing = d.x.atan2(d.y).rem_euclid(std::f32::consts::TAU);
+            let frame = shape.sequence[((bearing / std::f32::consts::TAU * n).round() as usize) % shape.sequence.len()];
+            if let Some(atlas) = sprite.texture_atlas.as_mut() {
+                if atlas.index != frame {
+                    atlas.index = frame;
+                    *anchor = shape.frames[frame].anchor();
+                }
+            }
+        }
     }
 }
 

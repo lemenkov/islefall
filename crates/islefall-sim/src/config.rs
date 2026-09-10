@@ -32,6 +32,26 @@ pub struct Config {
     pub sprites: Sprites,
     pub hud: Hud,
     pub animation: Animation,
+    pub projectiles: Projectiles,
+}
+
+/// What flies from a shooter to its target.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Projectiles {
+    /// Shooter type stem to missile type stem; nothing in the data links them.
+    #[serde(default)]
+    pub types: BTreeMap<String, String>,
+    /// The missile of shooters not listed.
+    pub default: String,
+    /// Flight speed in source pixels per second, and how high the lob rises.
+    pub speed_px: f32,
+    pub arc_px: f32,
+    /// A missile with at least this many frames turns to its bearing
+    /// instead of spinning through them.
+    pub bearing_min_frames: usize,
+    /// Seconds the flash where it lands stays.
+    pub flash_seconds: f32,
 }
 
 /// How a structure's frames are read for idling, variants and turrets.
@@ -438,8 +458,6 @@ pub struct Controls {
     pub hash_every_seconds: f64,
     /// Where F5 saves a snapshot and F9 loads it from.
     pub save_file: String,
-    /// How long a shot's tracer stays on screen.
-    pub tracer_seconds: f32,
 }
 
 #[derive(Debug)]
