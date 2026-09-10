@@ -93,6 +93,14 @@ time (`golemMove1` to `5`). `[sounds.footsteps]` lists the walkers that
 have true step sounds (the Bulf's `bulfWalk1` to `5`) and how many steps
 a walk cycle carries; everything else walks silently.
 
+## The panel
+
+`[sidebar]` builds the panel down the left from the original's `fortgump`
+art: which frames are the stone background, the ruler and the Storm
+Power box, the crystal beside the figure, the icon size of the build
+list, the minimap's height and its colours. Every type's list icon is the
+frame its type file flags `gumpframe`.
+
 ## Screen text
 
 `[hud]` holds the lines drawn in the corner as templates with `{power}`,

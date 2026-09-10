@@ -34,6 +34,26 @@ pub struct Config {
     pub animation: Animation,
     pub projectiles: Projectiles,
     pub effects: Effects,
+    pub sidebar: Sidebar,
+}
+
+/// The panel down the left of the screen, built from the original's art.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Sidebar {
+    /// Width in logical pixels.
+    pub width: f32,
+    /// The type whose frames are the panel's art, and which frames.
+    pub art: String,
+    pub back_frame: usize,
+    pub ruler_frame: usize,
+    pub counter_frame: usize,
+    /// The type drawn beside the Storm Power figure.
+    pub crystal: String,
+    pub icon_size: f32,
+    pub minimap_height: f32,
+    /// Minimap colours: sky, the four island themes, bridge, mine, enemy, unit, view.
+    pub colours: BTreeMap<String, [f32; 3]>,
 }
 
 /// An animation from the sprite cache: a type and the label of its frames.

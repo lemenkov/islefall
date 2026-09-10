@@ -62,7 +62,9 @@ harvesting crystals to the Temple, left-click on a stunned enemy priest sends
 the selected golem to capture him, left-click on an Obelisk sends it to
 learn the Spell there (`X` casts it, `Y` sets a High Priest praying for
 his own), and left-click on your altar while he is
-carried sacrifices him for Knowledge. The corner text and the window title show the Storm Power
+carried sacrifices him for Knowledge. The panel on the left shows the Storm Power, the piece queue (click a
+slot to take a piece), the build list (click an entry to take it as the
+tool) and a minimap (click to look there). The corner text and the window title show the Storm Power
 reserve, Knowledge, the tool in hand and the last thing the game had to
 say; sacrifice the enemy High Priest to win; drops cost their type's price and stand as translucent shells
 until a stream of Storm Power from your Temple, Workshop or Outpost has

@@ -814,16 +814,443 @@ fn main() {
         (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
+    .add_systems(
+        Update,
+        (fit_viewport, sidebar_update, sidebar_clicks.before(mouse_actions), minimap.after(camera_keys)).run_if(resource_equals(Mode::Island)),
+    )
     .add_systems(Update, (tint_shells, animate_structures, drift_stars, burning, projectiles.before(overlays), structure_effects, run_effects).after(sync_structures).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, collect_events.after(mouse_actions).after(bridge_keys).after(tool_keys).before(play_sounds).before(structure_effects).run_if(resource_equals(Mode::Island)))
     .init_resource::<Landed>()
     .init_resource::<Happenings>()
+    .init_resource::<MinimapFrame>()
     .add_systems(Update, (play_sounds.after(mouse_actions).after(bridge_keys), sync_loops, ambient, footsteps.after(animate), drift_sky.after(camera_keys)).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
         app.insert_resource(AutoScreenshot { path, delay: Timer::from_seconds(screenshot_at, TimerMode::Once) });
     }
     app.run();
+}
+
+/// One frame of a type as an image of its own, for the panel's art.
+fn frame_image(data: &GameData, stem: &str, frame: usize, images: &mut Assets<Image>) -> Option<(Handle<Image>, UVec2)> {
+    let palette = data.install.palette(&data.palette)?;
+    let records = data.install.shape_records(stem)?;
+    let offset = *records.images.get(frame)?;
+    let fr = data.install.shapes.decode(offset).ok()?;
+    if fr.is_empty() {
+        return None;
+    }
+    let (w, h) = (fr.width as u32, fr.height as u32);
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    for y in 0..fr.height {
+        for x in 0..fr.width {
+            if let Some(idx) = fr.pixel(x, y) {
+                let [r, g, b] = palette.rgb(idx);
+                let o = (y * fr.width + x) * 4;
+                rgba[o..o + 4].copy_from_slice(&[r, g, b, 255]);
+            }
+        }
+    }
+    let mut image = Image::new(
+        bevy::render::render_resource::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        bevy::render::render_resource::TextureDimension::D2,
+        rgba,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD,
+    );
+    image.sampler = bevy::image::ImageSampler::nearest();
+    Some((images.add(image), UVec2::new(w, h)))
+}
+
+/// The panel and its parts.
+#[derive(Component)]
+struct SidebarRoot;
+#[derive(Component)]
+struct PowerText;
+#[derive(Component)]
+struct PieceBox;
+#[derive(Component)]
+struct PieceSlotButton(usize);
+#[derive(Component)]
+struct BuildButton {
+    stem: String,
+    spawn: bool,
+}
+#[derive(Component)]
+struct MinimapNode;
+#[derive(Component)]
+struct ViewBox;
+
+/// The minimap's world bounds and scale, for placing the view box and clicks.
+#[derive(Resource, Default)]
+struct MinimapFrame {
+    /// World cell of the map's top-left, cells per map pixel.
+    origin: Vec2,
+    cells_per_px: f32,
+    size: Vec2,
+}
+
+fn colour(cfg: &islefall_sim::config::Sidebar, name: &str) -> Color {
+    let [r, g, b] = cfg.colours.get(name).copied().unwrap_or([1.0, 0.0, 1.0]);
+    Color::srgb(r, g, b)
+}
+
+/// Build the panel: counter, piece queue, build list, minimap.
+fn spawn_sidebar(commands: &mut Commands, data: &GameData, lib: &mut ShapeLibrary, images: &mut Assets<Image>, layouts: &mut Assets<TextureAtlasLayout>) {
+    let sb = &data.cfg.sidebar;
+    let width = sb.width;
+    let back = frame_image(data, &sb.art, sb.back_frame, images);
+    let counter = frame_image(data, &sb.art, sb.counter_frame, images);
+    let ruler = frame_image(data, &sb.art, sb.ruler_frame, images);
+    let crystal = frame_image(data, &sb.crystal, 0, images);
+    let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+    let mut root = commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            left: px(0),
+            top: px(0),
+            width: px(width),
+            height: percent(100),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(px(6)),
+            row_gap: px(6),
+            overflow: Overflow::clip(),
+            ..default()
+        },
+        BackgroundColor(Color::srgb(0.25, 0.24, 0.22)),
+        SidebarRoot,
+    ));
+    root.with_children(|panel| {
+        if let Some((back, _)) = &back {
+            panel.spawn((
+                ImageNode { image: back.clone(), image_mode: NodeImageMode::Tiled { tile_x: true, tile_y: true, stretch_value: 1.0 }, ..default() },
+                Node { position_type: PositionType::Absolute, left: px(0), top: px(0), width: percent(100), height: percent(100), ..default() },
+            ));
+        }
+        if let Some((ruler, size)) = &ruler {
+            panel.spawn((
+                ImageNode { image: ruler.clone(), color: Color::srgba(1.0, 1.0, 1.0, 0.6), ..default() },
+                Node { position_type: PositionType::Absolute, left: px((width - size.x as f32) / 2.0), top: px(0), width: px(size.x as f32), height: px(size.y as f32), ..default() },
+            ));
+        }
+        // Storm Power.
+        let mut counter_node = Node { width: percent(100), height: px(30), align_items: AlignItems::Center, justify_content: JustifyContent::Center, column_gap: px(6), ..default() };
+        let mut row = match &counter {
+            Some((img, _)) => {
+                counter_node.padding = UiRect::axes(px(8), px(2));
+                panel.spawn((ImageNode { image: img.clone(), image_mode: NodeImageMode::Stretch, ..default() }, counter_node))
+            }
+            None => panel.spawn((BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)), counter_node)),
+        };
+        row.with_children(|r| {
+            r.spawn((Text::new("0"), TextFont { font_size: 20.0.into(), ..default() }, TextColor(Color::srgb(0.95, 0.2, 0.2)), PowerText));
+            if let Some((c, size)) = &crystal {
+                r.spawn((ImageNode::new(c.clone()), Node { width: px(size.x as f32), height: px(size.y as f32), ..default() }));
+            }
+        });
+        // The piece queue.
+        panel.spawn((Node { width: percent(100), flex_wrap: FlexWrap::Wrap, column_gap: px(6), row_gap: px(6), justify_content: JustifyContent::Center, ..default() }, PieceBox));
+        // The build list.
+        let icon = sb.icon_size;
+        let entries: Vec<(String, bool)> = data.cfg.controls.build_tools.iter().map(|t| (t.clone(), false)).chain(data.cfg.controls.unit_tools.iter().map(|t| (t.clone(), true))).collect();
+        panel.spawn((Node { width: percent(100), flex_direction: FlexDirection::Column, row_gap: px(2), flex_grow: 1.0, overflow: Overflow::clip(), ..default() },)).with_children(|list| {
+            for (stem, spawn) in entries {
+                let def = data.install.type_def(&stem);
+                let name = def.and_then(|d| d.get_str("description")).unwrap_or(stem.as_str()).to_string();
+                let cost = def.and_then(|d| d.get_i64("cost")).unwrap_or(0);
+                let shape = lib.get_or_load(&data.install, palette, &stem, images, layouts);
+                let icon_frame = shape.and_then(|sh| {
+                    let n = sh.labels.len();
+                    let gump = (0..n).find(|&i| sh.flags[i].iter().any(|f| f.eq_ignore_ascii_case("gumpframe")));
+                    let default = (0..n).find(|&i| sh.flags[i].iter().any(|f| f.eq_ignore_ascii_case("default")));
+                    gump.or(default).map(|i| (sh.image.clone(), sh.layout.clone(), i, sh.frames[i].size))
+                });
+                let mut b = list.spawn((
+                    Button,
+                    Node { width: percent(100), height: px(icon + 4.0), align_items: AlignItems::Center, column_gap: px(6), padding: UiRect::all(px(2)), ..default() },
+                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
+                    BuildButton { stem: stem.clone(), spawn },
+                ));
+                b.with_children(|row| {
+                    match icon_frame {
+                        Some((image, layout, index, size)) => {
+                            let scale = (icon / size.x.max(1) as f32).min(icon / size.y.max(1) as f32).min(1.5);
+                            row.spawn((
+                                ImageNode { image, texture_atlas: Some(TextureAtlas { layout, index }), image_mode: NodeImageMode::Stretch, ..default() },
+                                Node { width: px(size.x as f32 * scale), height: px(size.y as f32 * scale), flex_shrink: 0.0, ..default() },
+                            ));
+                        }
+                        None => {
+                            row.spawn((Node { width: px(icon), height: px(icon), ..default() }, BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.3))));
+                        }
+                    }
+                    row.spawn((Node { flex_direction: FlexDirection::Column, ..default() },)).with_children(|col| {
+                        col.spawn((Text::new(name), TextFont { font_size: 12.0.into(), ..default() }, TextColor(Color::WHITE)));
+                        col.spawn((Text::new(if cost > 0 { cost.to_string() } else { String::new() }), TextFont { font_size: 12.0.into(), ..default() }, TextColor(Color::srgb(1.0, 0.85, 0.3))));
+                    });
+                });
+            }
+        });
+        // The minimap.
+        let map_w = width - 12.0;
+        panel.spawn((
+            Node { width: px(map_w), height: px(sb.minimap_height), flex_shrink: 0.0, ..default() },
+            BackgroundColor(colour(sb, "sky")),
+            ImageNode { image: Handle::default(), image_mode: NodeImageMode::Stretch, ..default() },
+            bevy::ui::RelativeCursorPosition::default(),
+            Interaction::None,
+            MinimapNode,
+        ))
+        .with_children(|m| {
+            m.spawn((
+                Node { position_type: PositionType::Absolute, left: px(0), top: px(0), width: px(10), height: px(10), border: UiRect::all(px(1)), ..default() },
+                BorderColor::all(colour(sb, "view")),
+                ViewBox,
+            ));
+        });
+    });
+}
+
+/// Keep the panel's figures and lists current: the Storm Power, the piece
+/// queue and which build entry is the tool in hand.
+#[allow(clippy::too_many_arguments)]
+fn sidebar_update(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    player: Res<Player>,
+    mut texts: Query<&mut Text, With<PowerText>>,
+    boxes: Query<Entity, With<PieceBox>>,
+    slots: Query<Entity, With<PieceSlotButton>>,
+    mut buttons: Query<(&BuildButton, &mut BackgroundColor)>,
+    mut last_queue: Local<Vec<String>>,
+) {
+    let w = sim.world();
+    let me = player.id as usize % data.cfg.sim.max_players;
+    for mut t in &mut texts {
+        let s = w.powers[me].to_string();
+        if t.0 != s {
+            t.0 = s;
+        }
+    }
+    let names: Vec<String> = w.queue.slots.iter().map(|p| p.name.clone()).collect();
+    if *last_queue != names {
+        *last_queue = names;
+        for e in &slots {
+            commands.entity(e).despawn();
+        }
+        if let Ok(boxe) = boxes.single() {
+            let sb = &data.cfg.sidebar;
+            let cell = 7.0;
+            commands.entity(boxe).with_children(|b| {
+                for (i, piece) in w.queue.slots.iter().enumerate() {
+                    let (pw, ph) = piece.size();
+                    let key = data.cfg.controls.slot_keys.get(i).cloned().unwrap_or_default();
+                    b.spawn((
+                        Button,
+                        Node { width: px((sb.width - 12.0) / 2.0 - 6.0), height: px(cell * 4.0 + 18.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: UiRect::all(px(2)), ..default() },
+                        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
+                        PieceSlotButton(i),
+                    ))
+                    .with_children(|slot| {
+                        slot.spawn((Node { width: px(cell * pw as f32), height: px(cell * ph as f32), position_type: PositionType::Relative, ..default() },)).with_children(|grid| {
+                            for &(ox, oy) in &piece.cells {
+                                grid.spawn((
+                                    Node { position_type: PositionType::Absolute, left: px(ox as f32 * cell), top: px(oy as f32 * cell), width: px(cell - 1.0), height: px(cell - 1.0), ..default() },
+                                    BackgroundColor(colour(sb, "bridge")),
+                                ));
+                            }
+                        });
+                        slot.spawn((Text::new(key), TextFont { font_size: 11.0.into(), ..default() }, TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8))));
+                    });
+                }
+            });
+        }
+    }
+    for (b, mut bg) in &mut buttons {
+        let chosen = match &player.tool {
+            Tool::Drop(stem) => !b.spawn && *stem == b.stem,
+            Tool::Spawn(stem) => b.spawn && *stem == b.stem,
+            Tool::Bridge(..) => false,
+        };
+        let wanted = if chosen { Color::srgba(1.0, 0.9, 0.4, 0.35) } else { Color::srgba(0.0, 0.0, 0.0, 0.25) };
+        if bg.0 != wanted {
+            bg.0 = wanted;
+        }
+    }
+}
+
+/// Clicks on the panel: a piece slot or a build entry becomes the tool.
+fn sidebar_clicks(
+    mut sim: ResMut<Sim>,
+    data: Res<GameData>,
+    mut player: ResMut<Player>,
+    mut status: ResMut<Status>,
+    mut rec: ResMut<Recording>,
+    slots: Query<(&Interaction, &PieceSlotButton), Changed<Interaction>>,
+    builds: Query<(&Interaction, &BuildButton), Changed<Interaction>>,
+) {
+    for (i, slot) in &slots {
+        if *i == Interaction::Pressed {
+            player.tool = Tool::Bridge(slot.0, 0);
+            status.say(format!("tool: bridge piece {} from slot {}", sim.world().queue.slots.get(slot.0).map(|p| p.name.as_str()).unwrap_or("?"), slot.0 + 1));
+        }
+    }
+    for (i, b) in &builds {
+        if *i != Interaction::Pressed {
+            continue;
+        }
+        let rules = data.rules(&b.stem);
+        if rules.energy.is_some() && !sim.world().in_production(player.id, &b.stem) {
+            rec.issue(sim.world_mut(), &data.scripts, &mut status, Command::Produce { kind: b.stem.clone() });
+        }
+        player.tool = if b.spawn { Tool::Spawn(b.stem.clone()) } else { Tool::Drop(b.stem.clone()) };
+        status.say(format!("tool: {}", b.stem));
+    }
+}
+
+/// Redraw the minimap now and then, place the view box, and jump the
+/// camera where the map is clicked.
+#[allow(clippy::too_many_arguments)]
+fn minimap(
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    time: Res<Time>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    mut images: ResMut<Assets<Image>>,
+    mut frame: ResMut<MinimapFrame>,
+    mut map: Query<(&mut ImageNode, &bevy::ui::RelativeCursorPosition), With<MinimapNode>>,
+    mut view_box: Query<&mut Node, With<ViewBox>>,
+    mut cameras: Query<(&Camera, &mut Transform, &Projection), With<Camera2d>>,
+    mut timer: Local<f32>,
+) {
+    let w = sim.world();
+    let g = data.grid();
+    let sb = &data.cfg.sidebar;
+    let Ok((mut node, cursor)) = map.single_mut() else { return };
+    let size = Vec2::new(sb.width - 12.0, sb.minimap_height);
+    *timer -= time.delta_secs();
+    if *timer <= 0.0 || frame.size == Vec2::ZERO {
+        *timer = 0.3;
+        // Bounds of everything that is ground, with a margin.
+        let mut min = Cell::new(i32::MAX, i32::MAX);
+        let mut max = Cell::new(i32::MIN, i32::MIN);
+        for c in w.islands.iter().flat_map(|i| i.cells()).chain(w.platforms.cells()).chain(w.bridges.keys().copied()) {
+            min = Cell::new(min.x.min(c.x), min.y.min(c.y));
+            max = Cell::new(max.x.max(c.x), max.y.max(c.y));
+        }
+        if min.x > max.x {
+            return;
+        }
+        let (min, max) = (Cell::new(min.x - 2, min.y - 2), Cell::new(max.x + 3, max.y + 3));
+        let cells = Vec2::new((max.x - min.x) as f32, (max.y - min.y) as f32);
+        // Cells are wider than tall; keep the map's shape in source pixels.
+        let world_px = Vec2::new(cells.x * g.cell_w as f32, cells.y * g.cell_h as f32);
+        let scale = (size.x / world_px.x).min(size.y / world_px.y);
+        let (mw, mh) = (size.x as u32, size.y as u32);
+        let mut rgba = vec![0u8; (mw * mh * 4) as usize];
+        let sky = sb.colours.get("sky").copied().unwrap_or([0.0, 0.0, 0.0]);
+        for px_ in rgba.chunks_exact_mut(4) {
+            px_.copy_from_slice(&[(sky[0] * 255.0) as u8, (sky[1] * 255.0) as u8, (sky[2] * 255.0) as u8, 255]);
+        }
+        let mut fill = |c: Cell, col: [f32; 3]| {
+            let x0 = ((c.x - min.x) as f32 * g.cell_w as f32 * scale) as u32;
+            let y0 = ((c.y - min.y) as f32 * g.cell_h as f32 * scale) as u32;
+            let x1 = (((c.x - min.x + 1) as f32 * g.cell_w as f32 * scale) as u32).max(x0 + 1);
+            let y1 = (((c.y - min.y + 1) as f32 * g.cell_h as f32 * scale) as u32).max(y0 + 1);
+            for y in y0..y1.min(mh) {
+                for x in x0..x1.min(mw) {
+                    let o = ((y * mw + x) * 4) as usize;
+                    rgba[o..o + 4].copy_from_slice(&[(col[0] * 255.0) as u8, (col[1] * 255.0) as u8, (col[2] * 255.0) as u8, 255]);
+                }
+            }
+        };
+        let col = |name: &str| sb.colours.get(name).copied().unwrap_or([1.0, 0.0, 1.0]);
+        for (i, island) in w.islands.iter().enumerate() {
+            let theme = w.island_themes.get(i).copied().unwrap_or(Theme::Sun);
+            let c = col(theme_name(theme));
+            for cell in island.cells() {
+                fill(cell, c);
+            }
+        }
+        for cell in w.platforms.cells() {
+            fill(cell, col("sun"));
+        }
+        for cell in w.bridges.keys() {
+            fill(*cell, col("bridge"));
+        }
+        for s in &w.structures {
+            if s.max_hp == 0 {
+                continue;
+            }
+            let c = if s.owner == 0 { col("mine") } else { col("enemy") };
+            fill(s.centre(), c);
+        }
+        for u in w.units.iter().filter(|u| u.alive) {
+            fill(u.cell(), col("unit"));
+        }
+        let image = images.add(Image::new(
+            bevy::render::render_resource::Extent3d { width: mw, height: mh, depth_or_array_layers: 1 },
+            bevy::render::render_resource::TextureDimension::D2,
+            rgba,
+            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+            bevy::asset::RenderAssetUsages::RENDER_WORLD,
+        ));
+        let old = std::mem::replace(&mut node.image, image);
+        images.remove(&old);
+        *frame = MinimapFrame { origin: Vec2::new(min.x as f32, min.y as f32), cells_per_px: 1.0 / scale, size };
+    }
+    let Ok((camera, mut cam_tf, proj)) = cameras.single_mut() else { return };
+    let scale = match proj {
+        Projection::Orthographic(o) => o.scale,
+        _ => 1.0,
+    };
+    // The view box: the camera's world rectangle on the map.
+    if let (Some(view), Ok(mut vb)) = (camera.logical_viewport_size(), view_box.single_mut()) {
+        let half = view * 0.5 * scale;
+        let centre = cam_tf.translation.truncate();
+        let to_map = |world: Vec2| Vec2::new((world.x / g.cell_w as f32 - frame.origin.x) / frame.cells_per_px, (-world.y / g.cell_h as f32 - frame.origin.y) / frame.cells_per_px);
+        let a = to_map(centre - half);
+        let b = to_map(centre + half);
+        let (l, t) = (a.x.min(b.x), a.y.min(b.y));
+        let (r, btm) = (a.x.max(b.x), a.y.max(b.y));
+        vb.left = px(l.clamp(0.0, size.x));
+        vb.top = px(t.clamp(0.0, size.y));
+        vb.width = px((r - l).min(size.x - l.max(0.0)).max(2.0));
+        vb.height = px((btm - t).min(size.y - t.max(0.0)).max(2.0));
+    }
+    // A click on the map centres the camera there.
+    if buttons.pressed(MouseButton::Left) && cursor.cursor_over {
+        if let Some(n) = cursor.normalized {
+            let map_px = (n + Vec2::splat(0.5)) * size;
+            let cell = frame.origin + map_px * frame.cells_per_px;
+            cam_tf.translation.x = cell.x * g.cell_w as f32;
+            cam_tf.translation.y = -(cell.y * g.cell_h as f32);
+        }
+    }
+}
+
+/// Keep the world's camera to the right of the panel.
+fn fit_viewport(data: Res<GameData>, windows: Query<&Window, With<PrimaryWindow>>, mut cameras: Query<&mut Camera, With<Camera2d>>) {
+    let Ok(window) = windows.single() else { return };
+    let sf = window.scale_factor();
+    let left = (data.cfg.sidebar.width * sf) as u32;
+    let (pw, ph) = (window.physical_width(), window.physical_height());
+    if pw <= left + 1 || ph == 0 {
+        return;
+    }
+    let wanted = bevy::camera::Viewport { physical_position: UVec2::new(left, 0), physical_size: UVec2::new(pw - left, ph), ..default() };
+    for mut cam in &mut cameras {
+        let same = cam.viewport.as_ref().is_some_and(|v| v.physical_position == wanted.physical_position && v.physical_size == wanted.physical_size);
+        if !same {
+            cam.viewport = Some(wanted.clone());
+        }
+    }
+}
+
+/// Whether the cursor is over the panel rather than the world.
+fn over_sidebar(windows: &Query<&Window, With<PrimaryWindow>>, data: &GameData) -> bool {
+    windows.single().ok().and_then(|w| w.cursor_position()).is_some_and(|c| c.x < data.cfg.sidebar.width)
 }
 
 /// A little four-pointed star, for the drifting marks of an Energy reach.
@@ -872,12 +1299,13 @@ fn setup(
         Mode::Island => {
             setup_map(&mut commands, &data, &mut sim, &mut lib, &mut images, &mut layouts);
             spawn_sky(&mut commands, &data, &mut images);
+            spawn_sidebar(&mut commands, &data, &mut lib, &mut images, &mut layouts);
             commands.spawn((
                 Text::new(""),
                 TextFont { font_size: data.cfg.hud.font_size.into(), ..default() },
                 TextColor(Color::WHITE),
                 BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
-                Node { position_type: PositionType::Absolute, top: px(8), left: px(8), padding: UiRect::all(px(6)), ..default() },
+                Node { position_type: PositionType::Absolute, top: px(8), left: px(data.cfg.sidebar.width + 8.0), padding: UiRect::all(px(6)), ..default() },
                 Hud,
             ));
         }
@@ -1514,7 +1942,7 @@ fn mouse_actions(
 ) {
     let left = buttons.just_pressed(MouseButton::Left);
     let right = buttons.just_pressed(MouseButton::Right);
-    if !left && !right {
+    if (!left && !right) || over_sidebar(&windows, &data) {
         return;
     }
     let Some(cell) = cursor_cell(&windows, &cameras, data.grid()) else { return };
@@ -1652,6 +2080,9 @@ fn ghost(
         commands.entity(e).despawn();
     }
     let g = data.grid();
+    if over_sidebar(&windows, &data) {
+        return;
+    }
     let Some(cell) = cursor_cell(&windows, &cameras, g) else { return };
     let w = sim.world();
     let (cells, ok) = match &player.tool {
