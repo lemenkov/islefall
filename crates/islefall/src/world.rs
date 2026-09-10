@@ -289,10 +289,13 @@ pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Anima
     } else {
         (vec![default], None)
     };
+    // A turret's bearing frames are small overlays of the arm drawn over the
+    // default picture, never the picture itself.
     let turret = {
-        let t = group(&rules.turret_label, &Vec::new());
+        let t: Vec<usize> = group(&rules.turret_label, &Vec::new()).into_iter().filter(|&i| i != default && area(i) < area(default) * rules.overlay_share).collect();
         if t.len() >= rules.turret_min_frames { t } else { Vec::new() }
     };
+    let (sequence, base) = if turret.is_empty() { (sequence, base) } else { (vec![turret[0]], Some(default)) };
     let cardinal = rules.cardinal.iter().map(|(dir, label)| (dir.clone(), group(label, &Vec::new()))).filter(|(_, f)| !f.is_empty()).collect();
     let stages = rules.stages.get(kind).copied().unwrap_or(1).max(1);
     StructureFrames { sequence, base, frames: shape.frames.clone(), turret, cardinal, stages }

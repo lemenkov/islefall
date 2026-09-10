@@ -48,7 +48,8 @@ and a Workshop's `A`, `B` and `C` are its three levels. Within a label,
 one big picture followed by small frames means window lights drawn over
 the picture (a Temple, a Workshop), while frames all of a size are whole
 pictures that loop (a battery turning);
-`P` frames of a Disc Thrower are its 32 bearings, and a cannon's `L`,
+`P` frames of a Disc Thrower are its 32 bearings, small pictures of the
+arm drawn over the base, and a cannon's `L`,
 `M`, `N` and `O` frames are its north, east, south and west firing
 animations (the letters are from the files' own comments). Types flagged
 `randframe` show one of their default frame's group, chosen per cell
