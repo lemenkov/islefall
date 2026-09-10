@@ -2052,9 +2052,12 @@ fn burning(mut commands: Commands, sim: Res<Sim>, data: Res<GameData>, time: Res
                 break;
             }
             expected -= 1.0;
-            let (x0, y0) = s.cell.top_left_px(g);
-            let x = x0 as f32 + next() * (s.foot_x * g.cell_w) as f32;
-            let y = -(y0 as f32) + next() * ((s.foot_y - 1) * g.cell_h) as f32 - g.cell_h as f32 * 0.5;
+            // The footprint runs up and left from the hotspot cell.
+            let (hx, hy) = s.cell.top_left_px(g);
+            let left = hx as f32 - ((s.foot_x - 1) * g.cell_w) as f32;
+            let top = hy as f32 - ((s.foot_y - 1) * g.cell_h) as f32;
+            let x = left + next() * (s.foot_x * g.cell_w) as f32;
+            let y = -(top + next() * (s.foot_y * g.cell_h) as f32);
             let size = 2.0 + next() * 2.0;
             commands.spawn((
                 Sprite::from_color(Color::srgb(1.0, 0.85, 0.3), Vec2::splat(size)),
