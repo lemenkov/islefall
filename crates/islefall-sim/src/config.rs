@@ -31,6 +31,28 @@ pub struct Config {
     pub sky: Sky,
     pub sprites: Sprites,
     pub hud: Hud,
+    pub animation: Animation,
+}
+
+/// How a structure's frames are read for idling, variants and turrets.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Animation {
+    /// Frames with this label loop while the structure stands.
+    pub idle_label: String,
+    /// Frame flags that mark a frame's role rather than its look.
+    pub tag_flags: Vec<String>,
+    /// Types with this flag show one frame of the default's group, picked per cell.
+    pub variant_flag: String,
+    /// Shooters with at least `turret_min_frames` frames of this label turn
+    /// to their target, frame 0 facing `turret_first`, then clockwise or not.
+    pub turret_label: String,
+    pub turret_min_frames: usize,
+    pub turret_first: String,
+    pub turret_clockwise: bool,
+    /// Shooters that aim only north, east, south and west play the label
+    /// of that direction once when they fire.
+    pub cardinal: BTreeMap<String, String>,
 }
 
 /// The on-screen text: templates with `{power}`, `{knowledge}`, `{techs}`,
@@ -369,6 +391,9 @@ pub struct Priest {
 #[serde(deny_unknown_fields)]
 pub struct Energy {
     pub range_px: i32,
+    /// Stars drifting round an Energy source's reach, and their orbit time.
+    pub stars: u32,
+    pub star_seconds: f32,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -399,6 +424,8 @@ pub struct Controls {
     pub hash_every_seconds: f64,
     /// Where F5 saves a snapshot and F9 loads it from.
     pub save_file: String,
+    /// How long a shot's tracer stays on screen.
+    pub tracer_seconds: f32,
 }
 
 #[derive(Debug)]

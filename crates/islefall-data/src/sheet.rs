@@ -28,6 +28,9 @@ pub struct SheetFrame {
     /// measured from the rect's top-left corner.
     pub hotspot: [i32; 2],
     /// The shadow's rect and hotspot in the same picture, if the frame has one.
+    /// The frame's flags as in the type file (`default`, `unlit`, ...).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<[u32; 4]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -79,8 +82,8 @@ mod tests {
         let sheet = Sheet {
             image: "golem.png".into(),
             frames: vec![
-                SheetFrame { animation: "A".into(), rect: [0, 0, 20, 30], hotspot: [10, 29], shadow: Some([21, 0, 24, 12]), shadow_hotspot: Some([12, 6]) },
-                SheetFrame { animation: "B".into(), rect: [0, 0, 0, 0], hotspot: [0, 0], shadow: None, shadow_hotspot: None },
+                SheetFrame { animation: "A".into(), rect: [0, 0, 20, 30], hotspot: [10, 29], flags: vec!["default".into()], shadow: Some([21, 0, 24, 12]), shadow_hotspot: Some([12, 6]) },
+                SheetFrame { animation: "B".into(), rect: [0, 0, 0, 0], hotspot: [0, 0], flags: Vec::new(), shadow: None, shadow_hotspot: None },
             ],
         };
         let text = sheet.to_toml();

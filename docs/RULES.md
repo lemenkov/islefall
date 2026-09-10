@@ -39,6 +39,21 @@ Paths are found with A* over eight neighbours; diagonal steps never cut the
 corner of a blocked cell. Movement is fixed point (256 steps per cell) at
 30 ticks per second, with `speed` read as cells per second.
 
+## What stands still shows
+
+The original's structures move: geysers spout, batteries turn, Workshops
+work, the Disc Thrower turns to its target and a cannon rises to fire. The
+type files carry it all as frame labels: `A` frames loop for an idle
+(drawn over the default frame when that frame is not one of them, as a
+Temple's window lights are),
+`P` frames of a Disc Thrower are its 32 bearings, and a cannon's `L`,
+`M`, `N` and `O` frames are its north, east, south and west firing
+animations (the letters are from the files' own comments). Types flagged
+`randframe` show one of their default frame's group, chosen per cell, so
+no two trees look alike. `[animation]` in the rules names the labels and
+flags. An Energy source's reach is shown as the original showed it: a ring
+of small stars drifting round it, not a drawn circle.
+
 ## Bridges
 
 From the manual and the tutorial texts:
@@ -178,7 +193,11 @@ From the type properties and the manual:
   flag says so, so Islefall applies it to types whose name contains
   "cannon". Everything else fires in any direction.
 - Targets are enemies within range, highest `threat` first, nearest second.
-  Units count below any structure. Range is measured from the footprint
+  Units count below any structure. Enemy bridge cells are targets too, at
+  no threat, so a cannon with nothing else in reach shoots the bridge: a
+  shot cracks a sound cell and breaks a cracked one (the `bridge_hit`
+  hook, read from the manual's rule for explosions), and a hardened cell
+  shrugs it off. Range is measured from the footprint
   edge in Chebyshev distance.
 - `maxHitPoints` is the health of structures and units; 0 means the type
   cannot be damaged (terrain and effects).

@@ -146,6 +146,12 @@ impl Scripts {
         v.as_int().map(|i| i as i32).map_err(|t| ScriptError::Call { hook: "kill_reward", message: format!("expected int, got {t}") })
     }
 
+    /// `bridge_hit(state, damage)` -> "crack", "destroy" or "none".
+    pub fn bridge_hit(&self, state: &str, damage: i64) -> Result<String, ScriptError> {
+        let v = self.call("bridge_hit", (state.to_string(), damage))?;
+        v.into_string().map_err(|t| ScriptError::Call { hook: "bridge_hit", message: format!("expected a string, got {t}") })
+    }
+
     pub fn target_priority(&self, threat: i64, distance: i64, is_unit: bool) -> Result<i64, ScriptError> {
         let v = self.call("target_priority", (threat, distance, is_unit))?;
         v.as_int().map_err(|t| ScriptError::Call { hook: "target_priority", message: format!("expected int, got {t}") })
@@ -184,6 +190,9 @@ mod tests {
         assert_eq!(s.air_attack("Shooter", 1, 12, 24, 8, 12).unwrap(), Some(AirAttack { air_range: 12, air_damage: 24, ground: true }));
         assert_eq!(s.air_attack("Shooter", 0, 0, 0, 22, 16).unwrap(), Some(AirAttack { air_range: 0, air_damage: 0, ground: true }));
         assert_eq!(s.air_attack("Defense", 0, 0, 0, 0, 0).unwrap(), None);
+        assert_eq!(s.bridge_hit("normal", 80).unwrap(), "crack");
+        assert_eq!(s.bridge_hit("cracked", 80).unwrap(), "destroy");
+        assert_eq!(s.bridge_hit("hard", 80).unwrap(), "none");
         assert_eq!(s.construction_seconds(400, 10.0, 5.0).unwrap(), 8.0, "a Sun Cannon stands in eight seconds");
         assert_eq!(s.construction_seconds(400, 0.0, 5.0).unwrap(), 1.0, "no rate: a moment");
         assert_eq!(s.kill_reward(1200, 25).unwrap(), 300);

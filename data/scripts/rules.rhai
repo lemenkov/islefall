@@ -131,3 +131,15 @@ fn construction_seconds(cost, construction_rate, power_per_rate) {
 fn kill_reward(cost, percent) {
     cost * percent / 100
 }
+
+// What a shot does to a bridge cell in `state` ("normal", "cracked" or
+// "hard"): "crack", "destroy" or "none". The manual: explosions crack
+// sound bridges and destroy cracked ones; shots are read the same way,
+// and hardened bridges are indestructible.
+fn bridge_hit(state, damage) {
+    switch state {
+        "hard" => "none",
+        "cracked" => "destroy",
+        _ => "crack",
+    }
+}

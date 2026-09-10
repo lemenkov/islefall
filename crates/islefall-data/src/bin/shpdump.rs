@@ -234,6 +234,7 @@ fn export_one(install: &Installation, palette: &Palette, stem: &str, out: &std::
     const SHELF: u32 = 2048;
     let records = install.shape_records(stem).ok_or("no sprites")?;
     let labels: Vec<String> = install.type_def(stem).map(|d| d.frames.iter().map(|f| f.animation.clone()).collect()).unwrap_or_default();
+    let flags: Vec<Vec<String>> = install.type_def(stem).map(|d| d.frames.iter().map(|f| f.flags.clone()).collect()).unwrap_or_default();
     let decode = |offsets: &[usize]| -> Vec<Option<Frame>> { offsets.iter().map(|&o| install.shapes.decode(o).ok().filter(|f| !f.is_empty())).collect() };
     let images = decode(&records.images);
     let shadows = decode(&records.shadows);
@@ -265,7 +266,7 @@ fn export_one(install: &Installation, palette: &Palette, stem: &str, out: &std::
     let mut frames = Vec::with_capacity(images.len());
     for (i, img) in images.iter().enumerate() {
         let rect = rects[i];
-        let mut frame = SheetFrame { animation: labels.get(i).cloned().unwrap_or_else(|| "A".into()), rect, hotspot: [0, 0], shadow: None, shadow_hotspot: None };
+        let mut frame = SheetFrame { animation: labels.get(i).cloned().unwrap_or_else(|| "A".into()), rect, hotspot: [0, 0], flags: flags.get(i).cloned().unwrap_or_default(), shadow: None, shadow_hotspot: None };
         if let Some(f) = img {
             frame.hotspot = hotspot(f);
             blit(&mut rgba, width, f, rect, |idx| { let [r, g, b] = palette.rgb(idx); [r, g, b, 255] });

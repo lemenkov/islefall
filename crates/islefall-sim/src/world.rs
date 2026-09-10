@@ -32,6 +32,8 @@ pub enum BridgeState {
 pub enum Target {
     Structure(usize),
     Unit(usize),
+    /// An enemy bridge cell.
+    Bridge(Cell),
 }
 
 /// Why a piece could not be placed.
@@ -1452,6 +1454,26 @@ impl World {
         }
     }
 
+    /// A shot at a bridge cell: the `bridge_hit` hook says whether it cracks,
+    /// breaks or shrugs it off.
+    pub fn shoot_bridge(&mut self, cell: Cell, damage: i32, scripts: &Scripts) {
+        let Some(&state) = self.bridges.get(&cell) else { return };
+        let name = match state {
+            BridgeState::Normal => "normal",
+            BridgeState::Cracked => "cracked",
+            BridgeState::Hard => "hard",
+        };
+        match scripts.bridge_hit(name, damage as i64).as_deref() {
+            Ok("crack") => {
+                self.crack_bridge(cell);
+            }
+            Ok("destroy") => {
+                self.destroy_bridge(cell);
+            }
+            _ => {}
+        }
+    }
+
     /// Damage dealt by player `by`, who is rewarded for a kill (the manual:
     /// a share of the victim's Storm Power value).
     pub fn damage_structure_by(&mut self, index: usize, amount: i32, by: Option<u8>, scripts: &Scripts) {
@@ -1596,6 +1618,18 @@ impl World {
                     best = Some((key, Target::Structure(j)));
                 }
             }
+            // Enemy bridges are targets too, below anything with a threat.
+            if w.ground {
+                for (&c, &state) in &self.bridges {
+                    if state == BridgeState::Hard || self.bridge_owners.get(&c).is_none_or(|&o| o == s.owner) || !in_range(c) {
+                        continue;
+                    }
+                    let key = scripts.target_priority(0, s.distance_to(c) as i64, false).unwrap_or(0);
+                    if best.as_ref().is_none_or(|b| b.0 < key) {
+                        best = Some((key, Target::Bridge(c)));
+                    }
+                }
+            }
             for (j, u) in self.units.iter().enumerate() {
                 if !u.alive || u.owner == s.owner || u.carried_by.is_some() || u.invisible > 0 {
                     continue;
@@ -1623,9 +1657,11 @@ impl World {
             let hit = match target {
                 Target::Structure(j) => self.structures.get(j).map(|t| t.centre()),
                 Target::Unit(j) => self.units.get(j).map(|u| u.cell()),
+                Target::Bridge(c) => Some(c),
             };
             self.emit(EventKind::Fired, &kind, from, owner);
             if let Some(at) = hit {
+                self.structures[i].aim = Some(at);
                 self.emit(EventKind::Hit, &kind, at, owner);
             }
             match target {
@@ -1634,6 +1670,7 @@ impl World {
                     let dmg = if self.units[j].is_air { w.air_damage } else { w.damage };
                     self.damage_unit_by(j, dmg, Some(owner), scripts);
                 }
+                Target::Bridge(c) => self.shoot_bridge(c, w.damage, scripts),
             }
         }
         for s in &mut self.structures {
@@ -1994,6 +2031,7 @@ impl World {
                     self.damage_unit_by(j, strike, Some(owner), scripts);
                     !self.units[j].alive
                 }
+                Target::Bridge(_) => false,
             };
             if killed && attacker.as_ref().is_some_and(|a| a.kill_extends_life) {
                 self.units[i].life = self.attacker_life(&kind);
@@ -2649,6 +2687,31 @@ mod tests {
         assert!(!shared, "never in the standing unit's cell");
         assert_eq!(w.units[g].cell(), Cell::new(9, 2), "went round and arrived");
         assert_eq!(w.units[post].cell(), Cell::new(5, 2), "the standing unit was not pushed");
+    }
+
+    #[test]
+    fn shooters_crack_then_break_enemy_bridges() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 4), 0);
+        w.push_island(IslandMap::rect(Cell::new(12, 0), 4, 4), 1);
+        let scripts = test_scripts();
+        for x in (8..12).rev() {
+            assert!(w.place_map_bridge(1, Cell::new(x, 1)), "enemy bridge at {x}");
+        }
+        w.harden_bridge(Cell::new(9, 1));
+        let cannon = TypeRules { foot_x: 1, foot_y: 1, range: 6, hp_per_sec: 10, delay_between_shots: 1.0, damage_per_shot: 10, ..TypeRules::plain() };
+        w.drop_structure("suncannon", &cannon, Cell::new(2, 1)).unwrap();
+        w.step(&scripts);
+        assert_eq!(w.bridge_state(Cell::new(8, 1)), Some(BridgeState::Cracked), "the nearest enemy cell cracks first");
+        for _ in 0..w.cfg.ticks(1.0) {
+            w.step(&scripts);
+        }
+        assert!(!w.is_bridge(Cell::new(8, 1)), "the second shot breaks it");
+        for _ in 0..w.cfg.ticks(20.0) {
+            w.step(&scripts);
+        }
+        assert_eq!(w.bridge_state(Cell::new(9, 1)), Some(BridgeState::Hard), "a hardened cell shrugs shots off");
+        assert!(w.is_bridge(Cell::new(9, 1)));
     }
 
     #[test]

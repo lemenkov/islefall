@@ -42,6 +42,8 @@ pub struct LoadedShape {
     pub shadow: Option<(Handle<Image>, Handle<TextureAtlasLayout>, Vec<FrameInfo>)>,
     /// Animation label of each frame, from the type file or the mod's sheet.
     pub labels: Vec<String>,
+    /// Each frame's flags (`default`, `unlit`, ...).
+    pub flags: Vec<Vec<String>>,
 }
 
 impl LoadedShape {
@@ -121,6 +123,7 @@ impl ShapeLibrary {
             frames: main.frames,
             shadow: shadow.map(|a| (images.add(a.image), layouts.add(a.layout), a.frames)),
             labels: sheet.labels(),
+            flags: sheet.frames.iter().map(|f| f.flags.clone()).collect(),
         })
     }
 
@@ -134,7 +137,9 @@ impl ShapeLibrary {
         };
         let mut labels: Vec<String> = install.type_def(stem).map(|d| d.frames.iter().map(|f| f.animation.clone()).collect()).unwrap_or_default();
         labels.resize(main.frames.len(), "A".to_string());
-        Some(LoadedShape { image: images.add(main.image), layout: layouts.add(main.layout), frames: main.frames, shadow, labels })
+        let mut flags: Vec<Vec<String>> = install.type_def(stem).map(|d| d.frames.iter().map(|f| f.flags.clone()).collect()).unwrap_or_default();
+        flags.resize(main.frames.len(), Vec::new());
+        Some(LoadedShape { image: images.add(main.image), layout: layouts.add(main.layout), frames: main.frames, shadow, labels, flags })
     }
 }
 
@@ -202,13 +207,74 @@ pub fn spawn_structures(
     world: &World,
 ) {
     for (i, st) in world.structures.iter().enumerate() {
-        let Some(def) = install.type_def(&st.kind) else { continue };
-        let frame = def.frames.iter().position(|f| f.has_flag("default")).unwrap_or(0);
         let Some(shape) = lib.get_or_load(install, palette, &st.kind, images, layouts) else { continue };
+        let plan = structure_frames(shape, &world.cfg.animation, install.type_def(&st.kind).map(|d| d.flags.as_slice()).unwrap_or(&[]), st.cell);
         let z = Z_STRUCTURE + st.cell.y as f32 * 0.01;
-        let e = spawn_frame(commands, shape, frame, cell_to_world(st.cell, &world.cfg.grid), z);
-        commands.entity(e).insert(StructureSprite(i));
+        let pos = cell_to_world(st.cell, &world.cfg.grid);
+        if let Some(base) = plan.base {
+            let b = spawn_frame(commands, shape, base, pos, z);
+            commands.entity(b).insert(StructureSprite(i));
+        }
+        let e = spawn_frame(commands, shape, plan.sequence[0], pos, z + 0.001);
+        commands.entity(e).insert((StructureSprite(i), plan));
     }
+}
+
+/// What a standing structure shows: a looping idle, a variant picked per
+/// cell, or its default frame. Also marks what the turret can do.
+#[derive(Component, Clone, Debug)]
+pub struct StructureFrames {
+    /// Frames to cycle; one frame means a still.
+    pub sequence: Vec<usize>,
+    /// A frame drawn underneath when the idle frames are an overlay (a
+    /// Temple's window lights) rather than whole pictures.
+    pub base: Option<usize>,
+    /// Placement of every frame, for anchoring.
+    pub frames: Vec<FrameInfo>,
+    /// Frames of the all-round turret, in order of bearing; empty if none.
+    pub turret: Vec<usize>,
+    /// Frames of each cardinal firing animation, by direction name.
+    pub cardinal: HashMap<String, Vec<usize>>,
+}
+
+/// A frame's flags without the role tags, for grouping frames that share a look.
+fn look_flags(flags: &[String], tags: &[String]) -> Vec<String> {
+    let mut v: Vec<String> = flags.iter().filter(|f| !tags.iter().any(|t| t.eq_ignore_ascii_case(f))).map(|f| f.to_lowercase()).collect();
+    v.sort();
+    v
+}
+
+pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Animation, type_flags: &[String], cell: Cell) -> StructureFrames {
+    let n = shape.labels.len();
+    let default = (0..n).find(|&i| shape.flags[i].iter().any(|f| f.eq_ignore_ascii_case("default"))).unwrap_or(0);
+    let default_look = look_flags(shape.flags.get(default).map(Vec::as_slice).unwrap_or(&[]), &rules.tag_flags);
+    let untagged = |i: usize| !shape.flags[i].iter().any(|f| rules.tag_flags.iter().any(|t| t.eq_ignore_ascii_case(f)) && !f.eq_ignore_ascii_case("default"));
+    let group = |label: &str, look: &Vec<String>| -> Vec<usize> {
+        (0..n).filter(|&i| shape.labels[i].eq_ignore_ascii_case(label) && untagged(i) && look_flags(&shape.flags[i], &rules.tag_flags) == *look).collect()
+    };
+    let idle = {
+        let same = group(&rules.idle_label, &default_look);
+        if same.len() >= 2 { same } else { group(&rules.idle_label, &Vec::new()) }
+    };
+    let variants = if type_flags.iter().any(|f| f.eq_ignore_ascii_case(&rules.variant_flag)) {
+        group(&shape.labels[default], &default_look)
+    } else {
+        Vec::new()
+    };
+    let (sequence, base) = if idle.len() >= 2 {
+        let overlay = !idle.contains(&default);
+        (idle, overlay.then_some(default))
+    } else if variants.len() >= 2 {
+        (vec![variants[variation(cell, variants.len())]], None)
+    } else {
+        (vec![default], None)
+    };
+    let turret = {
+        let t = group(&rules.turret_label, &Vec::new());
+        if t.len() >= rules.turret_min_frames { t } else { Vec::new() }
+    };
+    let cardinal = rules.cardinal.iter().map(|(dir, label)| (dir.clone(), group(label, &Vec::new()))).filter(|(_, f)| !f.is_empty()).collect();
+    StructureFrames { sequence, base, frames: shape.frames.clone(), turret, cardinal }
 }
 
 /// Marks a bridge tile sprite so the layer can be rebuilt.

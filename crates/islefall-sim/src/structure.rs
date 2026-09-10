@@ -61,6 +61,8 @@ pub struct Structure {
     pub spell: Option<String>,
     /// Ticks of paralysis left: no shooting.
     pub paralysed: u32,
+    /// Where the last shot went, for turning the turret.
+    pub aim: Option<Cell>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +122,7 @@ impl Structure {
             is_obelisk: false,
             spell: None,
             paralysed: 0,
+            aim: None,
         }
     }
 

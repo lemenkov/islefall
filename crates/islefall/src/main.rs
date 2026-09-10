@@ -48,7 +48,7 @@ use islefall_sim::config::Grid;
 use islefall_sim::map::{self, MapDef};
 use islefall_sim::{Ai, AiMove, Applied, Cell, Command, Config, Dir8, IslandMap, Replay, Scripts, TypeRules, Unit, World};
 use sprites::FrameInfo;
-use world::{BridgeTile, LoadedShape, ShapeLibrary, StructureSprite, TerrainTile, Z_SHADOW, Z_SKY, Z_STRUCTURE, Z_UNIT};
+use world::{BridgeTile, LoadedShape, ShapeLibrary, StructureFrames, StructureSprite, TerrainTile, Z_SHADOW, Z_SKY, Z_STRUCTURE, Z_UNIT};
 
 /// Row-based draw order: things lower on screen draw over things above them.
 fn depth_z(base: f32, row: f32) -> f32 {
@@ -542,6 +542,8 @@ struct ShapeSprite {
     frames: Vec<FrameInfo>,
     step: usize,
     playing: bool,
+    /// Stop on the last frame instead of looping.
+    once: bool,
 }
 
 /// Marks entities spawned by the viewer so they can be replaced.
@@ -564,9 +566,12 @@ struct Ghost;
 #[derive(Resource)]
 struct RingImage(Handle<Image>);
 
-/// Marks Energy circle sprites.
+/// One star drifting round an Energy source: its centre and its place in the ring.
 #[derive(Component)]
-struct EnergyRing;
+struct EnergyRing {
+    centre: Vec2,
+    index: u32,
+}
 
 /// Marks per-frame overlay sprites: health bars and shot flashes.
 #[derive(Component)]
@@ -677,9 +682,9 @@ fn main() {
     .add_systems(Startup, move |mut commands: Commands, game: Res<GameData>| {
         commands.insert_resource(SoundBank::scan(&game.install.root.join(&game.cfg.sounds.dir), &game.cfg.sounds, &data));
     })
-    .add_systems(Startup, |mut commands: Commands, data: Res<GameData>, mut images: ResMut<Assets<Image>>| {
-        let ring = make_ring(&mut images, data.cfg.energy.range_px);
-        commands.insert_resource(RingImage(ring));
+    .add_systems(Startup, |mut commands: Commands, mut images: ResMut<Assets<Image>>| {
+        let star = make_star(&mut images);
+        commands.insert_resource(RingImage(star));
     })
     .add_systems(FixedUpdate, sim_step.run_if(resource_equals(Mode::Island)))
     .add_systems(Update, (common_keys, animate, auto_screenshot))
@@ -688,7 +693,7 @@ fn main() {
         (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
-    .add_systems(Update, tint_shells.after(sync_structures).run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, (tint_shells, animate_structures, drift_stars).after(sync_structures).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, (play_sounds.after(mouse_actions).after(bridge_keys), sync_loops, ambient, footsteps.after(animate), drift_sky.after(camera_keys)).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, viewer_keys.run_if(resource_equals(Mode::Viewer)));
     if let Ok(path) = std::env::var("ISLEFALL_SCREENSHOT") {
@@ -697,19 +702,17 @@ fn main() {
     app.run();
 }
 
-/// A translucent ring of the Energy radius; drawn around every own source.
-fn make_ring(images: &mut Assets<Image>, radius: i32) -> Handle<Image> {
-    let r = radius as f32;
-    let size = (radius * 2 + 2) as u32;
+/// A little four-pointed star, for the drifting marks of an Energy reach.
+fn make_star(images: &mut Assets<Image>) -> Handle<Image> {
+    let size = 5u32;
     let mut data = vec![0u8; (size * size * 4) as usize];
     for y in 0..size {
         for x in 0..size {
-            let dx = x as f32 + 0.5 - size as f32 / 2.0;
-            let dy = y as f32 + 0.5 - size as f32 / 2.0;
-            let d = (dx * dx + dy * dy).sqrt();
-            let alpha = if (d - r).abs() <= 1.0 { 160 } else if d < r { 18 } else { 0 };
+            let on_arm = x == size / 2 || y == size / 2;
+            let centre = x == size / 2 && y == size / 2;
+            let alpha = if centre { 255 } else if on_arm { 170 } else { 0 };
             let o = ((y * size + x) * 4) as usize;
-            data[o..o + 4].copy_from_slice(&[255, 240, 120, alpha]);
+            data[o..o + 4].copy_from_slice(&[255, 250, 200, alpha]);
         }
     }
     images.add(Image::new(
@@ -720,6 +723,7 @@ fn make_ring(images: &mut Assets<Image>, radius: i32) -> Handle<Image> {
         bevy::asset::RenderAssetUsages::RENDER_WORLD,
     ))
 }
+
 
 fn auto_screenshot(mut commands: Commands, time: Res<Time>, auto: Option<ResMut<AutoScreenshot>>) {
     let Some(mut auto) = auto else { return };
@@ -894,7 +898,7 @@ fn spawn_animated(
             sprite,
             frames[first].anchor(),
             Transform::from_translation(pos.extend(z)),
-            ShapeSprite { sequence: sequence.clone(), frames, step: 0, playing: true },
+            ShapeSprite { sequence: sequence.clone(), frames, step: 0, playing: true, once: false },
         ));
         if viewer {
             e.insert(ViewerEntity);
@@ -1566,6 +1570,9 @@ fn overlays(
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     existing: Query<Entity, With<Overlay>>,
+    time: Res<Time>,
+    mut tracers: Local<Vec<(Vec2, Vec2, f32)>>,
+    mut seen_tick: Local<Option<u64>>,
 ) {
     for e in &existing {
         commands.entity(e).despawn();
@@ -1573,6 +1580,14 @@ fn overlays(
     let w = sim.world();
     let g = data.grid();
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+    // A box round the selected unit.
+    if let Some(u) = w.units.get(player.selected).filter(|u| u.alive && u.owner == player.id) {
+        let p = unit_to_world(u, g) + Vec2::new(0.0, 10.0);
+        let (wd, ht, c) = (20.0, 26.0, Color::srgba(1.0, 1.0, 1.0, 0.8));
+        for (dx, dy, sw, sh) in [(0.0, ht / 2.0, wd, 1.0), (0.0, -ht / 2.0, wd, 1.0), (wd / 2.0, 0.0, 1.0, ht), (-wd / 2.0, 0.0, 1.0, ht)] {
+            commands.spawn((Sprite::from_color(c, Vec2::new(sw, sh)), Transform::from_translation(Vec3::new(p.x + dx, p.y + dy, 58.5)), Overlay));
+        }
+    }
     // Spell icons over their bearers, the selected caster's reach, and casting, prayer, paralysis and invisibility marks.
     for (i, u) in w.units.iter().enumerate() {
         if !u.alive || u.carried_by.is_some() {
@@ -1651,17 +1666,35 @@ fn overlays(
             ));
         }
     }
-    for &(_, target) in &w.last_shots {
-        let pos = match target {
-            islefall_sim::world::Target::Structure(j) => w.structures.get(j).map(|s| {
-                let (x, y) = s.centre().centre_px(g);
-                Vec2::new(x as f32, -(y as f32))
-            }),
-            islefall_sim::world::Target::Unit(j) => w.units.get(j).map(|u| unit_to_world(u, g)),
-        };
-        if let Some(pos) = pos {
-            commands.spawn((Sprite::from_color(Color::srgba(1.0, 0.9, 0.3, 0.8), Vec2::new(6.0, 6.0)), Transform::from_translation(pos.extend(61.0)), Overlay));
+    // Shots: a tracer from the muzzle to the target that lingers a moment, and a flash where it lands.
+    if *seen_tick != Some(w.tick) {
+        *seen_tick = Some(w.tick);
+        for &(shooter, target) in &w.last_shots {
+            let to = match target {
+                islefall_sim::world::Target::Structure(j) => w.structures.get(j).map(|s| cell_to_world(s.centre(), g)),
+                islefall_sim::world::Target::Unit(j) => w.units.get(j).map(|u| unit_to_world(u, g)),
+                islefall_sim::world::Target::Bridge(c) => Some(cell_to_world(c, g)),
+            };
+            if let (Some(from), Some(to)) = (w.structures.get(shooter).map(|s| cell_to_world(s.centre(), g)), to) {
+                tracers.push((from, to, data.cfg.controls.tracer_seconds));
+            }
         }
+    }
+    let dt = time.delta_secs();
+    tracers.retain_mut(|t| {
+        t.2 -= dt;
+        t.2 > 0.0
+    });
+    for &(from, to, left) in tracers.iter() {
+        let d = to - from;
+        let len = d.length().max(1.0);
+        let alpha = (left / data.cfg.controls.tracer_seconds.max(0.01)).clamp(0.0, 1.0);
+        commands.spawn((
+            Sprite::from_color(Color::srgba(1.0, 0.95, 0.5, 0.9 * alpha), Vec2::new(len, 1.5)),
+            Transform::from_translation(((from + to) / 2.0).extend(60.5)).with_rotation(Quat::from_rotation_z(d.y.atan2(d.x))),
+            Overlay,
+        ));
+        commands.spawn((Sprite::from_color(Color::srgba(1.0, 0.8, 0.3, alpha), Vec2::new(7.0, 7.0)), Transform::from_translation(to.extend(61.0)), Overlay));
     }
 }
 
@@ -1683,9 +1716,24 @@ fn sync_energy_rings(
     for e in &existing {
         commands.entity(e).despawn();
     }
-    for s in w.structures.iter().filter(|s| s.owner == player.id && s.produces.is_some()) {
+    for s in w.structures.iter().filter(|s| s.owner == player.id && s.produces.is_some() && s.complete()) {
         let (x, y) = s.centre().centre_px(data.grid());
-        commands.spawn((Sprite::from_image(ring.0.clone()), Transform::from_translation(Vec3::new(x as f32, -(y as f32), 0.9)), EnergyRing));
+        let centre = Vec2::new(x as f32, -(y as f32));
+        for index in 0..data.cfg.energy.stars {
+            commands.spawn((Sprite::from_image(ring.0.clone()), Transform::from_translation(centre.extend(0.9)), EnergyRing { centre, index }));
+        }
+    }
+}
+
+/// The stars circle their source, one turn every `star_seconds`.
+fn drift_stars(time: Res<Time>, data: Res<GameData>, mut stars: Query<(&EnergyRing, &mut Transform)>) {
+    let count = data.cfg.energy.stars.max(1) as f32;
+    let radius = data.cfg.energy.range_px as f32;
+    let turn = time.elapsed_secs() / data.cfg.energy.star_seconds.max(0.1) * std::f32::consts::TAU;
+    for (star, mut tf) in &mut stars {
+        let a = turn + star.index as f32 / count * std::f32::consts::TAU;
+        tf.translation.x = star.centre.x + radius * a.cos();
+        tf.translation.y = star.centre.y + radius * a.sin();
     }
 }
 
@@ -1821,10 +1869,85 @@ fn animate(
             continue;
         }
         let Some(atlas) = sprite.texture_atlas.as_mut() else { continue };
+        if shape.once && shape.step + 1 >= shape.sequence.len() {
+            shape.playing = false;
+            continue;
+        }
         shape.step = (shape.step + 1) % shape.sequence.len().max(1);
         let frame = shape.sequence[shape.step];
         atlas.index = frame;
         *anchor = shape.frames[frame].anchor();
+    }
+}
+
+/// Give each new structure sprite its idle animation, and turn turrets to
+/// their targets: an all-round turret shows the frame of its bearing, a
+/// cannon plays its direction's raise-and-fire once per shot.
+#[allow(clippy::type_complexity)]
+fn animate_structures(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    fresh: Query<(Entity, &StructureFrames), Without<ShapeSprite>>,
+    mut turrets: Query<(&StructureSprite, &StructureFrames, &mut ShapeSprite, &mut Sprite, &mut Anchor)>,
+    mut seen_tick: Local<Option<u64>>,
+) {
+    for (e, plan) in &fresh {
+        commands.entity(e).insert(ShapeSprite { sequence: plan.sequence.clone(), frames: plan.frames.clone(), step: 0, playing: plan.sequence.len() > 1, once: false });
+    }
+    let w = sim.world();
+    let fired: Vec<usize> = if *seen_tick == Some(w.tick) {
+        Vec::new()
+    } else {
+        *seen_tick = Some(w.tick);
+        w.last_shots.iter().map(|&(i, _)| i).collect()
+    };
+    let rules = &data.cfg.animation;
+    let g = data.grid();
+    for (s, plan, mut shape, mut sprite, mut anchor) in &mut turrets {
+        let Some(st) = w.structures.get(s.0) else { continue };
+        let Some(aim) = st.aim else { continue };
+        let (cx, cy) = st.centre().centre_px(g);
+        let (ax, ay) = aim.centre_px(g);
+        let (dx, dy) = ((ax - cx) as f32, (ay - cy) as f32);
+        if !plan.turret.is_empty() {
+            // Bearing clockwise from north on screen (y grows downwards).
+            let mut bearing = dx.atan2(-dy);
+            if !rules.turret_clockwise {
+                bearing = -bearing;
+            }
+            let first = match rules.turret_first.as_str() {
+                "east" => std::f32::consts::FRAC_PI_2,
+                "south" => std::f32::consts::PI,
+                "west" => -std::f32::consts::FRAC_PI_2,
+                _ => 0.0,
+            };
+            let n = plan.turret.len() as f32;
+            let turn = ((bearing - first).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU * n).round() as usize % plan.turret.len();
+            let frame = plan.turret[turn];
+            if shape.sequence != [frame] {
+                shape.sequence = vec![frame];
+                shape.step = 0;
+                shape.playing = false;
+                if let Some(atlas) = sprite.texture_atlas.as_mut() {
+                    atlas.index = frame;
+                }
+                *anchor = shape.frames[frame].anchor();
+            }
+        } else if !plan.cardinal.is_empty() && fired.contains(&s.0) {
+            let dir = if dx.abs() >= dy.abs() { if dx >= 0.0 { "east" } else { "west" } } else if dy >= 0.0 { "south" } else { "north" };
+            if let Some(seq) = plan.cardinal.get(dir) {
+                shape.sequence = seq.clone();
+                shape.step = 0;
+                shape.playing = true;
+                shape.once = true;
+                let frame = seq[0];
+                if let Some(atlas) = sprite.texture_atlas.as_mut() {
+                    atlas.index = frame;
+                }
+                *anchor = shape.frames[frame].anchor();
+            }
+        }
     }
 }
 

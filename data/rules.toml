@@ -172,6 +172,9 @@ heal_per_second = 2
 [energy]
 # Radius of an Energy source's circle, in source pixels (guess; the manual only says fixed).
 range_px = 128
+# The reach is shown as stars drifting round it, this many, one turn in so many seconds.
+stars = 12
+star_seconds = 9.0
 
 [ai]
 # Seconds between opponent moves.
@@ -224,6 +227,23 @@ lines = [
 victory = "Victory! The enemy High Priests have been sacrificed."
 defeat = "Defeat. Your High Priest was sacrificed."
 
+# How a structure's frames animate. Frames labelled `idle_label` loop
+# (geysers spout, batteries turn, Workshops work); a type flagged
+# `variant_flag` shows one frame of its default's group, chosen per cell
+# (trees differ). Shooters with `turret_min_frames` frames of `turret_label`
+# turn to their target (the Disc Thrower's 32); cannons, which aim only
+# along the axes, play the direction's label once when they fire. `tag_flags`
+# mark a frame's role, not its look, and are ignored when grouping.
+[animation]
+idle_label = "A"
+tag_flags = ["default", "baseframe", "help", "gumpframe"]
+variant_flag = "randframe"
+turret_label = "P"
+turret_min_frames = 8
+turret_first = "north"
+turret_clockwise = true
+cardinal = { north = "L", east = "M", south = "N", west = "O" }
+
 [controls]
 # Keys for the piece slots, as in the original Production window.
 slot_keys = ["Q", "W", "A", "S", "Z", "X"]
@@ -246,6 +266,8 @@ palette = "gifcloud"
 hash_every_seconds = 10.0
 # F5 saves the world here (a binary snapshot) and F9 loads it.
 save_file = "islefall.save"
+# Seconds a shot's tracer stays on screen.
+tracer_seconds = 0.35
 
 [sounds]
 # Directory of sound files inside the NetStorm installation.
