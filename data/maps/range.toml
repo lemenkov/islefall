@@ -1,0 +1,65 @@
+# A shooting range for checking turret animations: your Sun Cannon with an
+# enemy priest due south of it, and an enemy island whose Crossbow, Thunder
+# Cannon and Ice Cannon each have one of your units in range: north-west,
+# south and east of them.
+
+name = "Range"
+start_power = 1000
+camera = [14, 12]
+
+[[islands]]
+owner = 0
+theme = "sun"
+origin = [0, 0]
+size = [22, 10]
+
+[[islands]]
+owner = 1
+theme = "wind"
+origin = [0, 14]
+size = [30, 12]
+
+[[structures]]
+owner = 0
+kind = "dais"
+at = [7, 7]
+
+[[structures]]
+owner = 0
+kind = "suncannon"
+at = [14, 6]
+
+[[structures]]
+owner = 1
+kind = "windarcher"
+at = [5, 20]
+
+[[structures]]
+owner = 1
+kind = "thundercannon"
+at = [14, 20]
+
+[[structures]]
+owner = 1
+kind = "raincannon"
+at = [23, 20]
+
+[[units]]
+owner = 1
+kind = "priest"
+at = [13, 8]
+
+[[units]]
+owner = 0
+kind = "sunwalker"
+at = [1, 16]
+
+[[units]]
+owner = 0
+kind = "priest"
+at = [13, 23]
+
+[[units]]
+owner = 0
+kind = "sunwalker"
+at = [27, 19]

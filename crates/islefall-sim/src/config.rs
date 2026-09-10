@@ -139,8 +139,19 @@ pub struct Animation {
     /// over its picture and played once per shot (a Disc Thrower's arm).
     pub fire_label: String,
     /// Shooters that aim only north, east, south and west play the label
-    /// of that direction once when they fire.
+    /// of that direction once when they fire, and rest on its first frame.
     pub cardinal: BTreeMap<String, String>,
+    /// Seconds an all-round turret takes to swing a quarter turn: a type
+    /// whose fire-label pictures lie between its direction groups has a
+    /// ring of bearings, and turns along it to each new target.
+    #[serde(default = "default_turn_seconds")]
+    pub turn_seconds: f32,
+    /// Firing sequences spelled out by type and direction as frame indices
+    /// in the type's file order (the order `shpdump export` writes), for
+    /// types whose label groups are not their play order. The first frame
+    /// shows before the shot and again after it.
+    #[serde(default)]
+    pub fire_sequences: BTreeMap<String, BTreeMap<String, Vec<usize>>>,
     /// Types whose idle frames are so many runs, full to empty, chosen by
     /// the share of stock left (a geyser's three spouts).
     #[serde(default)]
@@ -152,6 +163,10 @@ pub struct Animation {
     pub ground_label: Option<String>,
     #[serde(default)]
     pub ground_order: Vec<String>,
+}
+
+fn default_turn_seconds() -> f32 {
+    0.5
 }
 
 /// The on-screen text: templates with `{power}`, `{knowledge}`, `{techs}`,

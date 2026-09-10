@@ -252,8 +252,15 @@ variant_flag = "randframe"
 # over its picture per shot: the Disc Thrower's arm spinning a throw.
 fire_label = "P"
 # Cannons aim only along the axes: the label of each direction is its
-# raise-and-fire animation, played once per shot.
+# firing animation, played once per shot, and the direction's first frame
+# is how it rests afterwards (the Ice Cannon keeps its gun out, the
+# Thunder Cannon keeps facing its target). A type with whole pictures of
+# the fire label between the direction groups is an all-round turret: the
+# pictures are the bearings in between, and the turret swings along that
+# ring to each new target, a quarter turn in `turn_seconds`, and stays
+# there (the Crossbow's hundred frames).
 cardinal = { north = "L", east = "M", south = "N", west = "O" }
+turn_seconds = 0.5
 # Types whose idle frames are several runs from full to empty, shown by the
 # share of stock left: a geyser's spout is tall, then half, then low.
 stages = { geyser = 3 }
@@ -261,6 +268,15 @@ stages = { geyser = 3 }
 # in this order of themes; its default `P` frames are the Sun's green.
 ground_label = "A"
 ground_order = ["thunder", "wind", "rain"]
+# The Sun Cannon's frames are not in play order: it rests with the barrel
+# up (its default, frame 16), lowers it towards the target, fires from the
+# lowered pose and raises it again. Frame indices are the file order that
+# `shpdump export` lists.
+[animation.fire_sequences.suncannon]
+north = [16, 9, 10, 11, 1, 11, 10, 9, 16]
+east = [16, 17, 18, 19, 3, 19, 18, 17, 16]
+south = [16, 7, 6, 5, 4, 0, 4, 5, 6, 7, 16]
+west = [16, 15, 14, 13, 12, 2, 12, 13, 14, 15, 16]
 
 # What flies when a shooter fires: the missile type by shooter (the data
 # never links them; the sun disc, the crossbow bolt and the two cannons'

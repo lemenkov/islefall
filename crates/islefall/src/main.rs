@@ -50,7 +50,7 @@ use islefall_sim::config::Grid;
 use islefall_sim::map::{self, MapDef};
 use islefall_sim::{Ai, AiMove, Applied, Cell, Command, Config, Dir8, IslandMap, Replay, Scripts, TypeRules, Unit, World};
 use sprites::FrameInfo;
-use world::{BridgeTile, LoadedShape, ShapeLibrary, StructureFrames, StructureSprite, TerrainTile, Z_SHADOW, Z_SKY, Z_STRUCTURE, Z_UNIT};
+use world::{BridgeTile, LoadedShape, ShapeLibrary, StructureBase, StructureFrames, StructureSprite, TerrainTile, Z_SHADOW, Z_SKY, Z_STRUCTURE, Z_UNIT};
 
 /// Row-based draw order: things lower on screen draw over things above them.
 fn depth_z(base: f32, row: f32) -> f32 {
@@ -669,6 +669,14 @@ struct ShapeSprite {
     rest: Option<usize>,
 }
 
+/// An all-round turret's place on its ring of bearings, and where it is
+/// swinging to.
+#[derive(Component)]
+struct Turret {
+    pos: usize,
+    goal: usize,
+}
+
 /// Marks entities spawned by the viewer so they can be replaced.
 #[derive(Component)]
 struct ViewerEntity;
@@ -820,7 +828,7 @@ fn main() {
         Update,
         (sidebar_update, sidebar_clicks.before(mouse_actions), minimap.after(camera_keys)).run_if(resource_equals(Mode::Island)),
     )
-    .add_systems(Update, (tint_shells, animate_structures, drift_stars, burning, projectiles.before(overlays), structure_effects, run_effects).after(sync_structures).run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, (tint_shells, animate_structures, turn_turrets.after(animate).after(animate_structures), drift_stars, burning, projectiles.before(overlays), structure_effects, run_effects).after(sync_structures).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, collect_events.after(mouse_actions).after(bridge_keys).after(tool_keys).before(play_sounds).before(structure_effects).run_if(resource_equals(Mode::Island)))
     .init_resource::<Landed>()
     .init_resource::<Happenings>()
@@ -2623,19 +2631,25 @@ fn burning(mut commands: Commands, sim: Res<Sim>, data: Res<GameData>, time: Res
 }
 
 /// Give each new structure sprite its idle animation, and turn turrets to
-/// their targets: an all-round turret shows the frame of its bearing, a
-/// cannon plays its direction's raise-and-fire once per shot.
+/// their targets: an all-round turret swings along its ring of bearings
+/// to the target and stays there, a cannon plays its direction's sequence
+/// once per shot and rests facing that way, a thrower spins its arm once.
 #[allow(clippy::type_complexity)]
 fn animate_structures(
     mut commands: Commands,
     sim: Res<Sim>,
     data: Res<GameData>,
     fresh: Query<(Entity, &StructureFrames), Without<ShapeSprite>>,
-    mut turrets: Query<(&StructureSprite, &StructureFrames, &mut ShapeSprite, &mut Sprite, &mut Anchor)>,
+    mut turrets: Query<(&StructureSprite, &StructureFrames, &mut ShapeSprite, &mut Sprite, &mut Anchor, Option<&mut Turret>)>,
+    mut bases: Query<(&StructureSprite, &mut Sprite, &mut Anchor), (With<StructureBase>, Without<StructureFrames>)>,
     mut seen_tick: Local<Option<u64>>,
 ) {
     for (e, plan) in &fresh {
         commands.entity(e).insert(ShapeSprite { sequence: plan.sequence.clone(), frames: plan.frames.clone(), step: 0, playing: plan.sequence.len() > 1, once: false, rest: None });
+        if !plan.ring.is_empty() {
+            let pos = plan.ring.iter().position(|&f| f == plan.sequence[0]).unwrap_or(0);
+            commands.entity(e).insert(Turret { pos, goal: pos });
+        }
     }
     let w = sim.world();
     let fired: Vec<usize> = if *seen_tick == Some(w.tick) {
@@ -2645,7 +2659,7 @@ fn animate_structures(
         w.last_shots.iter().map(|&(i, _)| i).collect()
     };
     let g = data.grid();
-    for (s, plan, mut shape, mut sprite, mut anchor) in &mut turrets {
+    for (s, plan, mut shape, mut sprite, mut anchor, turret) in &mut turrets {
         let Some(st) = w.structures.get(s.0) else { continue };
         if plan.stages > 1 && plan.sequence.len() >= plan.stages as usize {
             // A well shows the run of its remaining stock: full, then half, then low.
@@ -2662,32 +2676,124 @@ fn animate_structures(
         if !fired.contains(&s.0) {
             continue;
         }
-        let rest = plan.base.unwrap_or(plan.sequence[0]);
-        let seq = if !plan.fire.is_empty() {
+        let (cx, cy) = st.centre().centre_px(g);
+        let aim = st.aim.map(|a| a.centre_px(g)).map(|(ax, ay)| ((ax - cx) as f32, (ay - cy) as f32));
+        if !plan.fire.is_empty() {
             // The arm spins a throw over the dome, then rests.
-            Some(plan.fire.clone())
-        } else if let (Some(aim), false) = (st.aim, plan.cardinal.is_empty()) {
-            let (cx, cy) = st.centre().centre_px(g);
-            let (ax, ay) = aim.centre_px(g);
-            let (dx, dy) = ((ax - cx) as f32, (ay - cy) as f32);
-            let dir = if dx.abs() >= dy.abs() { if dx >= 0.0 { "east" } else { "west" } } else if dy >= 0.0 { "south" } else { "north" };
-            plan.cardinal.get(dir).cloned()
-        } else {
-            None
-        };
-        if let Some(seq) = seq {
-            shape.sequence = seq;
-            shape.step = 0;
-            shape.playing = true;
-            shape.once = true;
-            shape.rest = Some(rest);
-            let frame = shape.sequence[0];
-            if let Some(atlas) = sprite.texture_atlas.as_mut() {
-                atlas.index = frame;
+            let rest = plan.base.unwrap_or(plan.sequence[0]);
+            play_once(&mut shape, &mut sprite, &mut anchor, plan.fire.clone(), rest);
+        } else if let (Some(mut turret), Some((dx, dy))) = (turret, aim) {
+            // Swing to the target's bearing; fire on arrival.
+            let goal = nearest_bearing(&plan.ring_bearings, bearing_deg(dx, dy));
+            turret.goal = goal;
+            if turret.pos == goal {
+                fire_on_ring(plan, goal, &mut shape, &mut sprite, &mut anchor);
             }
-            *anchor = shape.frames[frame].anchor();
+        } else if let (Some((dx, dy)), false) = (aim, plan.cardinal.is_empty()) {
+            let dir = if dx.abs() >= dy.abs() { if dx >= 0.0 { "east" } else { "west" } } else if dy >= 0.0 { "south" } else { "north" };
+            if let Some(seq) = plan.cardinal.get(dir).cloned() {
+                let rest = seq[0];
+                // The picture underneath, for directions whose frames are sparks over it.
+                if let Some((_, mut bs, mut ba)) = bases.iter_mut().find(|(b, _, _)| b.0 == s.0) {
+                    show_frame(&mut bs, &mut ba, &plan.frames, rest);
+                }
+                play_once(&mut shape, &mut sprite, &mut anchor, seq, rest);
+            }
         }
     }
+}
+
+/// Swing every all-round turret a step along its ring towards its goal,
+/// once per animation tick, and fire when it gets there.
+fn turn_turrets(
+    viewer: Res<Viewer>,
+    data: Res<GameData>,
+    mut turrets: Query<(&mut Turret, &StructureFrames, &mut ShapeSprite, &mut Sprite, &mut Anchor)>,
+) {
+    if !viewer.timer.just_finished() {
+        return;
+    }
+    let fps = data.cfg.controls.animation_fps.max(0.1);
+    let seconds = data.cfg.animation.turn_seconds.max(0.01);
+    for (mut turret, plan, mut shape, mut sprite, mut anchor) in &mut turrets {
+        let n = plan.ring.len();
+        let (pos, goal) = (turret.pos, turret.goal);
+        if n == 0 || pos == goal {
+            continue;
+        }
+        // Frames per tick for a quarter turn to take `turn_seconds`.
+        let step = ((n as f32 / 4.0 / (fps * seconds)).round() as usize).max(1);
+        let clockwise = (goal + n - pos) % n;
+        let counter = (pos + n - goal) % n;
+        let next = if clockwise <= counter {
+            if clockwise <= step { goal } else { (pos + step) % n }
+        } else if counter <= step {
+            goal
+        } else {
+            (pos + n - step) % n
+        };
+        turret.pos = next;
+        if next == goal {
+            fire_on_ring(plan, goal, &mut shape, &mut sprite, &mut anchor);
+        } else {
+            shape.sequence = vec![plan.ring[next]];
+            shape.step = 0;
+            shape.playing = false;
+            shape.once = false;
+            shape.rest = None;
+            show_frame(&mut sprite, &mut anchor, &plan.frames, plan.ring[next]);
+        }
+    }
+}
+
+/// Bearing in degrees clockwise from north of a screen offset (y down).
+fn bearing_deg(dx: f32, dy: f32) -> f32 {
+    dx.atan2(-dy).to_degrees().rem_euclid(360.0)
+}
+
+/// Index of the bearing nearest to `bearing` round the circle.
+fn nearest_bearing(bearings: &[f32], bearing: f32) -> usize {
+    let apart = |b: f32| {
+        let d = (b - bearing).rem_euclid(360.0);
+        d.min(360.0 - d)
+    };
+    (0..bearings.len()).min_by(|&a, &b| apart(bearings[a]).total_cmp(&apart(bearings[b]))).unwrap_or(0)
+}
+
+/// A turret that has arrived at ring position `at` fires: a direction
+/// group's frames play once and it rests on the position's frame; a frame
+/// between directions just shows.
+fn fire_on_ring(plan: &StructureFrames, at: usize, shape: &mut ShapeSprite, sprite: &mut Sprite, anchor: &mut Anchor) {
+    let frame = plan.ring[at];
+    match plan.cardinal.values().find(|seq| seq.contains(&frame)) {
+        Some(seq) => play_once(shape, sprite, anchor, seq.clone(), frame),
+        None => {
+            shape.sequence = vec![frame];
+            shape.step = 0;
+            shape.playing = false;
+            shape.once = false;
+            shape.rest = None;
+            show_frame(sprite, anchor, &plan.frames, frame);
+        }
+    }
+}
+
+/// Play `seq` through once from its first frame, then show `rest`.
+fn play_once(shape: &mut ShapeSprite, sprite: &mut Sprite, anchor: &mut Anchor, seq: Vec<usize>, rest: usize) {
+    let first = seq[0];
+    shape.sequence = seq;
+    shape.step = 0;
+    shape.playing = true;
+    shape.once = true;
+    shape.rest = Some(rest);
+    show_frame(sprite, anchor, &shape.frames, first);
+}
+
+fn show_frame(sprite: &mut Sprite, anchor: &mut Anchor, frames: &[FrameInfo], frame: usize) {
+    if let Some(atlas) = sprite.texture_atlas.as_mut() {
+        atlas.index = frame;
+    }
+    *anchor = frames[frame].anchor();
 }
 
 /// F5 saves the world as a snapshot, F9 restores it.

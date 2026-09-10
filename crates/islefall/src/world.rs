@@ -219,12 +219,16 @@ pub fn spawn_structures(
         let pos = cell_to_world(st.cell, &world.cfg.grid);
         if let Some(base) = plan.base {
             let b = spawn_frame(commands, shape, base, pos, z);
-            commands.entity(b).insert(StructureSprite(i));
+            commands.entity(b).insert((StructureSprite(i), StructureBase));
         }
         let e = spawn_frame(commands, shape, plan.sequence[0], pos, z + 0.001);
         commands.entity(e).insert((StructureSprite(i), plan));
     }
 }
+
+/// Marks the picture drawn underneath a structure's animated frames.
+#[derive(Component)]
+pub struct StructureBase;
 
 /// What a standing structure shows: a looping idle, a variant picked per
 /// cell, or its default frame. Also marks what the turret can do.
@@ -239,6 +243,10 @@ pub struct StructureFrames {
     pub frames: Vec<FrameInfo>,
     /// Frames of the firing animation drawn over the picture; empty if none.
     pub fire: Vec<usize>,
+    /// An all-round turret's frames in bearing order, and each one's
+    /// bearing in degrees clockwise from north; empty for other types.
+    pub ring: Vec<usize>,
+    pub ring_bearings: Vec<f32>,
     /// Frames of each cardinal firing animation, by direction name.
     pub cardinal: HashMap<String, Vec<usize>>,
     /// How many runs the idle splits into, full to empty; 1 for one loop.
@@ -312,9 +320,81 @@ pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Anima
     // picture; the shooter rests as the picture alone.
     let fire: Vec<usize> = group(&rules.fire_label, &Vec::new()).into_iter().filter(|&i| i != default && area(i) < area(default) * rules.overlay_share).collect();
     let (sequence, base) = if fire.len() >= 2 { (vec![default], Some(default)) } else { (sequence, base) };
-    let cardinal = rules.cardinal.iter().map(|(dir, label)| (dir.clone(), group(label, &Vec::new()))).filter(|(_, f)| !f.is_empty()).collect();
+    let mut cardinal: HashMap<String, Vec<usize>> = rules.cardinal.iter().map(|(dir, label)| (dir.clone(), group(label, &Vec::new()))).filter(|(_, f)| !f.is_empty()).collect();
+    let spelled = rules.fire_sequences.get(kind);
+    // An all-round turret: whole pictures of the fire label lie between the
+    // direction groups and are the bearings in between; the run is a ring.
+    let pictures = group(&rules.fire_label, &Vec::new()).into_iter().any(|i| i != default && area(i) >= area(default) * rules.overlay_share);
+    let (ring, ring_bearings) = if pictures && cardinal.len() >= 2 && spelled.is_none() {
+        let mut ring = Vec::new();
+        let mut marks = Vec::new();
+        for i in (0..n).filter(|&i| untagged(i)) {
+            let dir = rules.cardinal.iter().find(|(_, l)| shape.labels[i].eq_ignore_ascii_case(l)).map(|(d, _)| d.as_str());
+            if let Some(dir) = dir {
+                ring.push(i);
+                marks.push(compass(dir));
+            } else if shape.labels[i].eq_ignore_ascii_case(&rules.fire_label) {
+                ring.push(i);
+                marks.push(None);
+            }
+        }
+        let bearings = ring_bearings(&marks);
+        (ring, bearings)
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    // Sequences spelled out in the rules replace the label groups.
+    for (dir, seq) in spelled.into_iter().flatten() {
+        let seq: Vec<usize> = seq.iter().copied().filter(|&i| i < n).collect();
+        if !seq.is_empty() {
+            cardinal.insert(dir.clone(), seq);
+        }
+    }
+    // Direction frames smaller than the picture are sparks drawn over it,
+    // so such a turret needs its picture underneath.
+    let sparks = cardinal.values().flatten().any(|&i| area(i) < area(default) * rules.overlay_share);
+    let base = if sparks { base.or(Some(default)) } else { base };
     let stages = rules.stages.get(kind).copied().unwrap_or(1).max(1);
-    StructureFrames { sequence, base, frames: shape.frames.clone(), fire, cardinal, stages }
+    StructureFrames { sequence, base, frames: shape.frames.clone(), fire, ring, ring_bearings, cardinal, stages }
+}
+
+/// Bearing of a direction name from the rules, degrees clockwise from north.
+fn compass(dir: &str) -> Option<f32> {
+    match dir {
+        "north" => Some(0.0),
+        "east" => Some(90.0),
+        "south" => Some(180.0),
+        "west" => Some(270.0),
+        _ => None,
+    }
+}
+
+/// Bearings of a ring of frames where only some (`Some`) are known: the
+/// rest turn evenly clockwise from the known one before them to the known
+/// one after, wrapping round the ring.
+pub fn ring_bearings(marks: &[Option<f32>]) -> Vec<f32> {
+    let n = marks.len();
+    let known: Vec<usize> = (0..n).filter(|&i| marks[i].is_some()).collect();
+    if known.is_empty() {
+        return vec![0.0; n];
+    }
+    (0..n)
+        .map(|i| {
+            if let Some(b) = marks[i] {
+                return b;
+            }
+            let before = known.iter().rev().find(|&&k| k < i).or(known.last()).copied().unwrap_or(0);
+            let after = known.iter().find(|&&k| k > i).or(known.first()).copied().unwrap_or(0);
+            let (b0, mut b1) = (marks[before].unwrap_or(0.0), marks[after].unwrap_or(0.0));
+            if b1 <= b0 {
+                b1 += 360.0;
+            }
+            let span = (after + n - before) % n;
+            let span = if span == 0 { n } else { span };
+            let step = (i + n - before) % n;
+            (b0 + (b1 - b0) * step as f32 / span as f32).rem_euclid(360.0)
+        })
+        .collect()
 }
 
 /// Marks a bridge tile sprite so the layer can be rebuilt.
@@ -380,5 +460,29 @@ fn spawn_bridge_connectors(
             let e = spawn_frame(commands, shape, frame, cell_to_world(land, &world.cfg.grid), z);
             commands.entity(e).insert(BridgeTile);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ring_bearings;
+
+    #[test]
+    fn ring_turns_evenly_between_known_bearings() {
+        // Four direction frames with two in-between pictures after each.
+        let marks = [Some(0.0), None, None, Some(90.0), None, None, Some(180.0), None, None, Some(270.0), None, None];
+        let b = ring_bearings(&marks);
+        assert_eq!(b[1], 30.0);
+        assert_eq!(b[2], 60.0);
+        assert_eq!(b[4], 120.0);
+        assert_eq!(b[10], 300.0, "wraps from west back to north");
+        assert_eq!(b[11], 330.0);
+    }
+
+    #[test]
+    fn ring_with_one_known_bearing_turns_full_circle() {
+        let b = ring_bearings(&[Some(0.0), None, None, None]);
+        assert_eq!(b, vec![0.0, 90.0, 180.0, 270.0]);
+        assert_eq!(ring_bearings(&[None, None]), vec![0.0, 0.0]);
     }
 }

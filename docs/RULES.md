@@ -70,7 +70,17 @@ Energy source's stars are the original's twinkling `range` frames in the
 source's theme colour (`energy.star_type` and `star_labels`). A geyser's 49 idle frames are
 three runs of the spout, full, half and low; `[animation].stages` says
 so and the run shown follows the stock left. `[animation]` in the rules names the labels and
-flags. An Energy source's reach is shown as the original showed it: a ring
+flags. Turrets keep their bearing: a cannon's direction label is its
+firing sequence, played once per shot, and it rests on that direction's
+first frame afterwards, so the Thunder Cannon keeps facing its target and
+the Ice Cannon keeps its gun out. The Crossbow's hundred frames are a ring
+of bearings, five firing frames at each cardinal point with turning frames
+between; it swings along the ring only as far as the new target, a quarter
+turn in `turn_seconds`, fires on arrival and stays there. The Sun Cannon's
+frames are not in play order, so `fire_sequences` spells its shot out: it
+rests with the barrel up (its default frame), lowers it towards the
+target, fires and raises it again. The `range` map is a shooting range for
+checking all this. An Energy source's reach is shown as the original showed it: a ring
 of small stars drifting round it, not a drawn circle.
 
 ## Bridges
