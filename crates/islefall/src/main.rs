@@ -888,9 +888,9 @@ struct ViewBox;
 /// The minimap's world bounds and scale, for placing the view box and clicks.
 #[derive(Resource, Default)]
 struct MinimapFrame {
-    /// World cell of the map's top-left, cells per map pixel.
-    origin: Vec2,
-    cells_per_px: f32,
+    /// Source pixel at the map's top-left, and map pixels per source pixel.
+    origin_px: Vec2,
+    scale: f32,
     size: Vec2,
 }
 
@@ -1202,7 +1202,7 @@ fn minimap(
         ));
         let old = std::mem::replace(&mut node.image, image);
         images.remove(&old);
-        *frame = MinimapFrame { origin: Vec2::new(min.x as f32, min.y as f32), cells_per_px: 1.0 / scale, size };
+        *frame = MinimapFrame { origin_px: Vec2::new(min.x as f32 * g.cell_w as f32, min.y as f32 * g.cell_h as f32), scale, size };
     }
     let Ok((camera, mut cam_tf, proj)) = cameras.single_mut() else { return };
     let scale = match proj {
@@ -1213,7 +1213,8 @@ fn minimap(
     if let (Some(view), Ok(mut vb)) = (camera.logical_viewport_size(), view_box.single_mut()) {
         let half = view * 0.5 * scale;
         let centre = cam_tf.translation.truncate();
-        let to_map = |world: Vec2| Vec2::new((world.x / g.cell_w as f32 - frame.origin.x) / frame.cells_per_px, (-world.y / g.cell_h as f32 - frame.origin.y) / frame.cells_per_px);
+        // World y grows upwards, the map's downwards.
+        let to_map = |world: Vec2| (Vec2::new(world.x, -world.y) - frame.origin_px) * frame.scale;
         let a = to_map(centre - half);
         let b = to_map(centre + half);
         let (l, t) = (a.x.min(b.x), a.y.min(b.y));
@@ -1224,12 +1225,12 @@ fn minimap(
         vb.height = px((btm - t).min(size.y - t.max(0.0)).max(2.0));
     }
     // A click on the map centres the camera there.
-    if buttons.pressed(MouseButton::Left) && cursor.cursor_over {
+    if buttons.pressed(MouseButton::Left) && cursor.cursor_over && frame.scale > 0.0 {
         if let Some(n) = cursor.normalized {
             let map_px = (n + Vec2::splat(0.5)) * size;
-            let cell = frame.origin + map_px * frame.cells_per_px;
-            cam_tf.translation.x = cell.x * g.cell_w as f32;
-            cam_tf.translation.y = -(cell.y * g.cell_h as f32);
+            let source = frame.origin_px + map_px / frame.scale;
+            cam_tf.translation.x = source.x;
+            cam_tf.translation.y = -source.y;
         }
     }
 }
