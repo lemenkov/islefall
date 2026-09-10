@@ -231,8 +231,8 @@ pub struct StructureFrames {
     pub base: Option<usize>,
     /// Placement of every frame, for anchoring.
     pub frames: Vec<FrameInfo>,
-    /// Frames of the all-round turret, in order of bearing; empty if none.
-    pub turret: Vec<usize>,
+    /// Frames of the firing animation drawn over the picture; empty if none.
+    pub fire: Vec<usize>,
     /// Frames of each cardinal firing animation, by direction name.
     pub cardinal: HashMap<String, Vec<usize>>,
     /// How many runs the idle splits into, full to empty; 1 for one loop.
@@ -271,7 +271,11 @@ pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Anima
         Vec::new()
     };
     let area = |i: usize| shape.frames[i].size.x as f32 * shape.frames[i].size.y as f32;
-    let (sequence, base) = if idle.len() >= 2 {
+    let (sequence, base) = if variants.len() >= 2 {
+        // A type with variants holds one still: a Temple's layout, a tree's shape.
+        let pick = pinned.map(|f| f as usize % variants.len()).unwrap_or_else(|| variation(cell, variants.len()));
+        (vec![variants[pick]], None)
+    } else if idle.len() >= 2 {
         // A group's biggest frame with the rest much smaller is a picture
         // with overlays: draw it underneath and loop the overlays.
         let big = idle.iter().copied().max_by(|&a, &b| area(a).total_cmp(&area(b))).unwrap_or(default);
@@ -283,22 +287,16 @@ pub fn structure_frames(shape: &LoadedShape, rules: &islefall_sim::config::Anima
             let overlay = !idle.contains(&default);
             (idle, overlay.then_some(default))
         }
-    } else if variants.len() >= 2 {
-        let pick = pinned.map(|f| f as usize % variants.len()).unwrap_or_else(|| variation(cell, variants.len()));
-        (vec![variants[pick]], None)
     } else {
         (vec![default], None)
     };
-    // A turret's bearing frames are small overlays of the arm drawn over the
-    // default picture, never the picture itself.
-    let turret = {
-        let t: Vec<usize> = group(&rules.turret_label, &Vec::new()).into_iter().filter(|&i| i != default && area(i) < area(default) * rules.overlay_share).collect();
-        if t.len() >= rules.turret_min_frames { t } else { Vec::new() }
-    };
-    let (sequence, base) = if turret.is_empty() { (sequence, base) } else { (vec![turret[0]], Some(default)) };
+    // A firing animation is small overlays (the arm) drawn over the default
+    // picture; the shooter rests as the picture alone.
+    let fire: Vec<usize> = group(&rules.fire_label, &Vec::new()).into_iter().filter(|&i| i != default && area(i) < area(default) * rules.overlay_share).collect();
+    let (sequence, base) = if fire.len() >= 2 { (vec![default], Some(default)) } else { (sequence, base) };
     let cardinal = rules.cardinal.iter().map(|(dir, label)| (dir.clone(), group(label, &Vec::new()))).filter(|(_, f)| !f.is_empty()).collect();
     let stages = rules.stages.get(kind).copied().unwrap_or(1).max(1);
-    StructureFrames { sequence, base, frames: shape.frames.clone(), turret, cardinal, stages }
+    StructureFrames { sequence, base, frames: shape.frames.clone(), fire, cardinal, stages }
 }
 
 /// Marks a bridge tile sprite so the layer can be rebuilt.

@@ -74,12 +74,9 @@ pub struct Animation {
     pub hidden_flags: Vec<String>,
     /// Types with this flag show one frame of the default's group, picked per cell.
     pub variant_flag: String,
-    /// Shooters with at least `turret_min_frames` frames of this label turn
-    /// to their target, frame 0 facing `turret_first`, then clockwise or not.
-    pub turret_label: String,
-    pub turret_min_frames: usize,
-    pub turret_first: String,
-    pub turret_clockwise: bool,
+    /// Small frames of this label are a shooter's firing animation, drawn
+    /// over its picture and played once per shot (a Disc Thrower's arm).
+    pub fire_label: String,
     /// Shooters that aim only north, east, south and west play the label
     /// of that direction once when they fire.
     pub cardinal: BTreeMap<String, String>,

@@ -232,10 +232,8 @@ defeat = "Defeat. Your High Priest was sacrificed."
 # window lights flicker over a Temple or Workshop; a type flagged
 # `variant_flag` shows one frame of its default's group, chosen per cell
 # unless the map pins one with `frame` (trees differ: bushes, dead trees,
-# rocks, tall clumps). Shooters with `turret_min_frames` frames of `turret_label`
-# turn to their target (the Disc Thrower's 32); cannons, which aim only
-# along the axes, play the direction's label once when they fire. `tag_flags`
-# mark a frame's role, not its look, and are ignored when grouping.
+# rocks, tall clumps; a Temple has three layouts). `tag_flags` mark a
+# frame's role, not its look, and are ignored when grouping.
 [animation]
 idle_label = "A"
 # A Workshop's `A`, `B` and `C` frames are its Levels One to Three.
@@ -247,10 +245,11 @@ tag_flags = ["default", "baseframe", "help", "gumpframe"]
 # Frames with these flags are pictures for menus and help, never the map.
 hidden_flags = ["help", "gumpframe"]
 variant_flag = "randframe"
-turret_label = "P"
-turret_min_frames = 8
-turret_first = "north"
-turret_clockwise = true
+# Small frames of this label are a shooter's firing animation, played once
+# over its picture per shot: the Disc Thrower's arm spinning a throw.
+fire_label = "P"
+# Cannons aim only along the axes: the label of each direction is its
+# raise-and-fire animation, played once per shot.
 cardinal = { north = "L", east = "M", south = "N", west = "O" }
 # Types whose idle frames are several runs from full to empty, shown by the
 # share of stock left: a geyser's spout is tall, then half, then low.

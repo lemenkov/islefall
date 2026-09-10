@@ -557,8 +557,9 @@ struct ShapeSprite {
     frames: Vec<FrameInfo>,
     step: usize,
     playing: bool,
-    /// Stop on the last frame instead of looping.
+    /// Stop instead of looping, and then show `rest` if there is one.
     once: bool,
+    rest: Option<usize>,
 }
 
 /// Marks entities spawned by the viewer so they can be replaced.
@@ -916,7 +917,7 @@ fn spawn_animated(
             sprite,
             frames[first].anchor(),
             Transform::from_translation(pos.extend(z)),
-            ShapeSprite { sequence: sequence.clone(), frames, step: 0, playing: true, once: false },
+            ShapeSprite { sequence: sequence.clone(), frames, step: 0, playing: true, once: false, rest: None },
         ));
         if viewer {
             e.insert(ViewerEntity);
@@ -1872,6 +1873,12 @@ fn animate(
         let Some(atlas) = sprite.texture_atlas.as_mut() else { continue };
         if shape.once && shape.step + 1 >= shape.sequence.len() {
             shape.playing = false;
+            if let Some(rest) = shape.rest.take() {
+                shape.sequence = vec![rest];
+                shape.step = 0;
+                atlas.index = rest;
+                *anchor = shape.frames[rest].anchor();
+            }
             continue;
         }
         shape.step = (shape.step + 1) % shape.sequence.len().max(1);
@@ -1927,7 +1934,7 @@ fn projectiles(
                 Sprite::from_atlas_image(shape.image.clone(), TextureAtlas { layout: shape.layout.clone(), index: first }),
                 shape.frames[first].anchor(),
                 Transform::from_translation(from.extend(Z_UNIT + 2.0)),
-                ShapeSprite { sequence, frames: shape.frames.clone(), step: 0, playing: !bearings, once: false },
+                ShapeSprite { sequence, frames: shape.frames.clone(), step: 0, playing: !bearings, once: false, rest: None },
                 Projectile { from, to, progress: 0.0, seconds, bearings },
             ));
         }
@@ -1973,7 +1980,7 @@ fn animate_structures(
     mut seen_tick: Local<Option<u64>>,
 ) {
     for (e, plan) in &fresh {
-        commands.entity(e).insert(ShapeSprite { sequence: plan.sequence.clone(), frames: plan.frames.clone(), step: 0, playing: plan.sequence.len() > 1, once: false });
+        commands.entity(e).insert(ShapeSprite { sequence: plan.sequence.clone(), frames: plan.frames.clone(), step: 0, playing: plan.sequence.len() > 1, once: false, rest: None });
     }
     let w = sim.world();
     let fired: Vec<usize> = if *seen_tick == Some(w.tick) {
@@ -1982,7 +1989,6 @@ fn animate_structures(
         *seen_tick = Some(w.tick);
         w.last_shots.iter().map(|&(i, _)| i).collect()
     };
-    let rules = &data.cfg.animation;
     let g = data.grid();
     for (s, plan, mut shape, mut sprite, mut anchor) in &mut turrets {
         let Some(st) = w.structures.get(s.0) else { continue };
@@ -1998,47 +2004,33 @@ fn animate_structures(
                 shape.playing = frames.len() > 1;
             }
         }
-        let Some(aim) = st.aim else { continue };
-        let (cx, cy) = st.centre().centre_px(g);
-        let (ax, ay) = aim.centre_px(g);
-        let (dx, dy) = ((ax - cx) as f32, (ay - cy) as f32);
-        if !plan.turret.is_empty() {
-            // Bearing clockwise from north on screen (y grows downwards).
-            let mut bearing = dx.atan2(-dy);
-            if !rules.turret_clockwise {
-                bearing = -bearing;
-            }
-            let first = match rules.turret_first.as_str() {
-                "east" => std::f32::consts::FRAC_PI_2,
-                "south" => std::f32::consts::PI,
-                "west" => -std::f32::consts::FRAC_PI_2,
-                _ => 0.0,
-            };
-            let n = plan.turret.len() as f32;
-            let turn = ((bearing - first).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU * n).round() as usize % plan.turret.len();
-            let frame = plan.turret[turn];
-            if shape.sequence != [frame] {
-                shape.sequence = vec![frame];
-                shape.step = 0;
-                shape.playing = false;
-                if let Some(atlas) = sprite.texture_atlas.as_mut() {
-                    atlas.index = frame;
-                }
-                *anchor = shape.frames[frame].anchor();
-            }
-        } else if !plan.cardinal.is_empty() && fired.contains(&s.0) {
+        if !fired.contains(&s.0) {
+            continue;
+        }
+        let rest = plan.base.unwrap_or(plan.sequence[0]);
+        let seq = if !plan.fire.is_empty() {
+            // The arm spins a throw over the dome, then rests.
+            Some(plan.fire.clone())
+        } else if let (Some(aim), false) = (st.aim, plan.cardinal.is_empty()) {
+            let (cx, cy) = st.centre().centre_px(g);
+            let (ax, ay) = aim.centre_px(g);
+            let (dx, dy) = ((ax - cx) as f32, (ay - cy) as f32);
             let dir = if dx.abs() >= dy.abs() { if dx >= 0.0 { "east" } else { "west" } } else if dy >= 0.0 { "south" } else { "north" };
-            if let Some(seq) = plan.cardinal.get(dir) {
-                shape.sequence = seq.clone();
-                shape.step = 0;
-                shape.playing = true;
-                shape.once = true;
-                let frame = seq[0];
-                if let Some(atlas) = sprite.texture_atlas.as_mut() {
-                    atlas.index = frame;
-                }
-                *anchor = shape.frames[frame].anchor();
+            plan.cardinal.get(dir).cloned()
+        } else {
+            None
+        };
+        if let Some(seq) = seq {
+            shape.sequence = seq;
+            shape.step = 0;
+            shape.playing = true;
+            shape.once = true;
+            shape.rest = Some(rest);
+            let frame = shape.sequence[0];
+            if let Some(atlas) = sprite.texture_atlas.as_mut() {
+                atlas.index = frame;
             }
+            *anchor = shape.frames[frame].anchor();
         }
     }
 }

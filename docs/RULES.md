@@ -42,19 +42,23 @@ corner of a blocked cell. Movement is fixed point (256 steps per cell) at
 ## What stands still shows
 
 The original's structures move: geysers spout, batteries turn, Workshops
-work, the Disc Thrower turns to its target and a cannon rises to fire. The
-type files carry it all as frame labels: `A` frames loop for an idle,
+work, the Disc Thrower spins its arm to throw and a cannon rises to fire.
+The type files carry it all as frame labels: `A` frames loop for an idle,
 and a Workshop's `A`, `B` and `C` are its three levels. Within a label,
 one big picture followed by small frames means window lights drawn over
-the picture (a Temple, a Workshop), while frames all of a size are whole
-pictures that loop (a battery turning);
-`P` frames of a Disc Thrower are its 32 bearings, small pictures of the
-arm drawn over the base, and a cannon's `L`,
-`M`, `N` and `O` frames are its north, east, south and west firing
-animations (the letters are from the files' own comments). Types flagged
-`randframe` show one of their default frame's group, chosen per cell
-unless the map pins one with `frame` (the original saved the choice with
-`saveFrame`), so no two trees look alike. A geyser's 49 idle frames are
+the picture (a Workshop), while frames all of a size are whole pictures
+that loop (a battery turning). The Disc Thrower's 32 `P` frames are one
+spin of its arm, small pictures drawn over the dome and played once per
+throw, after which it rests as the dome alone; a cannon's `L`, `M`, `N`
+and `O` frames are its north, east, south and west firing animations (the
+letters are from the files' own comments), played once per shot before it
+settles back to its default look. Types flagged
+`randframe` never animate: they show one of their default frame's group,
+chosen per cell unless the map pins one with `frame` (the original saved
+the choice with `saveFrame`), so no two trees look alike and a Temple has
+one of three layouts (a well in front, a round tower, a hut on the
+left). The Temple's other frames are the same layouts, lit, and on the
+grey, autumn and snow grounds of the other island themes, not yet used. A geyser's 49 idle frames are
 three runs of the spout, full, half and low; `[animation].stages` says
 so and the run shown follows the stock left. `[animation]` in the rules names the labels and
 flags. An Energy source's reach is shown as the original showed it: a ring

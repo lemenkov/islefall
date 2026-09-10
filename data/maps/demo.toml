@@ -43,10 +43,13 @@ owner = 0
 kind = "dais"
 at = [9, 7]
 
+# The Temple's classic layout, the well in front (its other two are a
+# round tower and a hut on the left).
 [[structures]]
 owner = 0
 kind = "residence"
 at = [13, 6]
+frame = 0
 
 [[structures]]
 owner = 0
