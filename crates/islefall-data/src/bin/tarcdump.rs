@@ -4,6 +4,7 @@
 //! ```text
 //! tarcdump list  <netstorm.tarc>
 //! tarcdump cat   <netstorm.tarc> <name>
+//! tarcdump extract <netstorm.tarc> <name> <out-file>
 //! tarcdump types <netstorm.tarc>
 //! ```
 
@@ -38,6 +39,12 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             print!("{}", a.read_text(i));
             Ok(())
         }
+        Some("extract") if args.len() == 4 => {
+            let a = Archive::load(&args[1])?;
+            let i = a.find(&args[2]).ok_or_else(|| format!("{} not in archive", args[2]))?;
+            std::fs::write(&args[3], a.read(i))?;
+            Ok(())
+        }
         Some("types") if args.len() == 2 => {
             let a = Archive::load(&args[1])?;
             let mut bad = 0;
@@ -68,7 +75,7 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
         _ => {
-            eprintln!("usage:\n  tarcdump list <netstorm.tarc>\n  tarcdump cat <netstorm.tarc> <name>\n  tarcdump types <netstorm.tarc>");
+            eprintln!("usage:\n  tarcdump list <netstorm.tarc>\n  tarcdump cat <netstorm.tarc> <name>\n  tarcdump extract <netstorm.tarc> <name> <out-file>\n  tarcdump types <netstorm.tarc>");
             Err("bad arguments".into())
         }
     }
