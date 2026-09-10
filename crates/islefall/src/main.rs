@@ -27,6 +27,8 @@
 //! - `ISLEFALL_SCREENSHOT=file.png`: save a screenshot after start-up,
 //!   after `ISLEFALL_SCREENSHOT_AT` seconds (default from the rules).
 //! - `ISLEFALL_CAMERA=x,y`: start the camera centred on that cell.
+//! - `ISLEFALL_ZOOM=z`: start at that zoom instead of the rules' (1 is
+//!   source pixels, smaller is further away).
 //!
 //! Keys in both modes: `Space` pauses, `P` saves a screenshot.
 
@@ -1400,7 +1402,8 @@ fn setup_map(
         }
     }
     let centre = world::cell_to_world(cam, data.grid());
-    commands.spawn((Camera2d, zoomed_projection(data.cfg.controls.zoom), Transform::from_translation(centre.extend(0.0)), WorldCamera, IsDefaultUiCamera));
+    let zoom = std::env::var("ISLEFALL_ZOOM").ok().and_then(|z| z.trim().parse::<f32>().ok()).unwrap_or(data.cfg.controls.zoom);
+    commands.spawn((Camera2d, zoomed_projection(zoom), Transform::from_translation(centre.extend(0.0)), WorldCamera, IsDefaultUiCamera));
     info!(
         "map {}: {} islands, {} structures, {} bridge cells, {} Storm Power, {} opponents",
         data.map.name,

@@ -49,12 +49,16 @@ NETSTORM_DIR=~/games/NetStorm cargo run --release
 ```
 
 Rules, scripts and maps are loaded from `data/` (or `ISLEFALL_DATA`); see
-`docs/MODDING.md`. By default this shows the `demo` map, whose home island now has a Sun
-Workshop; picking a building tool puts that unit into production there: a home island with the altar and the
-Temple, a bridge to a battery on its own islet, an enemy island with a
-Storm Geyser, a Disc Thrower and the enemy High Priest, whose owner bridges
-towards your altar and drops shooters on the way, and two units walking
-under the simulation's control. Structures shoot enemies in range; damaged things
+`docs/MODDING.md`. By default this shows the `demo` map, with all four
+factions on it: your Sun home island with the altar, the Temple, a Sun
+Workshop (picking a building tool puts that unit into production there),
+a Disc Thrower, a Cannon and a Stone Tower, a bridge to a battery on its
+own islet, a neutral Storm Geyser island, a Wind island to the east, and
+Rain and Thunder islands far to the south, each with its Workshop, Temple,
+shooters, Generator, tower, barricade, air base, walker and High Priest.
+The three computer players bridge towards your altar and drop shooters on
+the way; the islands start out of cannon range of each other, so click the
+minimap to visit them. Two of your units walk under the simulation's control. Structures shoot enemies in range; damaged things
 show a health bar, destroyed ones explode and crack nearby bridges.
 Left-click on a unit selects it, left-click elsewhere sends the selected unit
 there along a path around obstacles, left-click on a Storm Geyser sets it
@@ -82,7 +86,8 @@ keys or WASD pan the camera and `-` / `=` zoom.
 animates one object type at a time: `[` and `]` step through types, `,` and
 `.` through its animations. In both modes `Space` pauses and `P` saves a
 screenshot; `ISLEFALL_SCREENSHOT=file.png` saves one automatically after
-start-up. `ISLEFALL_PALETTE` selects a palette file stem from `d/` (default
+start-up; `ISLEFALL_CAMERA=x,y` and `ISLEFALL_ZOOM=z` choose where it
+starts looking. `ISLEFALL_PALETTE` selects a palette file stem from `d/` (default
 `gifcloud`, which is the game's fixed 8-bit palette). The sky is generated from seeded noise. Sounds come from the
 installation's `sound/` directory through Bevy's built-in audio; the
 `[sounds]` section of the rules says what each event plays, how sounds

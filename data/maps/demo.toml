@@ -1,7 +1,9 @@
-# The demo scene: a home island with the altar, Temple, a Sun Workshop and
-# a Disc Thrower, a bridge to a battery islet, a neutral geyser island, and
-# an enemy island with a geyser, a shooter, a Whirlibase, a priest, a
-# Temple and a golem.
+# The demo scene: every faction on show. A Sun home island with the altar,
+# Temple, Workshop, Disc Thrower, Cannon and Stone Tower, a bridge to a
+# battery islet, a neutral geyser island, a Wind enemy island to the east,
+# and Rain and Thunder islands to the south, each with its Workshop,
+# Temple, shooters, Generator, tower, barricade, air base, walker and
+# priest.
 #
 # Cells are (x, y) with y growing downwards. Structure and unit positions
 # are hotspot cells (the bottom-right cell of a footprint). Islands are
@@ -34,6 +36,23 @@ size = [16, 11]
 theme = "sun"
 origin = [25, 8]
 size = [7, 5]
+
+# The Rain faction, far to the south-west: icy ground, Ice Cannon and Ice
+# Tower. The islands stand out of each other's cannon range (the Thunder
+# Cannon reaches 44 cells), so nobody fires until somebody bridges over.
+[[islands]]
+owner = 2
+theme = "rain"
+origin = [0, 60]
+size = [28, 13]
+
+# The Thunder faction, far to the south-east: Thunder Cannon, Vander
+# Tower and Bulwark.
+[[islands]]
+owner = 3
+theme = "thunder"
+origin = [70, 60]
+size = [28, 13]
 
 # Bridge cells laid by the map; connections and tiles follow from adjacency.
 [[bridges]]
@@ -124,6 +143,106 @@ owner = 0
 kind = "sunarcher"
 at = [16, 3]
 
+# A Sun Cannon beside it and a Stone Tower below the altar.
+[[structures]]
+owner = 0
+kind = "suncannon"
+at = [20, 3]
+
+[[structures]]
+owner = 0
+kind = "sunblocker"
+at = [9, 10]
+
+# A Wind Tower between the geyser and the Devil Maker.
+[[structures]]
+owner = 1
+kind = "windblocker"
+at = [47, 7]
+
+# The Rain island: Workshop and Temple along the top, the small pieces in
+# a row beneath, the Temple's cottage in the corner.
+[[structures]]
+owner = 2
+kind = "rainfactory"
+at = [9, 66]
+
+[[structures]]
+owner = 2
+kind = "rainvortex"
+at = [19, 66]
+
+[[structures]]
+owner = 2
+kind = "raincannon"
+at = [4, 70]
+
+[[structures]]
+owner = 2
+kind = "rainbattery"
+at = [8, 70]
+
+[[structures]]
+owner = 2
+kind = "rainblocker"
+at = [12, 70]
+
+[[structures]]
+owner = 2
+kind = "rainfence"
+at = [16, 70]
+
+[[structures]]
+owner = 2
+kind = "rainaviary"
+at = [20, 70]
+
+[[structures]]
+owner = 2
+kind = "residence"
+at = [25, 71]
+
+# The Thunder island, laid out the same way.
+[[structures]]
+owner = 3
+kind = "thunderfactory"
+at = [79, 66]
+
+[[structures]]
+owner = 3
+kind = "thundervortex"
+at = [89, 66]
+
+[[structures]]
+owner = 3
+kind = "thundercannon"
+at = [74, 70]
+
+[[structures]]
+owner = 3
+kind = "thunderarcher"
+at = [78, 70]
+
+[[structures]]
+owner = 3
+kind = "thunderbattery"
+at = [82, 70]
+
+[[structures]]
+owner = 3
+kind = "thunderblocker"
+at = [86, 70]
+
+[[structures]]
+owner = 3
+kind = "thunderfence"
+at = [90, 70]
+
+[[structures]]
+owner = 3
+kind = "residence"
+at = [95, 71]
+
 [[units]]
 owner = 0
 kind = "priest"
@@ -146,6 +265,26 @@ owner = 1
 kind = "windwalker"
 at = [42, 10]
 
+[[units]]
+owner = 2
+kind = "rainwalker"
+at = [22, 62]
+
+[[units]]
+owner = 2
+kind = "priest"
+at = [24, 62]
+
+[[units]]
+owner = 3
+kind = "bulf"
+at = [92, 62]
+
+[[units]]
+owner = 3
+kind = "priest"
+at = [94, 62]
+
 # Computer players: bridge towards a target cell, or the enemy altar when
 # `target` is omitted.
 [[opponents]]
@@ -155,3 +294,17 @@ generator = "windbattery"
 # The Wind Generator is Knowledge 4 and the Crossbow 7: the Wind faction
 # starts with both.
 knowledge = [4, 7]
+
+# The Rain and Thunder players start with their Generator and shooter:
+# Rain Generator 10 and Ice Cannon 11, Thunder Generator 17 and Cannon 19.
+[[opponents]]
+owner = 2
+shooter = "raincannon"
+generator = "rainbattery"
+knowledge = [10, 11]
+
+[[opponents]]
+owner = 3
+shooter = "thundercannon"
+generator = "thunderbattery"
+knowledge = [17, 19]

@@ -126,10 +126,10 @@ mod tests {
     #[test]
     fn demo_map_parses() {
         let m = MapDef::parse(include_str!("../../../data/maps/demo.toml")).unwrap();
-        assert_eq!(m.islands.len(), 3);
-        assert_eq!(m.structures.len(), 14);
-        assert_eq!(m.units.len(), 4);
-        assert_eq!(m.opponents.len(), 1);
+        assert_eq!(m.islands.len(), 5, "Sun, Wind, neutral, Rain, Thunder");
+        assert_eq!(m.structures.len(), 33);
+        assert_eq!(m.units.len(), 8);
+        assert_eq!(m.opponents.len(), 3, "Wind, Rain and Thunder are computer players");
         assert_eq!(m.camera_cell(), Cell::new(11, 5));
     }
 }
