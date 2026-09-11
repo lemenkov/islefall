@@ -65,13 +65,22 @@ impl Game {
     }
 }
 
+/// The Islefall relay server: orders the players' commands into turns.
+#[derive(clap::Parser)]
+#[command(version)]
+struct Cli {
+    /// A `server.toml`; the defaults without one.
+    config: Option<std::path::PathBuf>,
+}
+
 #[tokio::main]
 async fn main() {
-    let cfg: ServerConfig = match std::env::args().nth(1) {
+    let cli = <Cli as clap::Parser>::parse();
+    let cfg: ServerConfig = match cli.config {
         Some(path) => match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| toml::from_str(&t).map_err(|e| e.to_string())) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("islefall-server: {path}: {e}");
+                eprintln!("islefall-server: {}: {e}", path.display());
                 std::process::exit(1);
             }
         },

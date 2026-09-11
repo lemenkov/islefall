@@ -1,20 +1,35 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Show a campaign scenario from `netstorm.tarc`.
 //!
-//! ```text
-//! fortdump list <netstorm.tarc>
-//! fortdump show <netstorm.tarc> <name>      # e.g. capturethepriest
-//! ```
+//! `fortdump --help` lists the commands: `list`, `show <name>` (e.g. `capturethepriest`).
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
+use clap::{Parser, Subcommand};
 use islefall_data::fort::{self, Fort};
 use islefall_data::mission::Mission;
 use islefall_data::tarc::Archive;
 
+/// Show the campaign scenarios in a NetStorm `netstorm.tarc` archive.
+#[derive(Parser)]
+#[command(version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// List the scenarios and how they parse.
+    List { archive: PathBuf },
+    /// Draw a scenario's world table and list its fortresses.
+    Show { archive: PathBuf, name: String },
+}
+
 fn main() -> ExitCode {
-    match run(std::env::args().skip(1).collect()) {
+    match run(Cli::parse().command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("fortdump: {e}");
@@ -23,10 +38,10 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
-    match args.first().map(String::as_str) {
-        Some("list") if args.len() == 2 => {
-            let a = Archive::load(&args[1])?;
+fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
+    match command {
+        Command::List { archive } => {
+            let a = Archive::load(&archive)?;
             for (i, e) in a.entries().iter().enumerate() {
                 if e.extension().eq_ignore_ascii_case("fort") {
                     match Fort::parse(&a.read(i)) {
@@ -37,9 +52,9 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
             Ok(())
         }
-        Some("show") if args.len() == 3 => {
-            let a = Archive::load(&args[1])?;
-            let name = args[2].trim_end_matches(".fort");
+        Command::Show { archive, name } => {
+            let a = Archive::load(&archive)?;
+            let name = name.trim_end_matches(".fort");
             let i = a.find(&format!("{name}.fort")).ok_or_else(|| format!("{name}.fort not in archive"))?;
             let f = Fort::parse(&a.read(i))?;
             println!("{name}: version {} name {:?} {} items {} fortresses", f.version, f.name, f.items.len(), f.fortresses.len());
@@ -88,10 +103,6 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 println!("{} record chunks skipped", f.skipped_chunks);
             }
             Ok(())
-        }
-        _ => {
-            eprintln!("usage:\n  fortdump list <netstorm.tarc>\n  fortdump show <netstorm.tarc> <name>");
-            Err("bad arguments".into())
         }
     }
 }

@@ -12,3 +12,4 @@ islefall-net = { path = "../islefall-net", features = ["tokio"] }
 serde = { version = "1", features = ["derive"] }
 toml = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }
+clap = { version = "4.6.6", features = ["derive"] }

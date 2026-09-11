@@ -1,20 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 //! Inspect a NetStorm `netstorm.tarc` archive.
 //!
-//! ```text
-//! tarcdump list  <netstorm.tarc>
-//! tarcdump cat   <netstorm.tarc> <name>
-//! tarcdump extract <netstorm.tarc> <name> <out-file>
-//! tarcdump types <netstorm.tarc>
-//! ```
+//! `tarcdump --help` lists the commands: `list`, `cat`, `extract`, `types`.
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
+use clap::{Parser, Subcommand};
 use islefall_data::tarc::Archive;
 use islefall_data::typefile;
 
+/// Inspect a NetStorm `netstorm.tarc` archive.
+#[derive(Parser)]
+#[command(version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// List the entries.
+    List { archive: PathBuf },
+    /// Print an entry as text.
+    Cat { archive: PathBuf, name: String },
+    /// Write an entry's bytes to a file.
+    Extract { archive: PathBuf, name: String, out: PathBuf },
+    /// Summarise every type definition.
+    Types { archive: PathBuf },
+}
+
 fn main() -> ExitCode {
-    match run(std::env::args().skip(1).collect()) {
+    match run(Cli::parse().command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("tarcdump: {e}");
@@ -23,30 +40,30 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
-    match args.first().map(String::as_str) {
-        Some("list") if args.len() == 2 => {
-            let a = Archive::load(&args[1])?;
+fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
+    match command {
+        Command::List { archive } => {
+            let a = Archive::load(&archive)?;
             for e in a.entries() {
                 println!("{:>8}  {}", e.size, e.name);
             }
             println!("{} files", a.entries().len());
             Ok(())
         }
-        Some("cat") if args.len() == 3 => {
-            let a = Archive::load(&args[1])?;
-            let i = a.find(&args[2]).ok_or_else(|| format!("{} not in archive", args[2]))?;
+        Command::Cat { archive, name } => {
+            let a = Archive::load(&archive)?;
+            let i = a.find(&name).ok_or_else(|| format!("{name} not in archive"))?;
             print!("{}", a.read_text(i));
             Ok(())
         }
-        Some("extract") if args.len() == 4 => {
-            let a = Archive::load(&args[1])?;
-            let i = a.find(&args[2]).ok_or_else(|| format!("{} not in archive", args[2]))?;
-            std::fs::write(&args[3], a.read(i))?;
+        Command::Extract { archive, name, out } => {
+            let a = Archive::load(&archive)?;
+            let i = a.find(&name).ok_or_else(|| format!("{name} not in archive"))?;
+            std::fs::write(&out, a.read(i))?;
             Ok(())
         }
-        Some("types") if args.len() == 2 => {
-            let a = Archive::load(&args[1])?;
+        Command::Types { archive } => {
+            let a = Archive::load(&archive)?;
             let mut bad = 0;
             for (i, e) in a.entries().iter().enumerate() {
                 if e.extension() != "type" {
@@ -73,10 +90,6 @@ fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                 return Err(format!("{bad} type files failed to parse").into());
             }
             Ok(())
-        }
-        _ => {
-            eprintln!("usage:\n  tarcdump list <netstorm.tarc>\n  tarcdump cat <netstorm.tarc> <name>\n  tarcdump extract <netstorm.tarc> <name> <out-file>\n  tarcdump types <netstorm.tarc>");
-            Err("bad arguments".into())
         }
     }
 }

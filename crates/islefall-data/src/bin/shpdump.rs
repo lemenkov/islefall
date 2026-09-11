@@ -2,23 +2,57 @@
 //! Inspect a NetStorm `_shapes.shp`: print statistics or render a container
 //! to a PNG sprite sheet.
 //!
-//! ```text
-//! shpdump stats <_shapes.shp>
-//! shpdump sheet <_shapes.shp> <container> <out.png> [--col FILE.COL] [--scale N] [--max N]
-//! shpdump export <NETSTORM_DIR> <out_dir> [stem ...]
-//! ```
+//! `shpdump --help` lists the commands: `stats`, `sheet`, `export`.
 //!
 //! `export` writes a type's sprites as `<stem>.png` plus `<stem>.toml` in
 //! the sheet format a mod uses to replace them (every type with sprites
 //! when no stem is given).
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
+use clap::{Parser, Subcommand};
 use islefall_data::shp::{MAX_DIM, MAX_PIXELS};
 use islefall_data::{Frame, Installation, Palette, ShapeFile, Sheet, SheetFrame};
 
+/// Inspect and export NetStorm's `_shapes.shp` sprite cache.
+#[derive(Parser)]
+#[command(version)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// How every container decodes.
+    Stats { shp: PathBuf },
+    /// Draw one container's frames on a sheet.
+    Sheet {
+        shp: PathBuf,
+        container: usize,
+        out: PathBuf,
+        /// A `.COL` palette file; grey without one.
+        #[arg(long)]
+        col: Option<PathBuf>,
+        /// Pixels per source pixel, 1 to 8.
+        #[arg(long, default_value_t = 2)]
+        scale: usize,
+        /// At most this many frames.
+        #[arg(long, default_value_t = 40)]
+        max: usize,
+    },
+    /// Write every type's frames as a sheet PNG and TOML into a directory.
+    Export {
+        netstorm_dir: PathBuf,
+        out_dir: PathBuf,
+        /// Only these type stems (all when none given).
+        stems: Vec<String>,
+    },
+}
+
 fn main() -> ExitCode {
-    match run(std::env::args().skip(1).collect()) {
+    match run(Cli::parse().command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("shpdump: {e}");
@@ -27,19 +61,15 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
-    match args.first().map(String::as_str) {
-        Some("stats") if args.len() == 2 => stats(&args[1]),
-        Some("sheet") if args.len() >= 4 => sheet(&args[1..]),
-        Some("export") if args.len() >= 3 => export(&args[1..]),
-        _ => {
-            eprintln!("usage:\n  shpdump stats <_shapes.shp>\n  shpdump sheet <_shapes.shp> <container> <out.png> [--col FILE.COL] [--scale N] [--max N]\n  shpdump export <NETSTORM_DIR> <out_dir> [stem ...]");
-            Err("bad arguments".into())
-        }
+fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
+    match command {
+        Command::Stats { shp } => stats(&shp),
+        Command::Sheet { shp, container, out, col, scale, max } => sheet(&shp, container, &out, col.as_deref(), scale, max),
+        Command::Export { netstorm_dir, out_dir, stems } => export(&netstorm_dir, &out_dir, &stems),
     }
 }
 
-fn stats(path: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn stats(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let shp = ShapeFile::load(path)?;
     let (mut ok, mut empty, mut nofit, mut bad) = (0usize, 0usize, 0usize, 0usize);
     println!("{} containers, {} unique records", shp.container_count(), shp.records().len());
@@ -81,31 +111,7 @@ fn stats(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn sheet(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let path = &args[0];
-    let ci: usize = args[1].parse()?;
-    let out = &args[2];
-    let mut col: Option<String> = None;
-    let mut scale = 2usize;
-    let mut max = 40usize;
-    let mut i = 3;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--col" => {
-                col = Some(args.get(i + 1).ok_or("--col needs a file")?.clone());
-                i += 2;
-            }
-            "--scale" => {
-                scale = args.get(i + 1).ok_or("--scale needs a number")?.parse()?;
-                i += 2;
-            }
-            "--max" => {
-                max = args.get(i + 1).ok_or("--max needs a number")?.parse()?;
-                i += 2;
-            }
-            other => return Err(format!("unknown option {other}").into()),
-        }
-    }
+fn sheet(path: &std::path::Path, ci: usize, out: &std::path::Path, col: Option<&std::path::Path>, scale: usize, max: usize) -> Result<(), Box<dyn std::error::Error>> {
     if scale == 0 || scale > 8 {
         return Err("scale must be 1..8".into());
     }
@@ -175,7 +181,7 @@ fn sheet(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     enc.set_color(png::ColorType::Rgba);
     enc.set_depth(png::BitDepth::Eight);
     enc.write_header()?.write_image_data(&rgba)?;
-    println!("wrote {out}: {} frames, {sw}x{sh}", frames.len());
+    println!("wrote {}: {} frames, {sw}x{sh}", out.display(), frames.len());
     Ok(())
 }
 
@@ -210,16 +216,11 @@ fn draw(rgba: &mut [u8], sw: usize, fr: &Frame, pal: &Palette, x0: usize, y0: us
 
 /// Write each type's sprites as a picture plus a frame index, in the form a
 /// mod uses to replace them.
-fn export(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let install = Installation::load(&args[0])?;
-    let out = std::path::Path::new(&args[1]);
+fn export(dir: &std::path::Path, out: &std::path::Path, only: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let install = Installation::load(dir)?;
     std::fs::create_dir_all(out)?;
     let palette = install.palette("gifcloud").ok_or("no GIFCLOUD.COL in d/")?.clone();
-    let stems: Vec<String> = if args.len() > 2 {
-        args[2..].iter().map(|s| s.to_ascii_lowercase()).collect()
-    } else {
-        install.records.keys().cloned().collect()
-    };
+    let stems: Vec<String> = if !only.is_empty() { only.iter().map(|s| s.to_ascii_lowercase()).collect() } else { install.records.keys().cloned().collect() };
     for stem in &stems {
         match export_one(&install, &palette, stem, out) {
             Ok((frames, w, h)) => println!("{stem}: {frames} frames, {w}x{h}"),
