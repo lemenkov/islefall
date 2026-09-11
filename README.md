@@ -1,3 +1,5 @@
+<img src="assets/islefall_256.png" alt="Islefall" width="128" align="right">
+
 # Islefall
 
 A real-time strategy game of floating islands, bridges and priests, in the
@@ -8,7 +10,8 @@ Islefall ships **no game data**. It reads sprites, palettes and unit
 definitions from a NetStorm installation you already own, in the way OpenRA
 and OpenTTD use their original games' assets. See `NOTICE`.
 
-Status: early development. Nothing is playable yet.
+Status: early development. The demo map is playable against three
+computer players; there is no campaign yet.
 
 ## Layout
 

@@ -3317,10 +3317,12 @@ dependencies = [
  "islefall-net",
  "islefall-sim",
  "noise",
+ "png 0.18.1",
  "rand 0.10.2",
  "rand_pcg",
  "thiserror 2.0.20",
  "tokio",
+ "winit",
 ]
 
 [[package]]

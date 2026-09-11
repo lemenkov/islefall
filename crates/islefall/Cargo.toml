@@ -17,6 +17,9 @@ rand = "0.10.2"
 rand_pcg = "0.10.2"
 etagere = "0.3.0"
 tokio = { version = "1.53.1", features = ["rt", "net", "sync", "io-util"] }
+# The window icon: Bevy's own winit, and the PNG decoder the data crate uses.
+winit = "0.30"
+png = "0.18"
 
 [dependencies.bevy]
 version = "0.19.1"

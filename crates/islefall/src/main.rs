@@ -658,6 +658,35 @@ struct Viewer {
     paused: bool,
 }
 
+/// The game's emblem, `assets/islefall_64.png`, built into the binary.
+const ICON_PNG: &[u8] = include_bytes!("../../../assets/islefall_64.png");
+
+/// Give every window the emblem as its icon, once winit has made it.
+fn window_icon(windows: NonSend<bevy::winit::WinitWindows>, mut done: Local<bool>) {
+    if *done || windows.windows.is_empty() {
+        return;
+    }
+    let icon = (|| {
+        let mut reader = png::Decoder::new(std::io::Cursor::new(ICON_PNG)).read_info().ok()?;
+        let mut buf = vec![0; reader.output_buffer_size()?];
+        let info = reader.next_frame(&mut buf).ok()?;
+        if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
+            return None;
+        }
+        buf.truncate(info.buffer_size());
+        winit::window::Icon::from_rgba(buf, info.width, info.height).ok()
+    })();
+    match icon {
+        Some(icon) => {
+            for w in windows.windows.values() {
+                w.set_window_icon(Some(icon.clone()));
+            }
+        }
+        None => warn!("the window icon could not be decoded"),
+    }
+    *done = true;
+}
+
 /// Pending automatic screenshot requested through `ISLEFALL_SCREENSHOT`.
 #[derive(Resource)]
 struct AutoScreenshot {
@@ -836,6 +865,7 @@ fn main() {
         paused: false,
     })
     .add_systems(Startup, setup)
+    .add_systems(Update, window_icon)
     .add_systems(Startup, move |mut commands: Commands, game: Res<GameData>| {
         commands.insert_resource(SoundBank::scan(&game.install.root.join(&game.cfg.sounds.dir), &game.cfg.sounds, &data));
     })

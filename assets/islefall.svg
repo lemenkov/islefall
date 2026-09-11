@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17244f"/>
+      <stop offset="1" stop-color="#3d5194"/>
+    </linearGradient>
+    <linearGradient id="rock" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9a6531"/>
+      <stop offset="1" stop-color="#3a2211"/>
+    </linearGradient>
+    <clipPath id="round"><rect width="256" height="256" rx="48"/></clipPath>
+  </defs>
+  <g clip-path="url(#round)">
+    <rect width="256" height="256" fill="url(#sky)"/>
+    <g fill="#ffffff" opacity="0.13">
+      <ellipse cx="48" cy="210" rx="72" ry="16"/>
+      <ellipse cx="208" cy="232" rx="64" ry="14"/>
+      <ellipse cx="46" cy="52" rx="50" ry="12"/>
+    </g>
+    <!-- underside rock with stalactites -->
+    <path d="M38 134 L214 134 L204 162 L186 178 L176 216 L164 178 L140 188 L128 236 L116 188 L92 180 L80 206 L68 174 L50 160 Z" fill="url(#rock)"/>
+    <!-- island top: dark rim, then grass -->
+    <path d="M30 128 C38 102 68 98 94 102 C110 88 150 88 164 104 C190 98 224 106 228 128 C234 144 208 152 184 148 C160 156 98 156 72 148 C46 152 24 144 30 128 Z" fill="#2f6b28"/>
+    <path d="M40 126 C48 108 74 106 96 110 C112 98 148 98 162 112 C186 106 214 112 218 126 C222 138 202 144 182 141 C160 148 100 148 76 141 C54 144 36 138 40 126 Z" fill="#5db347"/>
+    <path d="M52 124 C60 114 80 112 98 116 C114 108 142 108 156 118 C176 114 198 118 204 126 C204 132 190 136 178 134 C158 140 104 140 82 134 C64 136 50 130 52 124 Z" fill="#7dd45f"/>
+    <!-- bolt in front, striking the grass -->
+    <polygon points="150,6 98,98 130,98 110,150 176,72 144,72 178,6" fill="none" stroke="#fff0a0" stroke-width="14" stroke-linejoin="round" opacity="0.35"/>
+    <polygon points="150,6 98,98 130,98 110,150 176,72 144,72 178,6" fill="#ffd633" stroke="#fff6c0" stroke-width="3" stroke-linejoin="round"/>
+    <g stroke="#fff6c0" stroke-width="3" stroke-linecap="round">
+      <line x1="96" y1="140" x2="88" y2="132"/><line x1="124" y1="148" x2="134" y2="146"/>
+    </g>
+    <!-- bridge planks off the right edge, open end -->
+    <rect x="200" y="114" width="52" height="18" rx="3" fill="#c2884a" stroke="#5c3a1c" stroke-width="3"/>
+    <g stroke="#5c3a1c" stroke-width="3">
+      <line x1="214" y1="114" x2="214" y2="132"/>
+      <line x1="228" y1="114" x2="228" y2="132"/>
+      <line x1="242" y1="114" x2="242" y2="132"/>
+    </g>
+  </g>
+</svg>
