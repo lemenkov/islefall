@@ -127,7 +127,8 @@ async fn turn_clock(game: Arc<Mutex<Game>>, cfg: ServerConfig) {
 }
 
 async fn serve(stream: TcpStream, game: Arc<Mutex<Game>>, cfg: ServerConfig) {
-    let (mut reader, mut writer) = stream.into_split();
+    let (reader, writer) = stream.into_split();
+    let (mut reader, mut writer) = (islefall_net::reader(reader), islefall_net::writer(writer));
     let hello: ClientMsg = match islefall_net::recv(&mut reader).await {
         Ok(m) => m,
         Err(e) => {

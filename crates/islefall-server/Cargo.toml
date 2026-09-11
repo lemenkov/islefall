@@ -8,7 +8,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-islefall-net = { path = "../islefall-net", features = ["tokio"] }
+islefall-net = { path = "../islefall-net" }
 serde = { version = "1", features = ["derive"] }
 toml = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }

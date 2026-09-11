@@ -439,8 +439,8 @@ impl Recording {
 /// The connection to a server: commands go out, the server's messages come in.
 #[derive(Resource)]
 struct Net {
-    tx: std::sync::mpsc::Sender<islefall_net::ClientMsg>,
-    rx: std::sync::Mutex<std::sync::mpsc::Receiver<islefall_net::ServerMsg>>,
+    tx: tokio::sync::mpsc::UnboundedSender<islefall_net::ClientMsg>,
+    rx: std::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<islefall_net::ServerMsg>>,
     turn_ticks: u32,
     hash_every_turns: u64,
     started: bool,
@@ -448,35 +448,51 @@ struct Net {
 }
 
 impl Net {
-    /// Connect in the background: one thread writes what we send, another
-    /// reads what the server says; both hand over through channels.
+    /// Connect on a thread of its own running a small tokio runtime: one
+    /// task writes what we send, another reads what the server says, both
+    /// through the framing the server uses; channels hand messages over.
     fn connect(addr: &str, hello: islefall_net::ClientMsg) -> Result<Net, String> {
-        let stream = std::net::TcpStream::connect(addr).map_err(|e| format!("{addr}: {e}"))?;
-        stream.set_nodelay(true).ok();
-        let mut writer = stream.try_clone().map_err(|e| e.to_string())?;
-        let mut reader = stream;
-        let (tx, out_rx) = std::sync::mpsc::channel::<islefall_net::ClientMsg>();
-        let (in_tx, rx) = std::sync::mpsc::channel::<islefall_net::ServerMsg>();
-        islefall_net::write_frame(&mut writer, &hello).map_err(|e| e.to_string())?;
+        let (tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<islefall_net::ClientMsg>();
+        let (in_tx, rx) = tokio::sync::mpsc::unbounded_channel::<islefall_net::ServerMsg>();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+        let addr = addr.to_string();
         std::thread::spawn(move || {
-            while let Ok(msg) = out_rx.recv() {
-                if islefall_net::write_frame(&mut writer, &msg).is_err() {
-                    break;
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+                let _ = ready_tx.send(Err("cannot start the network runtime".into()));
+                return;
+            };
+            rt.block_on(async move {
+                let stream = match tokio::net::TcpStream::connect(&addr).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(format!("{addr}: {e}")));
+                        return;
+                    }
+                };
+                stream.set_nodelay(true).ok();
+                let (r, w) = stream.into_split();
+                let (mut reader, mut writer) = (islefall_net::reader(r), islefall_net::writer(w));
+                if let Err(e) = islefall_net::send(&mut writer, &hello).await {
+                    let _ = ready_tx.send(Err(e.to_string()));
+                    return;
                 }
-            }
-        });
-        std::thread::spawn(move || {
-            loop {
-                match islefall_net::read_frame::<_, islefall_net::ServerMsg>(&mut reader) {
-                    Ok(msg) => {
-                        if in_tx.send(msg).is_err() {
+                let _ = ready_tx.send(Ok(()));
+                let writing = tokio::spawn(async move {
+                    while let Some(msg) = out_rx.recv().await {
+                        if islefall_net::send(&mut writer, &msg).await.is_err() {
                             break;
                         }
                     }
-                    Err(_) => break,
+                });
+                while let Ok(msg) = islefall_net::recv::<_, islefall_net::ServerMsg>(&mut reader).await {
+                    if in_tx.send(msg).is_err() {
+                        break;
+                    }
                 }
-            }
+                writing.abort();
+            });
         });
+        ready_rx.recv().map_err(|_| "the connection thread stopped".to_string())??;
         Ok(Net { tx, rx: std::sync::Mutex::new(rx), turn_ticks: 1, hash_every_turns: 0, started: false, turns_done: 0 })
     }
 
@@ -486,7 +502,7 @@ impl Net {
 
     fn drain(&self) -> Vec<islefall_net::ServerMsg> {
         let mut out = Vec::new();
-        if let Ok(rx) = self.rx.lock() {
+        if let Ok(mut rx) = self.rx.lock() {
             while let Ok(m) = rx.try_recv() {
                 out.push(m);
             }

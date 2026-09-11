@@ -11,9 +11,11 @@ rust-version.workspace = true
 islefall-sim = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }
-tokio = { version = "1", features = ["io-util"], optional = true }
+tokio = { version = "1", features = ["io-util"] }
 xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
+tokio-util = { version = "0.7.19", features = ["codec"] }
+bytes = "1.12.1"
+futures-util = { version = "0.3.34", features = ["sink"] }
 
-[features]
-default = []
-tokio = ["dep:tokio"]
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "io-util"] }

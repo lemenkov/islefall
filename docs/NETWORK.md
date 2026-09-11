@@ -56,8 +56,9 @@ on, and it is also how bugs get reported: a replay file reproduces them.
 ## What exists
 
 - `crates/islefall-net`: the messages and the framing (a little-endian
-  length and postcard bytes), blocking for the client and async for the
-  server behind the `tokio` feature, and the data hash clients present.
+  length and postcard bytes, through tokio-util's length-delimited
+  codec), used by the client on a runtime of its own and by the
+  server, and the data hash clients present.
 - `crates/islefall-server`: a relay over TCP. Clients say hello with
   their name, map and data hash; the first player's data is the
   standard and anyone differing is refused. Once `min_players` have

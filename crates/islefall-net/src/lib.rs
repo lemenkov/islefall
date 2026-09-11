@@ -5,13 +5,17 @@
 //! them into numbered turns and sends every turn's list to everyone, and
 //! each client advances its own simulation by the turn's ticks. Frames are
 //! a little-endian `u32` length followed by the postcard bytes of a
-//! message; the same framing works on a blocking stream (the client) and
-//! an async one (the server, with the `tokio` feature).
+//! message, as tokio-util's length-delimited codec lays them out; client
+//! and server both read and write them through [`reader`] and [`writer`].
 
-use std::io::{self, Read, Write};
+use std::io;
 
+use bytes::Bytes;
+use futures_util::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 pub use islefall_sim::Command;
 
@@ -54,59 +58,48 @@ pub enum ServerMsg {
     Pong(u64),
 }
 
-pub fn encode<T: Serialize>(msg: &T) -> io::Result<Vec<u8>> {
+/// Postcard bytes of a message, checked against [`MAX_FRAME`].
+pub fn encode<T: Serialize>(msg: &T) -> io::Result<Bytes> {
     let body = postcard::to_stdvec(msg).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     if body.len() > MAX_FRAME {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too long"));
     }
-    let mut out = Vec::with_capacity(4 + body.len());
-    out.extend_from_slice(&(body.len() as u32).to_le_bytes());
-    out.extend_from_slice(&body);
-    Ok(out)
+    Ok(Bytes::from(body))
 }
 
 pub fn decode<T: DeserializeOwned>(body: &[u8]) -> io::Result<T> {
     postcard::from_bytes(body).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-fn frame_len(header: [u8; 4]) -> io::Result<usize> {
-    let len = u32::from_le_bytes(header) as usize;
-    if len > MAX_FRAME {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "frame too long"));
+/// The wire framing: a little-endian `u32` length, then the message.
+pub fn codec() -> LengthDelimitedCodec {
+    LengthDelimitedCodec::builder().little_endian().length_field_type::<u32>().max_frame_length(MAX_FRAME).new_codec()
+}
+
+pub type Reader<R> = FramedRead<R, LengthDelimitedCodec>;
+pub type Writer<W> = FramedWrite<W, LengthDelimitedCodec>;
+
+pub fn reader<R: AsyncRead>(r: R) -> Reader<R> {
+    FramedRead::new(r, codec())
+}
+
+pub fn writer<W: AsyncWrite>(w: W) -> Writer<W> {
+    FramedWrite::new(w, codec())
+}
+
+/// Write one message and flush it.
+pub async fn send<W: AsyncWrite + Unpin, T: Serialize>(w: &mut Writer<W>, msg: &T) -> io::Result<()> {
+    w.send(encode(msg)?).await
+}
+
+/// Read one message; end of stream is an error, since every message is
+/// expected to arrive whole.
+pub async fn recv<R: AsyncRead + Unpin, T: DeserializeOwned>(r: &mut Reader<R>) -> io::Result<T> {
+    match r.next().await {
+        Some(Ok(body)) => decode(&body),
+        Some(Err(e)) => Err(e),
+        None => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed")),
     }
-    Ok(len)
-}
-
-/// Write one message to a blocking stream.
-pub fn write_frame<W: Write, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()> {
-    w.write_all(&encode(msg)?)?;
-    w.flush()
-}
-
-/// Read one message from a blocking stream.
-pub fn read_frame<R: Read, T: DeserializeOwned>(r: &mut R) -> io::Result<T> {
-    let mut header = [0u8; 4];
-    r.read_exact(&mut header)?;
-    let mut body = vec![0u8; frame_len(header)?];
-    r.read_exact(&mut body)?;
-    decode(&body)
-}
-
-#[cfg(feature = "tokio")]
-pub async fn send<W: tokio::io::AsyncWrite + Unpin, T: Serialize>(w: &mut W, msg: &T) -> io::Result<()> {
-    use tokio::io::AsyncWriteExt;
-    w.write_all(&encode(msg)?).await?;
-    w.flush().await
-}
-
-#[cfg(feature = "tokio")]
-pub async fn recv<R: tokio::io::AsyncRead + Unpin, T: DeserializeOwned>(r: &mut R) -> io::Result<T> {
-    use tokio::io::AsyncReadExt;
-    let mut header = [0u8; 4];
-    r.read_exact(&mut header).await?;
-    let mut body = vec![0u8; frame_len(header)?];
-    r.read_exact(&mut body).await?;
-    decode(&body)
 }
 
 /// The data hash clients present: XXH3 over the bytes of the rules, the
@@ -122,14 +115,29 @@ mod tests {
 
     #[test]
     fn frames_round_trip() {
-        let msg = ServerMsg::Turn { turn: 7, commands: vec![(1, Command::Move { unit: 2, to: Cell::new(3, 4) })] };
-        let bytes = encode(&msg).unwrap();
-        let mut cursor = io::Cursor::new(bytes);
-        let back: ServerMsg = read_frame(&mut cursor).unwrap();
-        assert_eq!(back, msg);
-        let mut out = Vec::new();
-        write_frame(&mut out, &ClientMsg::Ping(9)).unwrap();
-        assert_eq!(&out[..4], &(out.len() as u32 - 4).to_le_bytes());
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        rt.block_on(async {
+            let (a, b) = tokio::io::duplex(4096);
+            let (mut w, mut r) = (writer(a), reader(b));
+            let msg = ServerMsg::Turn { turn: 7, commands: vec![(1, Command::Move { unit: 2, to: Cell::new(3, 4) })] };
+            send(&mut w, &msg).await.unwrap();
+            send(&mut w, &ClientMsg::Ping(9)).await.unwrap();
+            let back: ServerMsg = recv(&mut r).await.unwrap();
+            assert_eq!(back, msg);
+            let ping: ClientMsg = recv(&mut r).await.unwrap();
+            assert_eq!(ping, ClientMsg::Ping(9));
+            drop(w);
+            assert!(recv::<_, ClientMsg>(&mut r).await.is_err(), "a closed stream is an error, not a message");
+        });
+        // The wire layout: a little-endian u32 length, then the postcard bytes.
+        let body = encode(&ClientMsg::Ping(9)).unwrap();
+        let mut framed = Vec::new();
+        framed.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        framed.extend_from_slice(&body);
+        let mut c = codec();
+        let mut buf = bytes::BytesMut::from(&framed[..]);
+        let got = tokio_util::codec::Decoder::decode(&mut c, &mut buf).unwrap().unwrap();
+        assert_eq!(&got[..], &body[..]);
         assert_ne!(data_hash(b"a"), data_hash(b"b"));
     }
 }
