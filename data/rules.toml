@@ -324,14 +324,17 @@ smoke_rise_px = 14.0
 # the figure, the icon size of the build list, the minimap's height and
 # its colours.
 [sidebar]
-width = 190
+width = 280
 art = "fortgump"
 back_frame = 0
 ruler_frame = 2
 counter_frame = 4
 crystal = "nugget"
-icon_size = 44
-minimap_height = 130
+icon_size = 48
+minimap_height = 150
+# A bridge piece in its slot: pixels per cell, and the list's text size.
+piece_cell = 10
+font_size = 14
 colours = { sky = [0.16, 0.19, 0.33], sun = [0.35, 0.62, 0.25], thunder = [0.45, 0.45, 0.52], wind = [0.58, 0.45, 0.24], rain = [0.82, 0.86, 0.92], bridge = [0.62, 0.46, 0.24], mine = [0.2, 0.95, 0.2], enemy = [0.95, 0.2, 0.2], unit = [1.0, 1.0, 1.0], view = [1.0, 1.0, 0.6] }
 
 [controls]

@@ -1010,8 +1010,8 @@ fn spawn_sidebar(commands: &mut Commands, data: &GameData, lib: &mut ShapeLibrar
                         }
                     }
                     row.spawn((Node { flex_direction: FlexDirection::Column, ..default() },)).with_children(|col| {
-                        col.spawn((Text::new(name), TextFont { font_size: 12.0.into(), ..default() }, TextColor(Color::WHITE)));
-                        col.spawn((Text::new(if cost > 0 { cost.to_string() } else { String::new() }), TextFont { font_size: 12.0.into(), ..default() }, TextColor(Color::srgb(1.0, 0.85, 0.3))));
+                        col.spawn((Text::new(name), TextFont { font_size: sb.font_size.into(), ..default() }, TextColor(Color::WHITE)));
+                        col.spawn((Text::new(if cost > 0 { cost.to_string() } else { String::new() }), TextFont { font_size: sb.font_size.into(), ..default() }, TextColor(Color::srgb(1.0, 0.85, 0.3))));
                     });
                 });
             }
@@ -1059,7 +1059,14 @@ fn sidebar_update(
             t.0 = s;
         }
     }
-    let names: Vec<String> = w.queue.slots.iter().map(|p| p.name.clone()).collect();
+    // The piece in hand is drawn turned as it is, so the slots are redrawn
+    // when the queue or the turn changes.
+    let in_hand = match &player.tool {
+        Tool::Bridge(slot, rotations) => Some((*slot, *rotations)),
+        _ => None,
+    };
+    let mut names: Vec<String> = w.queue.slots.iter().map(|p| p.name.clone()).collect();
+    names.push(format!("{in_hand:?}"));
     if *last_queue != names {
         *last_queue = names;
         for e in &slots {
@@ -1067,14 +1074,22 @@ fn sidebar_update(
         }
         if let Ok(boxe) = boxes.single() {
             let sb = &data.cfg.sidebar;
-            let cell = 7.0;
+            let cell = sb.piece_cell;
             commands.entity(boxe).with_children(|b| {
                 for (i, piece) in w.queue.slots.iter().enumerate() {
+                    let mut piece = piece.clone();
+                    if let Some((slot, rotations)) = in_hand {
+                        if slot == i {
+                            for _ in 0..rotations % 4 {
+                                piece = piece.rotated();
+                            }
+                        }
+                    }
                     let (pw, ph) = piece.size();
                     let key = data.cfg.controls.slot_keys.get(i).cloned().unwrap_or_default();
                     b.spawn((
                         Button,
-                        Node { width: px((sb.width - 12.0) / 2.0 - 6.0), height: px(cell * 4.0 + 18.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: UiRect::all(px(2)), ..default() },
+                        Node { width: px((sb.width - 12.0) / 4.0 - 6.0), height: px(cell * 4.0 + 22.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, padding: UiRect::all(px(2)), ..default() },
                         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
                         PieceSlotButton(i),
                     ))
@@ -1087,7 +1102,7 @@ fn sidebar_update(
                                 ));
                             }
                         });
-                        slot.spawn((Text::new(key), TextFont { font_size: 11.0.into(), ..default() }, TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8))));
+                        slot.spawn((Text::new(key), TextFont { font_size: sb.font_size.into(), ..default() }, TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8))));
                     });
                 }
             });

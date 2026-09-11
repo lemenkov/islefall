@@ -134,6 +134,12 @@ impl Default for Generate {
     }
 }
 
+fn default_piece_cell() -> f32 {
+    7.0
+}
+fn default_panel_font() -> f32 {
+    12.0
+}
 fn default_altar() -> String {
     "dais".into()
 }
@@ -198,6 +204,12 @@ pub struct Sidebar {
     pub crystal: String,
     pub icon_size: f32,
     pub minimap_height: f32,
+    /// Pixels per cell of a bridge piece drawn in its slot.
+    #[serde(default = "default_piece_cell")]
+    pub piece_cell: f32,
+    /// Text size in the build list.
+    #[serde(default = "default_panel_font")]
+    pub font_size: f32,
     /// Minimap colours: sky, the four island themes, bridge, mine, enemy, unit, view.
     pub colours: BTreeMap<String, [f32; 3]>,
 }
