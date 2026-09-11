@@ -347,6 +347,25 @@ pub struct Hud {
     pub lines: Vec<String>,
     pub victory: String,
     pub defeat: String,
+    /// The selected unit's mark: a ring on the ground round its feet and
+    /// a frame round its picture, in this colour, the ring this wide and
+    /// tall in source pixels, pulsing this many times a second.
+    #[serde(default = "default_selection_colour")]
+    pub selection_colour: [f32; 3],
+    #[serde(default = "default_selection_ring")]
+    pub selection_ring: [f32; 2],
+    #[serde(default = "default_selection_pulse")]
+    pub selection_pulse: f32,
+}
+
+fn default_selection_colour() -> [f32; 3] {
+    [1.0, 0.9, 0.2]
+}
+fn default_selection_ring() -> [f32; 2] {
+    [22.0, 11.0]
+}
+fn default_selection_pulse() -> f32 {
+    1.5
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

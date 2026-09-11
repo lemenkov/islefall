@@ -710,9 +710,20 @@ struct EnergyRing {
     index: u32,
 }
 
-/// Marks per-frame overlay sprites: health bars and shot flashes.
+/// Marks per-frame overlay sprites: health bars, the selection mark, flashes.
 #[derive(Component)]
 struct Overlay;
+
+/// A one-pixel white image for sprites that are just a colour. The
+/// default image handle draws nothing here, so `Sprite::from_color` is
+/// never used; see [`solid`].
+#[derive(Resource)]
+struct Solid(Handle<Image>);
+
+/// A sprite of one colour and size.
+fn solid(white: &Solid, color: Color, size: Vec2) -> Sprite {
+    Sprite { image: white.0.clone(), color, custom_size: Some(size), ..default() }
+}
 
 /// Where the game's own data lives.
 fn whoami() -> String {
@@ -1327,6 +1338,14 @@ fn setup(
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
     lib.sheets = Some(data.data_dir.join(&data.cfg.sprites.dir));
+    let white = images.add(Image::new(
+        bevy::render::render_resource::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        bevy::render::render_resource::TextureDimension::D2,
+        vec![255, 255, 255, 255],
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD,
+    ));
+    commands.insert_resource(Solid(white));
     match *mode {
         Mode::Island => {
             setup_map(&mut commands, &data, &mut sim, &mut lib, &mut images, &mut layouts);
@@ -2255,6 +2274,7 @@ fn ghost(
     player: Res<Player>,
     sim: Res<Sim>,
     existing: Query<Entity, With<Ghost>>,
+    white: Res<Solid>,
 ) {
     for e in &existing {
         commands.entity(e).despawn();
@@ -2299,7 +2319,7 @@ fn ghost(
     for c in cells {
         let (x, y) = c.centre_px(g);
         commands.spawn((
-            Sprite::from_color(color, Vec2::new(g.cell_w as f32, g.cell_h as f32)),
+            solid(&white, color, Vec2::new(g.cell_w as f32, g.cell_h as f32)),
             Transform::from_translation(Vec3::new(x as f32, -(y as f32), 50.0)),
             Ghost,
         ));
@@ -2321,6 +2341,8 @@ fn overlays(
     time: Res<Time>,
     mut tracers: Local<Vec<(Vec2, Vec2, f32)>>,
     mut landed: ResMut<Landed>,
+    layers: Query<(&UnitLayer, &GlobalTransform, &Sprite, &ShapeSprite)>,
+    white: Res<Solid>,
 ) {
     for e in &existing {
         commands.entity(e).despawn();
@@ -2328,12 +2350,31 @@ fn overlays(
     let w = sim.world();
     let g = data.grid();
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
-    // A box round the selected unit.
+    // The selected unit: a pulsing ring on the ground round its feet and a
+    // frame round its picture.
     if let Some(u) = w.units.get(player.selected).filter(|u| u.alive && u.owner == player.id) {
-        let p = unit_to_world(u, g) + Vec2::new(0.0, 10.0);
-        let (wd, ht, c) = (20.0, 26.0, Color::srgba(1.0, 1.0, 1.0, 0.8));
-        for (dx, dy, sw, sh) in [(0.0, ht / 2.0, wd, 1.0), (0.0, -ht / 2.0, wd, 1.0), (wd / 2.0, 0.0, 1.0, ht), (-wd / 2.0, 0.0, 1.0, ht)] {
-            commands.spawn((Sprite::from_color(c, Vec2::new(sw, sh)), Transform::from_translation(Vec3::new(p.x + dx, p.y + dy, 58.5)), Overlay));
+        let hud = &data.cfg.hud;
+        let pulse = 0.65 + 0.35 * (time.elapsed_secs() * hud.selection_pulse * std::f32::consts::TAU).sin();
+        let c = Color::srgba(hud.selection_colour[0], hud.selection_colour[1], hud.selection_colour[2], pulse);
+        let feet = unit_to_world(u, g);
+        let (rw, rh) = (hud.selection_ring[0] / 2.0, hud.selection_ring[1] / 2.0);
+        let dots = 28;
+        for k in 0..dots {
+            let a = k as f32 / dots as f32 * std::f32::consts::TAU;
+            let (x, y) = (feet.x + rw * a.cos(), feet.y + rh * a.sin());
+            commands.spawn((solid(&white, c, Vec2::new(2.0, 2.0)), Transform::from_translation(Vec3::new(x, y, Z_UNIT - 0.5)), Overlay));
+        }
+        let picture = layers.iter().find(|(l, ..)| l.unit == player.selected && !l.shadow).and_then(|(_, tf, sprite, shape)| {
+            let frame = shape.frames.get(sprite.texture_atlas.as_ref()?.index)?;
+            Some((tf.translation().truncate(), frame.size.as_vec2(), frame.hotspot))
+        });
+        if let Some((at, size, hot)) = picture {
+            let (x0, y0) = (at.x - hot.x - 2.0, at.y + hot.y - size.y - 2.0);
+            let (wd, ht) = (size.x + 4.0, size.y + 4.0);
+            let (cx, cy) = (x0 + wd / 2.0, y0 + ht / 2.0);
+            for (dx, dy, sw, sh) in [(0.0, ht / 2.0, wd, 1.0), (0.0, -ht / 2.0, wd, 1.0), (wd / 2.0, 0.0, 1.0, ht), (-wd / 2.0, 0.0, 1.0, ht)] {
+                commands.spawn((solid(&white, c, Vec2::new(sw, sh)), Transform::from_translation(Vec3::new(cx + dx, cy + dy, 58.5)), Overlay));
+            }
         }
     }
     // Spell icons over their bearers, the selected caster's reach, and casting, prayer, paralysis and invisibility marks.
@@ -2352,7 +2393,7 @@ fn overlays(
                 if i == player.selected && u.owner == player.id {
                     let range = data.rules(spell).spell_range;
                     let size = Vec2::new(((2 * range + 1) * g.cell_w) as f32, ((2 * range + 1) * g.cell_h) as f32);
-                    commands.spawn((Sprite::from_color(Color::srgba(0.6, 0.4, 1.0, 0.12), size), Transform::from_translation(Vec3::new(p.x, p.y + g.cell_h as f32 / 2.0, 58.0)), Overlay));
+                    commands.spawn((solid(&white, Color::srgba(0.6, 0.4, 1.0, 0.12), size), Transform::from_translation(Vec3::new(p.x, p.y + g.cell_h as f32 / 2.0, 58.0)), Overlay));
                 }
             }
         }
@@ -2366,16 +2407,16 @@ fn overlays(
             None
         };
         if let Some(c) = mark {
-            commands.spawn((Sprite::from_color(c, Vec2::new(16.0, 16.0)), Transform::from_translation(Vec3::new(p.x, p.y + 8.0, 59.5)), Overlay));
+            commands.spawn((solid(&white, c, Vec2::new(16.0, 16.0)), Transform::from_translation(Vec3::new(p.x, p.y + 8.0, 59.5)), Overlay));
         }
     }
     let bar = |commands: &mut Commands, pos: Vec2, width: f32, frac: f32| {
         let back = Color::srgba(0.1, 0.1, 0.1, 0.8);
         let front = if frac > 0.6 { Color::srgb(0.2, 0.9, 0.2) } else if frac > 0.3 { Color::srgb(0.9, 0.9, 0.2) } else { Color::srgb(0.9, 0.2, 0.2) };
-        commands.spawn((Sprite::from_color(back, Vec2::new(width, 3.0)), Transform::from_translation(pos.extend(60.0)), Overlay));
+        commands.spawn((solid(&white, back, Vec2::new(width, 3.0)), Transform::from_translation(pos.extend(60.0)), Overlay));
         let wdt = (width - 1.0) * frac.clamp(0.0, 1.0);
         commands.spawn((
-            Sprite::from_color(front, Vec2::new(wdt.max(0.5), 2.0)),
+            solid(&white, front, Vec2::new(wdt.max(0.5), 2.0)),
             Transform::from_translation(Vec3::new(pos.x - (width - 1.0 - wdt) / 2.0, pos.y, 60.1)),
             Overlay,
         ));
@@ -2387,10 +2428,10 @@ fn overlays(
         if !s.complete() {
             // Build progress in blue while the stream works.
             let frac = s.progress();
-            commands.spawn((Sprite::from_color(Color::srgba(0.1, 0.1, 0.1, 0.8), Vec2::new(width, 3.0)), Transform::from_translation(top.extend(60.0)), Overlay));
+            commands.spawn((solid(&white, Color::srgba(0.1, 0.1, 0.1, 0.8), Vec2::new(width, 3.0)), Transform::from_translation(top.extend(60.0)), Overlay));
             let wdt = (width - 1.0) * frac.clamp(0.0, 1.0);
             commands.spawn((
-                Sprite::from_color(Color::srgb(0.3, 0.6, 1.0), Vec2::new(wdt.max(0.5), 2.0)),
+                solid(&white, Color::srgb(0.3, 0.6, 1.0), Vec2::new(wdt.max(0.5), 2.0)),
                 Transform::from_translation(Vec3::new(top.x - (width - 1.0 - wdt) / 2.0, top.y, 60.1)),
                 Overlay,
             ));
@@ -2408,7 +2449,7 @@ fn overlays(
         }
         if u.stunned {
             commands.spawn((
-                Sprite::from_color(Color::srgba(1.0, 0.95, 0.3, 0.45), Vec2::new(18.0, 12.0)),
+                solid(&white, Color::srgba(1.0, 0.95, 0.3, 0.45), Vec2::new(18.0, 12.0)),
                 Transform::from_translation(Vec3::new(p.x, p.y - 2.0, 59.0)),
                 Overlay,
             ));
@@ -2422,7 +2463,7 @@ fn overlays(
     });
     for &(_, to, left) in tracers.iter() {
         let alpha = (left / data.cfg.projectiles.flash_seconds.max(0.01)).clamp(0.0, 1.0);
-        commands.spawn((Sprite::from_color(Color::srgba(1.0, 0.8, 0.3, alpha), Vec2::new(7.0, 7.0)), Transform::from_translation(to.extend(61.0)), Overlay));
+        commands.spawn((solid(&white, Color::srgba(1.0, 0.8, 0.3, alpha), Vec2::new(7.0, 7.0)), Transform::from_translation(to.extend(61.0)), Overlay));
     }
     for hit in landed.0.drain(..) {
         tracers.push((hit, hit, data.cfg.projectiles.flash_seconds));
@@ -2774,7 +2815,7 @@ struct Ember {
 
 /// Damaged structures burn: flames start at random points of the
 /// footprint at a rate set by the damage, rise, fade, and leave smoke.
-fn burning(mut commands: Commands, sim: Res<Sim>, data: Res<GameData>, time: Res<Time>, mut embers: Query<(Entity, &mut Ember, &mut Transform, &mut Sprite)>, mut rng: Local<u64>) {
+fn burning(mut commands: Commands, sim: Res<Sim>, data: Res<GameData>, time: Res<Time>, mut embers: Query<(Entity, &mut Ember, &mut Transform, &mut Sprite)>, mut rng: Local<u64>, white: Res<Solid>) {
     let w = sim.world();
     let fx = &data.cfg.effects;
     let g = data.grid();
@@ -2809,13 +2850,13 @@ fn burning(mut commands: Commands, sim: Res<Sim>, data: Res<GameData>, time: Res
             let y = -(top + next() * (s.foot_y * g.cell_h) as f32);
             let size = 2.0 + next() * 2.0;
             commands.spawn((
-                Sprite::from_color(Color::srgb(1.0, 0.85, 0.3), Vec2::splat(size)),
+                solid(&white, Color::srgb(1.0, 0.85, 0.3), Vec2::splat(size)),
                 Transform::from_translation(Vec3::new(x, y, Z_UNIT + 1.0)),
                 Ember { life: 0.0, seconds: fx.flame_seconds * (0.7 + next() * 0.6), rise: fx.flame_rise_px, smoke: false },
             ));
             if next() < fx.smoke_per_flame {
                 commands.spawn((
-                    Sprite::from_color(Color::srgba(0.3, 0.3, 0.3, 0.5), Vec2::splat(size + 2.0)),
+                    solid(&white, Color::srgba(0.3, 0.3, 0.3, 0.5), Vec2::splat(size + 2.0)),
                     Transform::from_translation(Vec3::new(x + next() * 4.0 - 2.0, y + 6.0, Z_UNIT + 0.9)),
                     Ember { life: 0.0, seconds: fx.smoke_seconds * (0.7 + next() * 0.6), rise: fx.smoke_rise_px, smoke: true },
                 ));

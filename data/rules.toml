@@ -230,6 +230,11 @@ lines = [
 ]
 victory = "Victory! The enemy High Priests have been sacrificed."
 defeat = "Defeat. Your High Priest was sacrificed."
+# The selected unit: a ring on the ground round its feet and a frame round
+# its picture, pulsing.
+selection_colour = [1.0, 0.9, 0.2]
+selection_ring = [22.0, 11.0]
+selection_pulse = 1.5
 
 # How a structure's frames animate. Frames labelled `idle_label` (or the
 # label of the structure's level) loop: geysers spout, batteries turn,
