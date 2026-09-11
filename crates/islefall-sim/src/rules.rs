@@ -58,6 +58,11 @@ pub struct AirAttack {
 pub struct TypeRules {
     pub foot_x: i32,
     pub foot_y: i32,
+    /// `hotFootRatioX`/`Y`: how far, in cells, the picture's hotspot sits
+    /// in from the bottom-right corner of the footprint's hotspot cell.
+    /// (0, 0) puts it on the corner; a geyser's 0.22 draws its rocks
+    /// inside its island, a Generator's 0.5 centres its narrow picture.
+    pub hot_foot: (f64, f64),
     pub walk: Walk,
     pub drop_blocking: bool,
     pub creates_island: bool,
@@ -186,6 +191,7 @@ impl TypeRules {
         Ok(TypeRules {
             foot_x: def.get_i64("foot_x").unwrap_or(1).max(1) as i32,
             foot_y: def.get_i64("foot_y").unwrap_or(1).max(1) as i32,
+            hot_foot: (def.get_f64("hotFootRatioX").unwrap_or(0.0), def.get_f64("hotFootRatioY").unwrap_or(0.0)),
             walk,
             drop_blocking: has(&f.drop_blocking),
             creates_island: has(&f.creates_island),
@@ -232,6 +238,7 @@ impl TypeRules {
         TypeRules {
             foot_x: 1,
             foot_y: 1,
+            hot_foot: (0.0, 0.0),
             walk: Walk::Free,
             drop_blocking: false,
             creates_island: false,
@@ -299,8 +306,9 @@ mod tests {
         assert!(r.is_unit);
         assert_eq!(r.speed, 1.8);
         assert_eq!(r.walk, Walk::Free);
-        let r = rules_of("typename g\ntypeflags geyser dropBlocking;\n{\n cost = 2000;\n}\nA00 : : \"a.gif\" #0;\n");
+        let r = rules_of("typename g\ntypeflags geyser dropBlocking;\n{\n cost = 2000;\n hotFootRatioX = 0.22;\n hotfootratioy = 0.5;\n}\nA00 : : \"a.gif\" #0;\n");
         assert!(r.is_geyser && r.cost == 2000);
+        assert_eq!(r.hot_foot, (0.22, 0.5), "hot foot ratios, whatever their case");
         let r = rules_of("typename sunCannon\ntypeflags emplacement;\n{\n maxHitPoints = 600;\n range = 22;\n hpPerSec = 16;\n delayBetweenShots = 5.0;\n threat = 5;\n}\nA00 : : \"a.gif\" #0;\n");
         assert_eq!((r.max_hit_points, r.range, r.damage_per_shot), (600, 22, 80));
         assert!(r.cardinal_only);

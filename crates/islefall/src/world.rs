@@ -235,7 +235,11 @@ pub fn spawn_structure(
         };
         let plan = structure_frames(shape, &world.cfg.animation, install.type_def(&st.kind).map(|d| d.flags.as_slice()).unwrap_or(&[]), st.cell, &st.kind, st.variant, st.level, ground);
         let z = Z_STRUCTURE + st.cell.y as f32 * 0.01;
-        let pos = cell_to_world(st.cell, &world.cfg.grid);
+        // The picture's hotspot sits `hotFootRatio` cells in from the
+        // hotspot cell's bottom-right corner (the original's convention).
+        let (rx, ry) = world.types.get(&st.kind.to_lowercase()).map(|r| r.hot_foot).unwrap_or((0.0, 0.0));
+        let g = &world.cfg.grid;
+        let pos = cell_to_world(st.cell, g) + Vec2::new(-(rx as f32 * g.cell_w as f32), ry as f32 * g.cell_h as f32);
         if let Some(base) = plan.base {
             let b = spawn_frame(commands, shape, base, pos, z);
             commands.entity(b).insert((StructureSprite(i), StructureKey::of(st), StructureBase));

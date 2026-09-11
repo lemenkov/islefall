@@ -96,6 +96,16 @@ altar and High Priest; geyser islands and bare islets lie between. The
 original's campaign scenarios load from the archive and are read by
 `[fort]`; `docs/FORT.md` has the format and what of it is known.
 
+## Pictures on the grid
+
+A structure's picture has a hotspot (from the sprite cache) that the
+engine puts `hotFootRatioX` and `hotFootRatioY` cells in from the
+bottom-right corner of the footprint's hotspot cell; types that say
+nothing sit on the corner. Read that way, every picture in the data comes
+out centred on its footprint: a Generator's narrow picture with ratio
+0.5, a Thunder Cannon's wide wings with 0.125, and the geyser's rocks
+(0.22) stay inside their little island instead of running to its edge.
+
 ## Bridges
 
 From the manual and the tutorial texts:
