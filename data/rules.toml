@@ -217,6 +217,19 @@ layers = [
 [sprites]
 dir = "sprites"
 
+# What hangs under islands, as in the original: `fringe` stalactites under
+# the rim cells of big islands (by the `isle` piece label: EI is the bottom
+# edge, IO and HN the bottom corners, AB and AE the inside bottom
+# corners), their hotspots `hang` cells below the rim so the picture
+# starts at the rim's top; and one `islandstalag` rock under a
+# three-by-three island (frame 8 is the one without a player's apron).
+[fringe]
+kind = "fringe"
+pieces = { EI = "EA", IO = "IA", HN = "HA", AB = "AB", AE = "AE" }
+hang = 3
+stalag = "islandstalag"
+stalag_frame = 8
+
 # The text in the corner of the screen. Placeholders: {power}, {knowledge},
 # {techs}, {tool}, {status} (the last thing the game had to say) and
 # {opponents} (players still in). The last two lines show when the game
@@ -336,8 +349,9 @@ counter_frame = 4
 crystal = "nugget"
 icon_size = 48
 minimap_height = 150
-# A bridge piece in its slot: pixels per cell, and the list's text size.
-piece_cell = 10
+# A bridge piece in its slot, drawn with the bridge tiles: pixels per
+# cell, and the list's text size.
+piece_cell = 16
 font_size = 14
 colours = { sky = [0.16, 0.19, 0.33], sun = [0.35, 0.62, 0.25], thunder = [0.45, 0.45, 0.52], wind = [0.58, 0.45, 0.24], rain = [0.82, 0.86, 0.92], bridge = [0.62, 0.46, 0.24], mine = [0.2, 0.95, 0.2], enemy = [0.95, 0.2, 0.2], unit = [1.0, 1.0, 1.0], view = [1.0, 1.0, 0.6] }
 

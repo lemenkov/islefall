@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use islefall_data::isle::{self, Theme};
 use islefall_data::{Installation, Palette, Picture, Sheet, bridge};
-use islefall_sim::config::Grid;
+use islefall_sim::config::{Config, Grid};
 use islefall_sim::{BridgeState, Cell, IslandMap, World};
 
 /// Marks a terrain tile sprite; platform tiles are rebuilt when terrain changes.
@@ -178,20 +178,49 @@ pub fn spawn_island(
     island: &IslandMap,
     theme: Theme,
     platform: bool,
-    grid: &Grid,
+    cfg: &Config,
 ) {
-    let world_grid = grid.clone();
+    let world_grid = cfg.grid.clone();
     let Some(isle_def) = install.type_def("isle") else { return };
     let mut by_piece = HashMap::new();
     let Some(shape) = lib.get_or_load(install, palette, "isle", images, layouts) else { return };
+    let mut pieces = Vec::new();
     for cell in island.cells() {
         let Some(piece) = island.piece_at(cell) else { continue };
+        pieces.push((cell, piece));
         let frames = by_piece.entry(piece).or_insert_with(|| isle::frames(isle_def, theme, piece));
         if frames.is_empty() {
             continue;
         }
         let frame = frames[variation(cell, frames.len())];
         let e = spawn_frame(commands, shape, frame, cell_to_world(cell, &world_grid), Z_TERRAIN + if platform { 0.5 } else { 0.0 });
+        commands.entity(e).insert(TerrainTile { platform });
+    }
+    // The underside, behind the ground: one rock under a three-by-three
+    // island, stalactites under a bigger island's bottom rim.
+    let fr = &cfg.fringe;
+    let z = Z_TERRAIN - 0.5 + if platform { 0.25 } else { 0.0 };
+    let (min_x, min_y) = (island.cells().map(|c| c.x).min().unwrap_or(0), island.cells().map(|c| c.y).min().unwrap_or(0));
+    let (max_x, max_y) = (island.cells().map(|c| c.x).max().unwrap_or(0), island.cells().map(|c| c.y).max().unwrap_or(0));
+    if island.len() == 9 && max_x - min_x == 2 && max_y - min_y == 2 {
+        if let Some(stalag) = lib.get_or_load(install, palette, &fr.stalag, images, layouts) {
+            if fr.stalag_frame < stalag.frames.len() {
+                let e = spawn_frame(commands, stalag, fr.stalag_frame, cell_to_world(Cell::new(max_x, max_y), &world_grid), z);
+                commands.entity(e).insert(TerrainTile { platform });
+            }
+        }
+        return;
+    }
+    let Some(fringe) = lib.get_or_load(install, palette, &fr.kind, images, layouts) else { return };
+    let mut by_label: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (cell, piece) in pieces {
+        let Some(label) = fr.pieces.get(piece.label()) else { continue };
+        let frames = by_label.entry(label.as_str()).or_insert_with(|| (0..fringe.labels.len()).filter(|&i| fringe.labels[i].eq_ignore_ascii_case(label) && fringe.flags[i].is_empty()).collect());
+        if frames.is_empty() {
+            continue;
+        }
+        let frame = frames[variation(cell, frames.len())];
+        let e = spawn_frame(commands, fringe, frame, cell_to_world(cell.offset(0, fr.hang), &world_grid), z);
         commands.entity(e).insert(TerrainTile { platform });
     }
 }

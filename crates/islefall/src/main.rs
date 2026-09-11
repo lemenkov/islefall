@@ -1049,6 +1049,9 @@ fn sidebar_update(
     mut slot_buttons: Query<(&PieceSlotButton, &mut BackgroundColor), Without<BuildButton>>,
     mut buttons: Query<(&BuildButton, &mut BackgroundColor)>,
     mut last_queue: Local<Vec<String>>,
+    mut lib: ResMut<ShapeLibrary>,
+    mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
     let w = sim.world();
     let me = player.id as usize % data.cfg.sim.max_players;
@@ -1074,6 +1077,10 @@ fn sidebar_update(
         if let Ok(boxe) = boxes.single() {
             let sb = &data.cfg.sidebar;
             let cell = sb.piece_cell;
+            // Rows overlap as on the map, where a tile is taller than its cell.
+            let pitch = cell * data.grid().cell_h as f32 / data.grid().cell_w as f32;
+            let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+            let tiles = data.install.type_def("bridge").and_then(|def| lib.get_or_load(&data.install, palette, "bridge", &mut images, &mut layouts).map(|sh| (def.clone(), sh.image.clone(), sh.layout.clone())));
             commands.entity(boxe).with_children(|b| {
                 for (i, piece) in w.queue.slots.iter().enumerate() {
                     let mut piece = piece.clone();
@@ -1088,17 +1095,29 @@ fn sidebar_update(
                     let key = data.cfg.controls.slot_keys.get(i).cloned().unwrap_or_default();
                     b.spawn((
                         Button,
-                        Node { width: px((sb.width - 12.0) / 4.0 - 6.0), height: px(cell * 4.0 + 22.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, padding: UiRect::all(px(2)), ..default() },
+                        Node { width: px((sb.width - 12.0) / 4.0 - 6.0), height: px(pitch * 3.0 + cell + 22.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, justify_content: JustifyContent::Center, padding: UiRect::all(px(2)), ..default() },
                         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.25)),
                         PieceSlotButton(i),
                     ))
                     .with_children(|slot| {
-                        slot.spawn((Node { width: px(cell * pw as f32), height: px(cell * ph as f32), position_type: PositionType::Relative, ..default() },)).with_children(|grid| {
+                        slot.spawn((Node { width: px(cell * pw as f32), height: px(pitch * (ph - 1) as f32 + cell), position_type: PositionType::Relative, ..default() },)).with_children(|grid| {
                             for &(ox, oy) in &piece.cells {
-                                grid.spawn((
-                                    Node { position_type: PositionType::Absolute, left: px(ox as f32 * cell), top: px(oy as f32 * cell), width: px(cell - 1.0), height: px(cell - 1.0), ..default() },
-                                    BackgroundColor(colour(sb, "bridge")),
-                                ));
+                                // The cell as the bridge tile it would be laid as.
+                                let mut mask = 0u8;
+                                for (bit, dx, dy) in [(islefall_data::bridge::NORTH, 0, -1), (islefall_data::bridge::EAST, 1, 0), (islefall_data::bridge::SOUTH, 0, 1), (islefall_data::bridge::WEST, -1, 0)] {
+                                    if piece.cells.contains(&(ox + dx, oy + dy)) {
+                                        mask |= bit;
+                                    }
+                                }
+                                let node = Node { position_type: PositionType::Absolute, left: px(ox as f32 * cell), top: px(oy as f32 * pitch), width: px(cell), height: px(cell), ..default() };
+                                match tiles.as_ref().and_then(|(def, image, layout)| islefall_data::bridge::frames(def, mask, islefall_data::bridge::Condition::Normal).first().map(|&f| (image.clone(), layout.clone(), f))) {
+                                    Some((image, layout, index)) => {
+                                        grid.spawn((ImageNode { image, texture_atlas: Some(TextureAtlas { layout, index }), image_mode: NodeImageMode::Stretch, ..default() }, node));
+                                    }
+                                    None => {
+                                        grid.spawn((node, BackgroundColor(colour(sb, "bridge"))));
+                                    }
+                                }
                             }
                         });
                         slot.spawn((Text::new(key), TextFont { font_size: sb.font_size.into(), ..default() }, TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8))));
@@ -1426,7 +1445,7 @@ fn setup_map(
             island.remove(map::cell(*c));
         }
         let theme = Theme::parse(&isl.theme).unwrap_or(Theme::Sun);
-        world::spawn_island(commands, install, lib, palette, images, layouts, &island, theme, false, data.grid());
+        world::spawn_island(commands, install, lib, palette, images, layouts, &island, theme, false, &data.cfg);
         match isl.owner {
             Some(owner) => w.push_island(island, owner),
             None => w.push_neutral_island(island),
@@ -2616,7 +2635,7 @@ fn sync_platforms(
         }
     }
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
-    world::spawn_island(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, &w.platforms, Theme::Sun, true, data.grid());
+    world::spawn_island(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, &w.platforms, Theme::Sun, true, &data.cfg);
 }
 
 fn camera_keys(

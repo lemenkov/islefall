@@ -106,6 +106,13 @@ out centred on its footprint: a Generator's narrow picture with ratio
 0.5, a Thunder Cannon's wide wings with 0.125, and the geyser's rocks
 (0.22) stay inside their little island instead of running to its edge.
 
+Islands have undersides, as the original's did: `fringe` stalactites hang
+under the bottom rim cells of a big island (chosen by the rim's `isle`
+piece label through `[fringe].pieces`, their hotspot `hang` cells below
+the rim so the picture starts at the rim's top), and a single
+`islandstalag` rock hangs under every three-by-three island. Both are
+drawn behind the ground.
+
 ## Bridges
 
 From the manual and the tutorial texts:

@@ -42,6 +42,50 @@ pub struct Config {
     /// Making maps up.
     #[serde(default)]
     pub generate: Generate,
+    /// What hangs under islands.
+    #[serde(default)]
+    pub fringe: FringeRules,
+}
+
+/// The original's island undersides: `fringe` pieces hanging under the
+/// rim cells of big islands, and `islandstalag`, one rock under each
+/// three-by-three island.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct FringeRules {
+    #[serde(default = "default_fringe_kind")]
+    pub kind: String,
+    /// Fringe label by island piece label (the `isle` type's).
+    #[serde(default)]
+    pub pieces: BTreeMap<String, String>,
+    /// Cells below a rim cell where a fringe piece's hotspot goes: its
+    /// picture then starts at the rim cell's top and hangs below it.
+    #[serde(default = "default_hang")]
+    pub hang: i32,
+    #[serde(default = "default_stalag_kind")]
+    pub stalag: String,
+    /// Which stalag frame: the last has no player-colour apron.
+    #[serde(default = "default_stalag_frame")]
+    pub stalag_frame: usize,
+}
+
+impl Default for FringeRules {
+    fn default() -> Self {
+        toml::from_str("").expect("all fields default")
+    }
+}
+
+fn default_fringe_kind() -> String {
+    "fringe".into()
+}
+fn default_hang() -> i32 {
+    3
+}
+fn default_stalag_kind() -> String {
+    "islandstalag".into()
+}
+fn default_stalag_frame() -> usize {
+    8
 }
 
 /// How a `.fort` scenario's type codes and seats are read (see
