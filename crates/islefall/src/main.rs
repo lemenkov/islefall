@@ -49,6 +49,8 @@ use bevy::window::PrimaryWindow;
 use islefall_data::isle::Theme;
 use islefall_data::shapes::SHAPE_ORDER;
 use islefall_data::Installation;
+use rand::{RngExt as _, SeedableRng};
+use rand_pcg::Pcg32;
 use bevy::audio::{AudioPlayer, AudioSink, AudioSinkPlayback, AudioSource, GlobalVolume, PlaybackSettings, Volume};
 use islefall_sim::config::Grid;
 use islefall_sim::map::{self, MapDef};
@@ -276,20 +278,12 @@ fn cell_to_world(cell: Cell, g: &Grid) -> Vec2 {
 #[derive(Resource)]
 struct Sky {
     timer: Timer,
-    rng: u64,
+    rng: Pcg32,
 }
 
 impl Sky {
-    fn next(&mut self) -> u64 {
-        // xorshift; presentation only, never the simulation.
-        self.rng ^= self.rng << 13;
-        self.rng ^= self.rng >> 7;
-        self.rng ^= self.rng << 17;
-        self.rng
-    }
-
     fn wait(&mut self, range: [f32; 2]) -> f32 {
-        let t = (self.next() % 10_000) as f32 / 10_000.0;
+        let t = self.rng.random::<f32>();
         range[0] + (range[1] - range[0]) * t
     }
 }
@@ -602,7 +596,7 @@ fn structure_effects(
     mut lib: ResMut<ShapeLibrary>,
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-    mut rng: Local<u64>,
+    mut rng: Local<Option<Pcg32>>,
 ) {
     let g = data.grid();
     let fx = &data.cfg.effects;
@@ -613,15 +607,8 @@ fn structure_effects(
     }
     let Some(sparkle) = &fx.building else { return };
     let Some(w) = sim.world.as_ref() else { return };
-    if *rng == 0 {
-        *rng = 0x5851_F42D_4C95_7F2D;
-    }
-    let mut next = || {
-        *rng ^= *rng << 13;
-        *rng ^= *rng >> 7;
-        *rng ^= *rng << 17;
-        (*rng % 10_000) as f32 / 10_000.0
-    };
+    let rng = rng.get_or_insert_with(|| Pcg32::seed_from_u64(0x5851_F42D_4C95_7F2D));
+    let mut next = || rng.random::<f32>();
     let dt = time.delta_secs();
     for s in w.structures.iter().filter(|s| !s.complete()) {
         let expected = fx.sparkles_per_cell * (s.foot_x * s.foot_y) as f32 * dt;
@@ -784,7 +771,7 @@ fn main() {
         bytes.extend(std::fs::read(data.join("scripts/rules.rhai")).unwrap_or_default());
         // The map as loaded, so a scenario or a seeded map agrees between clients too.
         bytes.extend(format!("{map:?}").into_bytes());
-        let hello = islefall_net::ClientMsg::Hello { protocol: islefall_net::PROTOCOL, name: name.clone(), map: map_name.clone(), data_hash: islefall_net::fnv64(&bytes) };
+        let hello = islefall_net::ClientMsg::Hello { protocol: islefall_net::PROTOCOL, name: name.clone(), map: map_name.clone(), data_hash: islefall_net::data_hash(&bytes) };
         let net = Net::connect(&addr, hello).unwrap_or_else(|e| fail(format!("cannot join {addr}: {e}")));
         net.send(islefall_net::ClientMsg::Ready(true));
         info!("joined {addr} as {name}; waiting for the others");
@@ -816,7 +803,8 @@ fn main() {
     .insert_resource(ClearColor(Color::srgb(background[0], background[1], background[2])))
     .insert_resource(Sky {
         timer: Timer::from_seconds(sky_first, TimerMode::Once),
-        rng: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0x9E37_79B9_7F4A_7C15) | 1,
+        // Presentation only, never the simulation: seeded from the clock.
+        rng: Pcg32::seed_from_u64(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(7)),
     })
     .insert_resource(mode)
     .insert_resource(Time::<Fixed>::from_hz(tick_hz as f64))
@@ -1838,7 +1826,7 @@ fn ambient(mut commands: Commands, data: Res<GameData>, mut bank: ResMut<SoundBa
     }
     sky.timer.tick(time.delta());
     if sky.timer.just_finished() {
-        let pick = (sky.next() % amb.sky.len() as u64) as usize;
+        let pick = sky.rng.random_range(0..amb.sky.len());
         if let Some((handle, db)) = bank.get_or_load(&amb.sky[pick], &mut sources) {
             commands.spawn((AudioPlayer::new(handle), PlaybackSettings::DESPAWN.with_volume(Volume::Decibels(db))));
         }
@@ -2815,20 +2803,13 @@ struct Ember {
 
 /// Damaged structures burn: flames start at random points of the
 /// footprint at a rate set by the damage, rise, fade, and leave smoke.
-fn burning(mut commands: Commands, sim: Res<Sim>, data: Res<GameData>, time: Res<Time>, mut embers: Query<(Entity, &mut Ember, &mut Transform, &mut Sprite)>, mut rng: Local<u64>, white: Res<Solid>) {
+fn burning(mut commands: Commands, sim: Res<Sim>, data: Res<GameData>, time: Res<Time>, mut embers: Query<(Entity, &mut Ember, &mut Transform, &mut Sprite)>, mut rng: Local<Option<Pcg32>>, white: Res<Solid>) {
     let w = sim.world();
     let fx = &data.cfg.effects;
     let g = data.grid();
     let dt = time.delta_secs();
-    if *rng == 0 {
-        *rng = 0x2545_F491_4F6C_DD1D;
-    }
-    let mut next = || {
-        *rng ^= *rng << 13;
-        *rng ^= *rng >> 7;
-        *rng ^= *rng << 17;
-        (*rng % 10_000) as f32 / 10_000.0
-    };
+    let rng = rng.get_or_insert_with(|| Pcg32::seed_from_u64(0x2545_F491_4F6C_DD1D));
+    let mut next = || rng.random::<f32>();
     for s in &w.structures {
         if s.max_hp == 0 || !s.complete() {
             continue;

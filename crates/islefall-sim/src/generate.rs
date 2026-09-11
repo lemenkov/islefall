@@ -6,28 +6,22 @@
 
 use std::collections::BTreeSet;
 
+use rand::{RngExt as _, SeedableRng};
+use rand_pcg::Pcg32;
+
 use crate::config::Config;
 use crate::grid::Cell;
 use crate::island::IslandMap;
 use crate::map::{IslandDef, MapDef, OpponentDef, PlacementDef, UnitDef};
 
-/// A small deterministic generator (xorshift64*), so maps do not depend
-/// on any library's choice of algorithm.
+/// A seeded generator with a fixed, portable algorithm (PCG-32), so the
+/// same seed makes the same map on every machine.
 #[derive(Clone, Debug)]
-pub struct Rng(u64);
+pub struct Rng(Pcg32);
 
 impl Rng {
     pub fn new(seed: u64) -> Rng {
-        Rng(seed ^ 0x9E37_79B9_7F4A_7C15 | 1)
-    }
-
-    pub fn next(&mut self) -> u64 {
-        let mut x = self.0;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        self.0 = x;
-        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        Rng(Pcg32::seed_from_u64(seed))
     }
 
     /// An integer in `0..n`.
@@ -35,12 +29,12 @@ impl Rng {
         if n == 0 {
             return 0;
         }
-        (self.next() >> 33) as u32 % n
+        self.0.random_range(0..n)
     }
 
     /// A float in `0..1`.
     pub fn unit(&mut self) -> f32 {
-        (self.next() >> 40) as f32 / (1u64 << 24) as f32
+        self.0.random::<f32>()
     }
 }
 

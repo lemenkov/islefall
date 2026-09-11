@@ -2,6 +2,8 @@
 //! The whole simulated state and its fixed-rate tick.
 
 use serde::{Deserialize, Serialize};
+use rand::{RngExt as _, SeedableRng};
+use rand_pcg::Pcg32;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use islefall_data::isle::Theme;
@@ -1080,13 +1082,8 @@ impl World {
         if total == 0 {
             return;
         }
-        let mut x = self.cfg.spells.seed ^ ((index as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15)) | 1;
-        for _ in 0..3 {
-            x ^= x << 13;
-            x ^= x >> 7;
-            x ^= x << 17;
-        }
-        let mut pick = x % total;
+        let mut rng = Pcg32::seed_from_u64(self.cfg.spells.seed ^ (index as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+        let mut pick = rng.random_range(0..total);
         let _ = s;
         for (name, &w) in pool {
             if pick < w as u64 {

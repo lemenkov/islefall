@@ -164,7 +164,7 @@ impl World {
     /// A digest of the state that matters: two worlds that ran the same
     /// commands must agree on it, and one that drifted will not.
     pub fn hash(&self) -> u64 {
-        let mut h = Fnv::new();
+        let mut h = Bytes::new();
         h.u64(self.tick);
         for p in &self.powers {
             h.i32(*p);
@@ -206,7 +206,7 @@ impl World {
             h.u64(matches!(u.task, Task::Idle) as u64);
             h.str(u.spell.as_deref().unwrap_or(""));
         }
-        h.0
+        xxhash_rust::xxh3::xxh3_64(&h.0)
     }
 }
 
@@ -222,21 +222,15 @@ impl World {
     }
 }
 
-/// FNV-1a, 64-bit: small, portable and good enough to catch a drift.
-struct Fnv(u64);
+/// The state that matters, laid out as bytes for the hash.
+struct Bytes(Vec<u8>);
 
-impl Fnv {
-    fn new() -> Fnv {
-        Fnv(0xcbf2_9ce4_8422_2325)
-    }
-    fn byte(&mut self, b: u8) {
-        self.0 ^= b as u64;
-        self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
+impl Bytes {
+    fn new() -> Bytes {
+        Bytes(Vec::with_capacity(4096))
     }
     fn u64(&mut self, v: u64) {
-        for b in v.to_le_bytes() {
-            self.byte(b);
-        }
+        self.0.extend_from_slice(&v.to_le_bytes());
     }
     fn i32(&mut self, v: i32) {
         self.u64(v as u32 as u64);
@@ -246,10 +240,8 @@ impl Fnv {
         self.i32(c.y);
     }
     fn str(&mut self, s: &str) {
-        for b in s.bytes() {
-            self.byte(b);
-        }
-        self.byte(0);
+        self.u64(s.len() as u64);
+        self.0.extend_from_slice(s.as_bytes());
     }
 }
 

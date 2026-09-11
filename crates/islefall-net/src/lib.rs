@@ -109,14 +109,10 @@ pub async fn recv<R: tokio::io::AsyncRead + Unpin, T: DeserializeOwned>(r: &mut 
     decode(&body)
 }
 
-/// FNV-1a over bytes, for the data hash clients present.
-pub fn fnv64(bytes: &[u8]) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for &b in bytes {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    h
+/// The data hash clients present: XXH3 over the bytes of the rules, the
+/// scripts and the map as loaded.
+pub fn data_hash(bytes: &[u8]) -> u64 {
+    xxhash_rust::xxh3::xxh3_64(bytes)
 }
 
 #[cfg(test)]
@@ -134,6 +130,6 @@ mod tests {
         let mut out = Vec::new();
         write_frame(&mut out, &ClientMsg::Ping(9)).unwrap();
         assert_eq!(&out[..4], &(out.len() as u32 - 4).to_le_bytes());
-        assert_ne!(fnv64(b"a"), fnv64(b"b"));
+        assert_ne!(data_hash(b"a"), data_hash(b"b"));
     }
 }

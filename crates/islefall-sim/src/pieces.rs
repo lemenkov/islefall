@@ -7,6 +7,8 @@
 //! in the data files, so this is a plausible set that can be adjusted.
 
 use serde::{Deserialize, Serialize};
+use rand::{RngExt as _, SeedableRng};
+use rand_pcg::Pcg32;
 use crate::config::PieceDef;
 use crate::grid::Cell;
 
@@ -65,12 +67,12 @@ impl Piece {
 pub struct PieceQueue {
     pub slots: Vec<Piece>,
     catalogue: Vec<Piece>,
-    rng: u64,
+    rng: Pcg32,
 }
 
 impl PieceQueue {
     pub fn new(catalogue: Vec<Piece>, slots: usize, seed: u64) -> PieceQueue {
-        let mut q = PieceQueue { slots: Vec::new(), catalogue, rng: seed | 1 };
+        let mut q = PieceQueue { slots: Vec::new(), catalogue, rng: Pcg32::seed_from_u64(seed) };
         if q.catalogue.is_empty() {
             return q;
         }
@@ -95,11 +97,7 @@ impl PieceQueue {
     }
 
     fn draw(&mut self) -> Piece {
-        // A small xorshift; only determinism matters here, not quality.
-        self.rng ^= self.rng << 13;
-        self.rng ^= self.rng >> 7;
-        self.rng ^= self.rng << 17;
-        let i = (self.rng >> 33) as usize % self.catalogue.len();
+        let i = self.rng.random_range(0..self.catalogue.len());
         self.catalogue[i].clone()
     }
 }

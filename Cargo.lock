@@ -3279,6 +3279,8 @@ dependencies = [
  "islefall-net",
  "islefall-sim",
  "noise",
+ "rand 0.10.2",
+ "rand_pcg",
  "thiserror 2.0.20",
 ]
 

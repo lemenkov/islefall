@@ -13,6 +13,8 @@ islefall-sim = { workspace = true }
 islefall-net = { path = "../islefall-net" }
 noise = "0.9"
 thiserror = "2.0.20"
+rand = "0.10.2"
+rand_pcg = "0.10.2"
 
 [dependencies.bevy]
 version = "0.19.1"
