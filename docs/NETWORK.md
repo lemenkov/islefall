@@ -64,9 +64,12 @@ on, and it is also how bugs get reported: a replay file reproduces them.
   standard and anyone differing is refused. Once `min_players` have
   connected and said ready the game starts; every `turn_ticks` ticks the
   server sends the commands it received as one turn. Clients send their
-  world hash every `hash_every_turns`, and the server prints agreement
+  world hash every `hash_every_turns`, and the server logs agreement
   or broadcasts a desync with everyone's hashes. It runs no simulation
-  yet, so a client that drops cannot rejoin.
+  yet, so a client that drops cannot rejoin. The server logs through
+  `tracing`, filtered by `RUST_LOG`: `info` (the default) shows players
+  joining, leaving and refusals, the start and desyncs; `debug` adds
+  connections and every hash agreement; `trace` every command relayed.
 - The app joins with `ISLEFALL_JOIN=host:port` and `ISLEFALL_NAME`,
   sends every command to the server instead of applying it, and moves
   its world only by received turns; the player number comes from the

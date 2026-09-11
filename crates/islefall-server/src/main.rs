@@ -9,6 +9,10 @@
 //! ```text
 //! islefall-server [server.toml]
 //! ```
+//!
+//! Logging goes through `tracing`; `RUST_LOG` filters it (`info` by
+//! default, `debug` shows every turn's hash agreement, `islefall_server=trace`
+//! every command relayed).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -18,6 +22,7 @@ use islefall_net::{ClientMsg, PROTOCOL, PlayerInfo, ServerMsg};
 use serde::Deserialize;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, mpsc};
+use tracing::{debug, error, info, trace, warn};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -78,11 +83,12 @@ struct Cli {
 #[tokio::main]
 async fn main() {
     let cli = <Cli as clap::Parser>::parse();
+    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into())).with_target(false).init();
     let cfg: ServerConfig = match cli.config {
         Some(path) => match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| toml::from_str(&t).map_err(|e| e.to_string())) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("islefall-server: {}: {e}", path.display());
+                error!(path = %path.display(), "cannot read the configuration: {e}");
                 std::process::exit(1);
             }
         },
@@ -91,22 +97,22 @@ async fn main() {
     let listener = match TcpListener::bind(&cfg.bind).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("islefall-server: cannot listen on {}: {e}", cfg.bind);
+            error!(bind = %cfg.bind, "cannot listen: {e}");
             std::process::exit(1);
         }
     };
-    println!("islefall-server: listening on {}; {} ticks per turn at {} Hz; {}-{} players", cfg.bind, cfg.turn_ticks, cfg.tick_hz, cfg.min_players, cfg.max_players);
+    info!(bind = %cfg.bind, turn_ticks = cfg.turn_ticks, tick_hz = cfg.tick_hz, min_players = cfg.min_players, max_players = cfg.max_players, "listening");
     let game = Arc::new(Mutex::new(Game::default()));
     tokio::spawn(turn_clock(game.clone(), cfg.clone()));
     loop {
         let (stream, addr) = match listener.accept().await {
             Ok(x) => x,
             Err(e) => {
-                eprintln!("accept: {e}");
+                warn!("accept failed: {e}");
                 continue;
             }
         };
-        println!("connection from {addr}");
+        debug!(%addr, "connection");
         tokio::spawn(serve(stream, game.clone(), cfg.clone()));
     }
 }
@@ -134,7 +140,7 @@ async fn serve(stream: TcpStream, game: Arc<Mutex<Game>>, cfg: ServerConfig) {
     let hello: ClientMsg = match islefall_net::recv(&mut reader).await {
         Ok(m) => m,
         Err(e) => {
-            eprintln!("hello: {e}");
+            debug!("no hello: {e}");
             return;
         }
     };
@@ -158,6 +164,7 @@ async fn serve(stream: TcpStream, game: Arc<Mutex<Game>>, cfg: ServerConfig) {
         };
         if let Some(why) = refusal {
             drop(g);
+            info!(%name, "refused: {why}");
             let _ = islefall_net::send(&mut writer, &ServerMsg::Reject(why)).await;
             return;
         }
@@ -169,7 +176,7 @@ async fn serve(stream: TcpStream, game: Arc<Mutex<Game>>, cfg: ServerConfig) {
         g.broadcast(&lobby);
         id
     };
-    println!("player {id} is {name}");
+    info!(player = id, %name, "joined");
     let write_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if islefall_net::send(&mut writer, &msg).await.is_err() {
@@ -193,13 +200,14 @@ async fn serve(stream: TcpStream, game: Arc<Mutex<Game>>, cfg: ServerConfig) {
                 g.broadcast(&lobby);
                 if !g.started && g.players.len() >= cfg.min_players && g.players.iter().all(|p| p.info.ready) {
                     let map = g.players[0].map.clone();
-                    println!("starting on {map} with {} players", g.players.len());
+                    info!(%map, players = g.players.len(), "starting");
                     g.started = true;
                     g.broadcast(&ServerMsg::Start { map });
                 }
             }
             ClientMsg::Command(cmd) => {
                 if g.started {
+                    trace!(player = id, turn = g.turn, ?cmd, "command");
                     g.pending.push((id, cmd));
                 }
             }
@@ -211,9 +219,9 @@ async fn serve(stream: TcpStream, game: Arc<Mutex<Game>>, cfg: ServerConfig) {
                     let hashes: Vec<(u8, u64)> = g.hashes.remove(&turn).unwrap_or_default().into_iter().collect();
                     let agree = hashes.windows(2).all(|w| w[0].1 == w[1].1);
                     if agree {
-                        println!("turn {turn}: {} players agree on {:016x}", hashes.len(), hashes[0].1);
+                        debug!(turn, players = hashes.len(), hash = format_args!("{:016x}", hashes[0].1), "hashes agree");
                     } else {
-                        println!("desync at turn {turn}: {hashes:?}");
+                        warn!(turn, ?hashes, "desync");
                         g.broadcast(&ServerMsg::Desync { turn, hashes });
                     }
                     g.hashes.retain(|&t, _| t > turn);
@@ -231,6 +239,6 @@ async fn serve(stream: TcpStream, game: Arc<Mutex<Game>>, cfg: ServerConfig) {
     g.broadcast(&ServerMsg::Left(id));
     let lobby = g.lobby();
     g.broadcast(&lobby);
-    println!("player {id} left");
+    info!(player = id, "left");
     write_task.abort();
 }
