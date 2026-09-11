@@ -472,16 +472,29 @@ fn spawn_bridge_connectors(
 ) {
     let Some(def) = install.type_def("bridgeconnector") else { return };
     let Some(shape) = lib.get_or_load(install, palette, "bridgeconnector", images, layouts) else { return };
+    // Every ramp is drawn on the island cell the bridge touches; the
+    // frames' hotspots put it on that cell's side facing the bridge.
+    // Bridge tiles start two pixels below their cell's top, so a bridge
+    // hanging off an island's bottom edge would show sky there: the north
+    // ramp is drawn once more over the top of the bridge cell.
+    let g = &world.cfg.grid;
     let mut done = std::collections::HashSet::new();
     for &cell in world.bridges.keys() {
         for (frame, dx, dy) in [(0usize, 0, -1), (1, 1, 0), (2, 0, 1), (3, -1, 0)] {
             let land = cell.offset(dx, dy);
-            if frame >= def.frames.len() || !world.is_land(land) || !done.insert((land, frame)) {
+            if frame >= def.frames.len() || !world.is_land(land) || !done.insert((cell, frame)) {
                 continue;
             }
             let z = Z_BRIDGE - 0.5 + land.y as f32 * 0.001;
-            let e = spawn_frame(commands, shape, frame, cell_to_world(land, &world.cfg.grid), z);
-            commands.entity(e).insert(BridgeTile);
+            let mut spots = vec![cell_to_world(land, g)];
+            if frame == 0 {
+                let lip = shape.frames[frame].size.y as f32;
+                spots.push(cell_to_world(cell, g) + Vec2::new(0.0, g.cell_h as f32 - lip));
+            }
+            for pos in spots {
+                let e = spawn_frame(commands, shape, frame, pos, z);
+                commands.entity(e).insert(BridgeTile);
+            }
         }
     }
 }
