@@ -1537,8 +1537,10 @@ fn setup_map(
 
 /// World position of a unit's feet: cells to source pixels, y flipped.
 fn unit_to_world(unit: &Unit, g: &Grid) -> Vec2 {
+    // The simulation keeps a unit at its cell's middle; its feet belong on
+    // the cell's bottom edge, where structures put their hotspots too.
     let (x, y) = unit.pos_f32();
-    Vec2::new(x * g.cell_w as f32, -(y * g.cell_h as f32))
+    Vec2::new(x * g.cell_w as f32, -((y + 0.5) * g.cell_h as f32 - 1.0))
 }
 
 /// Cell under a world position.
