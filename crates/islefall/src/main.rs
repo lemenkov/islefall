@@ -662,8 +662,11 @@ struct Viewer {
 const ICON_PNG: &[u8] = include_bytes!("../../../assets/islefall_64.png");
 
 /// Give every window the emblem as its icon, once winit has made it.
-fn window_icon(windows: NonSend<bevy::winit::WinitWindows>, mut done: Local<bool>) {
-    if *done || windows.windows.is_empty() {
+fn window_icon(windows: Option<NonSend<bevy::winit::WinitWindows>>, mut done: Local<bool>) {
+    // The winit windows exist only once the event loop runs, a frame or
+    // two after start-up (and never in a headless run).
+    let Some(windows) = windows.filter(|w| !w.windows.is_empty()) else { return };
+    if *done {
         return;
     }
     let icon = (|| {
