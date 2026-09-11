@@ -64,7 +64,8 @@ Rain and Thunder islands far to the south, each with its Workshop, Temple,
 shooters, Generator, tower, barricade, air base, walker and High Priest.
 The three computer players bridge towards your altar and drop shooters on
 the way; the islands are close enough for the cannons to reach their
-neighbours, so the fight is on from the start. Click the minimap to jump
+neighbours, so the fight is on from the start, though your home island
+lies just outside every reach. Click the minimap to jump
 between them. Two of your units walk under the simulation's control. Structures shoot enemies in range; damaged things
 show a health bar, destroyed ones explode and crack nearby bridges.
 The controls follow the original: take something in hand, left-click
