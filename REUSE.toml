@@ -3,13 +3,21 @@ SPDX-PackageName = "Islefall"
 SPDX-PackageSupplier = "Peter Lemenkov <lemenkov@gmail.com>"
 SPDX-PackageDownloadLocation = "https://github.com/lemenkov/islefall"
 
-# Prose and the emblem carry no header of their own; they are Apache-2.0
-# like the code.
+# The README and NOTICE go with the code.
 [[annotations]]
-path = ["README.md", "NOTICE", "docs/**", "assets/**"]
+path = ["README.md", "NOTICE"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Peter Lemenkov <lemenkov@gmail.com>"
 SPDX-License-Identifier = "Apache-2.0"
+
+# Creative content: the documentation and the emblem (the maps in
+# data/maps carry the same license in their own headers). The name and
+# emblem identify this project; see NOTICE.
+[[annotations]]
+path = ["docs/**", "assets/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Peter Lemenkov <lemenkov@gmail.com>"
+SPDX-License-Identifier = "CC-BY-4.0"
 
 # What the tools produce is nobody's work: the ignore list and the lock file
 # are public domain.

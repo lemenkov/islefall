@@ -14,3 +14,9 @@ maps or text) is included in this repository or in Islefall releases.
 Islefall reads such data at run time from a copy of the game supplied by the
 user. The file format descriptions in docs/FORMATS.md were produced by
 examining the data files and are original work of the Islefall authors.
+
+The maps in data/maps, the documentation in docs/ and the emblem in assets/
+are licensed under the Creative Commons Attribution 4.0 International
+license (CC-BY-4.0). The Islefall name and emblem identify this project;
+please do not use them in a way that suggests your work is Islefall or is
+endorsed by it.
