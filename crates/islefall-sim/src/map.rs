@@ -7,6 +7,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::grid::Cell;
+use thiserror::Error;
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -97,22 +98,13 @@ pub struct OpponentDef {
     pub power: Option<i32>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum MapError {
+    #[error("{0}")]
     Io(std::io::Error),
+    #[error("{0}")]
     Parse(toml::de::Error),
 }
-
-impl std::fmt::Display for MapError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MapError::Io(e) => write!(f, "{e}"),
-            MapError::Parse(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for MapError {}
 
 impl MapDef {
     pub fn parse(text: &str) -> Result<MapDef, MapError> {

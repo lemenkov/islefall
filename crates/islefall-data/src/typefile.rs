@@ -22,7 +22,7 @@
 //! references, `"file.gif" #index`; the second one, when present, is the
 //! shadow.
 
-use std::fmt;
+use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -156,19 +156,12 @@ impl TypeDef {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[error("line {line}: {message}")]
 pub struct ParseError {
     pub line: usize,
     pub message: String,
 }
-
-impl fmt::Display for ParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "line {}: {}", self.line, self.message)
-    }
-}
-
-impl std::error::Error for ParseError {}
 
 /// Parse one `.type` file.
 pub fn parse(text: &str) -> Result<TypeDef, ParseError> {

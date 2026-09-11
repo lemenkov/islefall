@@ -6,6 +6,7 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -37,22 +38,13 @@ pub struct SheetFrame {
     pub shadow_hotspot: Option<[i32; 2]>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum SheetError {
+    #[error("{0}")]
     Io(std::io::Error),
+    #[error("sheet: {0}")]
     Parse(String),
 }
-
-impl std::fmt::Display for SheetError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SheetError::Io(e) => write!(f, "{e}"),
-            SheetError::Parse(e) => write!(f, "sheet: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for SheetError {}
 
 impl Sheet {
     pub fn parse(text: &str) -> Result<Sheet, SheetError> {

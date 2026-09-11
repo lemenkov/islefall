@@ -15,6 +15,7 @@ use crate::rules::{AirAttack, TypeRules, Walk};
 use crate::script::Scripts;
 use crate::structure::{Aim, Structure, Weapon};
 use crate::unit::{Pos, Task, Unit};
+use thiserror::Error;
 
 /// Condition of a bridge cell.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -37,52 +38,57 @@ pub enum Target {
 }
 
 /// Why a piece could not be placed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum PieceError {
     /// A piece cell is not sky.
+    #[error("{0:?} is not sky")]
     NotSky(Cell),
     /// No piece cell touches an island edge or an open bridge end.
+    #[error("must attach to an island edge or an open bridge end")]
     NoAttachment,
     /// The piece touches only ground belonging to someone else.
+    #[error("may only be built off your own island or your own bridge end")]
     NotOwnGround,
-}
-
-impl std::fmt::Display for PieceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PieceError::NotSky(c) => write!(f, "{c:?} is not sky"),
-            PieceError::NoAttachment => write!(f, "must attach to an island edge or an open bridge end"),
-            PieceError::NotOwnGround => write!(f, "may only be built off your own island or your own bridge end"),
-        }
-    }
 }
 
 /// Why a drop was refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum DropError {
     /// A footprint cell is sky and the type cannot make its own island.
+    #[error("{0:?} is not ground")]
     NotGround(Cell),
     /// A `createsisland` type in the sky must sit against an open bridge end.
+    #[error("must be placed in the sky against an open bridge end")]
     NotAtBridgeEnd,
     /// A `createsisland` type is either wholly on land or wholly in the sky.
+    #[error("{0:?}: footprint must be all land or all sky")]
     Straddling(Cell),
     /// A footprint cell is covered by a structure that refuses drops, or by any structure.
+    #[error("{0:?} is occupied")]
     Occupied(Cell),
     /// A footprint cell is an island rim and the type may not sit on rims.
+    #[error("{0:?} is an island rim")]
     OnRim(Cell),
     /// A unit stands on a footprint cell.
+    #[error("a unit stands on {0:?}")]
     UnitInTheWay(Cell),
     /// The player cannot afford the type.
+    #[error("costs {cost} Storm Power, have {have}")]
     NotEnoughPower { cost: i32, have: i32 },
     /// The owner lacks the Knowledge for the type.
+    #[error("needs Knowledge {0}")]
     UnknownTech(u8),
     /// A drop must touch the dropper's own ground or open bridge end.
+    #[error("must be built on your own island or off your own bridge end")]
     NotOwnGround,
     /// Not enough Energy of the right kind reaches the site.
+    #[error("needs {} {:?} and {} any Energy here; {themed} {:?} and {any} other reach the site", .need.themed, .need.theme, .need.any, .need.theme)]
     NotEnoughEnergy { need: crate::rules::EnergyNeed, themed: u8, any: u8 },
     /// The type is not in production at any of the owner's Workshops.
+    #[error("not in production at any Workshop")]
     NotInProduction,
     /// The owner has no Temple, needed for Temple-provided types.
+    #[error("needs a Temple")]
     NoTemple,
 }
 
@@ -138,47 +144,17 @@ pub enum EventKind {
 }
 
 /// Why a type could not be put into production.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum ProductionError {
     /// The owner has no Workshop able to produce the type.
+    #[error("no Workshop can produce it")]
     NoWorkshop,
     /// Every able Workshop's slots are full.
+    #[error("every able Workshop's production slots are full")]
     NoFreeSlot,
     /// The type is not built at a Workshop.
+    #[error("not something a Workshop produces")]
     NotProducible,
-}
-
-impl std::fmt::Display for ProductionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProductionError::NoWorkshop => write!(f, "no Workshop can produce it"),
-            ProductionError::NoFreeSlot => write!(f, "every able Workshop's production slots are full"),
-            ProductionError::NotProducible => write!(f, "not something a Workshop produces"),
-        }
-    }
-}
-
-impl std::fmt::Display for DropError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DropError::NotGround(c) => write!(f, "{c:?} is not ground"),
-            DropError::NotAtBridgeEnd => write!(f, "must be placed in the sky against an open bridge end"),
-            DropError::Straddling(c) => write!(f, "{c:?}: footprint must be all land or all sky"),
-            DropError::Occupied(c) => write!(f, "{c:?} is occupied"),
-            DropError::OnRim(c) => write!(f, "{c:?} is an island rim"),
-            DropError::UnitInTheWay(c) => write!(f, "a unit stands on {c:?}"),
-            DropError::NotEnoughPower { cost, have } => write!(f, "costs {cost} Storm Power, have {have}"),
-            DropError::UnknownTech(b) => write!(f, "needs Knowledge {b}"),
-            DropError::NotOwnGround => write!(f, "must be built on your own island or off your own bridge end"),
-            DropError::NotInProduction => write!(f, "not in production at any Workshop"),
-            DropError::NoTemple => write!(f, "needs a Temple"),
-            DropError::NotEnoughEnergy { need, themed, any } => write!(
-                f,
-                "needs {} {:?} and {} any Energy here; {themed} {:?} and {any} other reach the site",
-                need.themed, need.theme, need.any, need.theme
-            ),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

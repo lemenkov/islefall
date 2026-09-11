@@ -13,6 +13,7 @@ use crate::pieces::PieceQueue;
 use crate::script::Scripts;
 use crate::unit::Task;
 use crate::world::World;
+use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -277,22 +278,13 @@ fn yes() -> bool {
     true
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ReplayError {
+    #[error("{0}")]
     Io(std::io::Error),
+    #[error("replay: {0}")]
     Parse(String),
 }
-
-impl std::fmt::Display for ReplayError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ReplayError::Io(e) => write!(f, "{e}"),
-            ReplayError::Parse(e) => write!(f, "replay: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for ReplayError {}
 
 impl Replay {
     pub fn parse(text: &str) -> Result<Replay, ReplayError> {

@@ -13,3 +13,7 @@ serde = { version = "1", features = ["derive"] }
 toml = "1"
 postcard = { version = "1", features = ["use-std"] }
 rhai = { version = "1.26", features = ["sync", "no_time", "only_i64"] }
+thiserror = "2.0.20"
+rand = "0.10.2"
+rand_pcg = { version = "0.10.2", features = ["serde"] }
+xxhash-rust = { version = "0.8.18", features = ["xxh3"] }

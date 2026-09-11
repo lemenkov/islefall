@@ -17,8 +17,8 @@
 //! header; rasters are capped by [`MAX_DIM`] and [`MAX_PIXELS`]; every offset
 //! is validated before use.
 
-use std::fmt;
 use std::path::Path;
+use thiserror::Error;
 
 /// Largest width or height accepted for any raster.
 pub const MAX_DIM: usize = 2048;
@@ -32,49 +32,34 @@ const MAX_ENTRIES: u32 = 100_000;
 /// Trailer floats must match their shorts to within this tolerance.
 const TRAILER_TOLERANCE: f32 = 0.15;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ShpError {
+    #[error("{0}")]
     Io(std::io::Error),
     /// No container magic at offset 0.
+    #[error("no container magic at offset 0")]
     NoContainers,
+    #[error("container {container}: implausible entry count {count}")]
     ImplausibleCount { container: usize, count: u32 },
     /// A container entry points outside the file.
+    #[error("container {container} entry {entry}: offset {offset:#x} outside file")]
     EntryOutOfFile { container: usize, entry: usize, offset: u64 },
     /// The offset is not one referenced by any container table.
+    #[error("{offset:#x}: not a table target")]
     UnknownRecord { offset: usize },
     /// The record cannot hold a header and a trailer before the next one.
+    #[error("{offset:#x}: record too small")]
     RecordTooSmall { offset: usize },
     /// Rows continued to the end of the record without a trailer.
+    #[error("{offset:#x}: no trailer found")]
     NoTrailer { offset: usize },
     /// A row's opcodes ran past the record's data.
+    #[error("{offset:#x}: row {row} overruns record")]
     RowOverrun { offset: usize, row: usize },
     /// Decoded block exceeds [`MAX_DIM`] or [`MAX_PIXELS`].
+    #[error("{offset:#x}: refusing {width}x{height} raster")]
     TooLarge { offset: usize, width: usize, height: usize },
 }
-
-impl fmt::Display for ShpError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ShpError::Io(e) => write!(f, "{e}"),
-            ShpError::NoContainers => write!(f, "no container magic at offset 0"),
-            ShpError::ImplausibleCount { container, count } => {
-                write!(f, "container {container}: implausible entry count {count}")
-            }
-            ShpError::EntryOutOfFile { container, entry, offset } => {
-                write!(f, "container {container} entry {entry}: offset {offset:#x} outside file")
-            }
-            ShpError::UnknownRecord { offset } => write!(f, "{offset:#x}: not a table target"),
-            ShpError::RecordTooSmall { offset } => write!(f, "{offset:#x}: record too small"),
-            ShpError::NoTrailer { offset } => write!(f, "{offset:#x}: no trailer found"),
-            ShpError::RowOverrun { offset, row } => write!(f, "{offset:#x}: row {row} overruns record"),
-            ShpError::TooLarge { offset, width, height } => {
-                write!(f, "{offset:#x}: refusing {width}x{height} raster")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ShpError {}
 
 impl From<std::io::Error> for ShpError {
     fn from(e: std::io::Error) -> Self {

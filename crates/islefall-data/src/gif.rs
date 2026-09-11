@@ -4,6 +4,7 @@
 //! bring instead.
 
 use std::path::Path;
+use thiserror::Error;
 
 /// An 8-bit image with its own palette.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18,24 +19,15 @@ pub struct IndexedImage {
     pub transparent: Option<u8>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum GifError {
+    #[error("{0}")]
     Io(std::io::Error),
+    #[error("gif: {0}")]
     Decode(String),
+    #[error("gif has no frames")]
     Empty,
 }
-
-impl std::fmt::Display for GifError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            GifError::Io(e) => write!(f, "{e}"),
-            GifError::Decode(e) => write!(f, "gif: {e}"),
-            GifError::Empty => write!(f, "gif has no frames"),
-        }
-    }
-}
-
-impl std::error::Error for GifError {}
 
 impl IndexedImage {
     pub fn load(path: impl AsRef<Path>) -> Result<IndexedImage, GifError> {

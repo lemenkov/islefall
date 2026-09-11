@@ -8,6 +8,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::world::EventKind;
+use thiserror::Error;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -734,25 +735,16 @@ pub struct Controls {
     pub save_file: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ConfigError {
+    #[error("{0}")]
     Io(std::io::Error),
+    #[error("{0}")]
     Parse(toml::de::Error),
     /// A value is outside what the simulation can work with.
+    #[error("invalid rules: {0}")]
     Invalid(String),
 }
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConfigError::Io(e) => write!(f, "{e}"),
-            ConfigError::Parse(e) => write!(f, "{e}"),
-            ConfigError::Invalid(s) => write!(f, "invalid rules: {s}"),
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
 
 impl Config {
     pub fn parse(text: &str) -> Result<Config, ConfigError> {

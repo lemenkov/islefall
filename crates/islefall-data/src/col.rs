@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! `*.COL` palette files: an 8-byte header followed by 256 RGB triplets.
 
-use std::fmt;
 use std::path::Path;
+use thiserror::Error;
 
 const HEADER_LEN: usize = 8;
 const ENTRIES: usize = 256;
@@ -14,23 +14,14 @@ pub struct Palette {
     pub colors: [[u8; 3]; ENTRIES],
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ColError {
     /// The file is not exactly [`FILE_LEN`] bytes long.
+    #[error("palette file is {0} bytes, expected {FILE_LEN}")]
     BadLength(usize),
+    #[error("{0}")]
     Io(std::io::Error),
 }
-
-impl fmt::Display for ColError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ColError::BadLength(n) => write!(f, "palette file is {n} bytes, expected {FILE_LEN}"),
-            ColError::Io(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for ColError {}
 
 impl From<std::io::Error> for ColError {
     fn from(e: std::io::Error) -> Self {

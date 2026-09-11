@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 
 use crate::shp::ShapeFile;
 use crate::typefile::TypeDef;
+use thiserror::Error;
 
 /// Type file stems in container order, for the 8.2 data (119 containers).
 pub const SHAPE_ORDER: [&str; 119] = [
@@ -64,31 +65,18 @@ pub struct ShapeRecords {
     pub shadows: Vec<usize>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ShapeIndexError {
     /// The cache does not have the expected number of containers.
+    #[error("sprite cache has {found} containers, expected {expected}")]
     ContainerCount { expected: usize, found: usize },
     /// A container's entry count does not match its type's frames.
+    #[error("container {container} ({stem}) has {found} entries, type has {expected} frames")]
     EntryCount { stem: &'static str, container: usize, expected: usize, found: usize },
     /// A type from [`SHAPE_ORDER`] was not provided.
+    #[error("no type definition for {0}")]
     MissingType(&'static str),
 }
-
-impl std::fmt::Display for ShapeIndexError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ShapeIndexError::ContainerCount { expected, found } => {
-                write!(f, "sprite cache has {found} containers, expected {expected}")
-            }
-            ShapeIndexError::EntryCount { stem, container, expected, found } => {
-                write!(f, "container {container} ({stem}) has {found} entries, type has {expected} frames")
-            }
-            ShapeIndexError::MissingType(stem) => write!(f, "no type definition for {stem}"),
-        }
-    }
-}
-
-impl std::error::Error for ShapeIndexError {}
 
 /// Resolve every type in [`SHAPE_ORDER`] against the sprite cache.
 ///

@@ -27,7 +27,7 @@
 //! place in the world are not in the file: the original drew every
 //! fortress on the same island and put it where the player's seat was.
 
-use std::fmt;
+use thiserror::Error;
 
 /// Cells per block side; the world is `BLOCKS` blocks square.
 pub const BLOCK: i32 = 16;
@@ -121,24 +121,15 @@ pub struct Fort {
     pub skipped_chunks: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum FortError {
+    #[error("file too short")]
     Short,
+    #[error("not a fort file (no F magic)")]
     Magic,
+    #[error("no world table of 256 blocks")]
     NoTable,
 }
-
-impl fmt::Display for FortError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FortError::Short => write!(f, "file too short"),
-            FortError::Magic => write!(f, "not a fort file (no F magic)"),
-            FortError::NoTable => write!(f, "no world table of 256 blocks"),
-        }
-    }
-}
-
-impl std::error::Error for FortError {}
 
 fn u16_at(d: &[u8], p: usize) -> Option<usize> {
     Some(d.get(p).copied()? as usize | (d.get(p + 1).copied()? as usize) << 8)

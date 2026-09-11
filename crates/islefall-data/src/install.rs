@@ -2,7 +2,6 @@
 //! A NetStorm installation as one loaded object.
 
 use std::collections::BTreeMap;
-use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::col::{ColError, Palette};
@@ -10,29 +9,21 @@ use crate::shapes::{self, ShapeIndexError, ShapeRecords};
 use crate::shp::{ShapeFile, ShpError};
 use crate::tarc::{Archive, TarcError};
 use crate::typefile::{self, ParseError, TypeDef};
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum InstallError {
+    #[error("_shapes.shp: {0}")]
     Shp(ShpError),
+    #[error("netstorm.tarc: {0}")]
     Tarc(TarcError),
+    #[error("{file}: {error}")]
     Col { file: String, error: ColError },
+    #[error("{file}: {error}")]
     Type { file: String, error: ParseError },
+    #[error("{0}")]
     Index(ShapeIndexError),
 }
-
-impl fmt::Display for InstallError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            InstallError::Shp(e) => write!(f, "_shapes.shp: {e}"),
-            InstallError::Tarc(e) => write!(f, "netstorm.tarc: {e}"),
-            InstallError::Col { file, error } => write!(f, "{file}: {error}"),
-            InstallError::Type { file, error } => write!(f, "{file}: {error}"),
-            InstallError::Index(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for InstallError {}
 
 /// Everything Islefall needs from the game directory, loaded up front.
 pub struct Installation {

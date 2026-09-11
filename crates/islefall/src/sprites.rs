@@ -13,6 +13,7 @@ use bevy::math::{URect, UVec2, Vec2};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::sprite::Anchor;
 use islefall_data::{Frame, Palette, Picture, ShapeFile, Sheet};
+use thiserror::Error;
 
 /// Largest atlas edge we are willing to build.
 const MAX_ATLAS_EDGE: u32 = 8192;
@@ -52,25 +53,16 @@ pub struct ShapeAtlas {
     pub frames: Vec<FrameInfo>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum AtlasError {
+    #[error("container has no decodable frames")]
     NoFrames,
+    #[error("atlas {width}x{height} exceeds limits")]
     TooLarge { width: u32, height: u32 },
     /// A sheet frame's rect lies outside its picture.
+    #[error("sheet frame {0} lies outside the picture")]
     BadRect(usize),
 }
-
-impl std::fmt::Display for AtlasError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AtlasError::NoFrames => write!(f, "container has no decodable frames"),
-            AtlasError::TooLarge { width, height } => write!(f, "atlas {width}x{height} exceeds limits"),
-            AtlasError::BadRect(i) => write!(f, "sheet frame {i} lies outside the picture"),
-        }
-    }
-}
-
-impl std::error::Error for AtlasError {}
 
 /// Pack the records at `offsets` into an atlas, one cell per offset in
 /// order. Records that fail to decode or are empty become 1x1 transparent

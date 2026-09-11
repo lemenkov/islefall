@@ -8,31 +8,23 @@ use islefall_data::isle::Theme;
 use rhai::{AST, Array, Dynamic, Engine, Map, Scope};
 
 use crate::rules::{AirAttack, EnergyNeed};
+use thiserror::Error;
 
 pub struct Scripts {
     engine: Engine,
     ast: AST,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ScriptError {
+    #[error("{0}")]
     Io(std::io::Error),
+    #[error("script error: {0}")]
     Compile(String),
     /// A hook failed or returned something unexpected.
+    #[error("hook {hook}: {message}")]
     Call { hook: &'static str, message: String },
 }
-
-impl std::fmt::Display for ScriptError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ScriptError::Io(e) => write!(f, "{e}"),
-            ScriptError::Compile(e) => write!(f, "script error: {e}"),
-            ScriptError::Call { hook, message } => write!(f, "hook {hook}: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for ScriptError {}
 
 fn theme_name(t: Theme) -> &'static str {
     match t {

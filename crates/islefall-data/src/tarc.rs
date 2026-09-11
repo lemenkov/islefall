@@ -15,41 +15,32 @@
 //! The name table holds, per file, `u32 offset` (relative to the data
 //! area), `u32 size`, then a NUL-terminated path such as `\d\bird.type`.
 
-use std::fmt;
 use std::path::Path;
+use thiserror::Error;
 
 const MAGIC: &[u8] = b"TAFF v0.2\x1a";
 const KEY: &[u8] = b"mydoghasfleas";
 const MAX_FILES: u32 = 100_000;
 const MAX_NAME: usize = 260;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum TarcError {
+    #[error("{0}")]
     Io(std::io::Error),
+    #[error("not a TAFF v0.2 archive")]
     BadMagic,
     /// A header field points outside the file.
+    #[error("archive truncated: {what}")]
     Truncated { what: &'static str },
+    #[error("implausible file count {0}")]
     ImplausibleCount(u32),
     /// The name table ended before all entries were read.
+    #[error("name table ends inside entry {entry}")]
     BadNameTable { entry: usize },
     /// An entry's data lies outside the data area.
+    #[error("entry {entry} lies outside the archive")]
     EntryOutOfFile { entry: usize },
 }
-
-impl fmt::Display for TarcError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TarcError::Io(e) => write!(f, "{e}"),
-            TarcError::BadMagic => write!(f, "not a TAFF v0.2 archive"),
-            TarcError::Truncated { what } => write!(f, "archive truncated: {what}"),
-            TarcError::ImplausibleCount(n) => write!(f, "implausible file count {n}"),
-            TarcError::BadNameTable { entry } => write!(f, "name table ends inside entry {entry}"),
-            TarcError::EntryOutOfFile { entry } => write!(f, "entry {entry} lies outside the archive"),
-        }
-    }
-}
-
-impl std::error::Error for TarcError {}
 
 impl From<std::io::Error> for TarcError {
     fn from(e: std::io::Error) -> Self {
