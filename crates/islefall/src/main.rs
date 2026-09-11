@@ -2057,6 +2057,34 @@ fn cursor_cell(windows: &Query<&Window, With<PrimaryWindow>>, cameras: &Query<(&
     Some(world_to_cell(world_pos, g))
 }
 
+/// World position under the cursor.
+fn cursor_world(windows: &Query<&Window, With<PrimaryWindow>>, cameras: &Query<(&Camera, &GlobalTransform), With<WorldCamera>>) -> Option<Vec2> {
+    let (Ok(window), Ok((camera, cam_tf))) = (windows.single(), cameras.single()) else { return None };
+    camera.viewport_to_world_2d(cam_tf, window.cursor_position()?).ok()
+}
+
+/// The unit whose drawn picture lies under `at`, nearest the front, among
+/// those `wanted` accepts. A walker's picture stands above its cell, so
+/// clicks land on the body, not the feet.
+fn unit_under(at: Vec2, layers: &Query<(&UnitLayer, &GlobalTransform, &Sprite, &ShapeSprite)>, wanted: impl Fn(usize) -> bool) -> Option<usize> {
+    let mut best: Option<(f32, usize)> = None;
+    for (layer, tf, sprite, shape) in layers {
+        if layer.shadow || !wanted(layer.unit) {
+            continue;
+        }
+        let Some(atlas) = &sprite.texture_atlas else { continue };
+        let Some(frame) = shape.frames.get(atlas.index) else { continue };
+        let (w, h) = (frame.size.x as f32, frame.size.y as f32);
+        let x0 = tf.translation().x - frame.hotspot.x;
+        let top = tf.translation().y + frame.hotspot.y;
+        if at.x >= x0 && at.x <= x0 + w && at.y <= top && at.y >= top - h && best.is_none_or(|(y, _)| tf.translation().y < y) {
+            best = Some((tf.translation().y, layer.unit));
+        }
+    }
+    best.map(|(_, i)| i)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn mouse_actions(
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window, With<PrimaryWindow>>,
@@ -2066,6 +2094,7 @@ fn mouse_actions(
     mut sim: ResMut<Sim>,
     mut status: ResMut<Status>,
     mut rec: ResMut<Recording>,
+    layers: Query<(&UnitLayer, &GlobalTransform, &Sprite, &ShapeSprite)>,
 ) {
     let left = buttons.just_pressed(MouseButton::Left);
     let right = buttons.just_pressed(MouseButton::Right);
@@ -2073,6 +2102,7 @@ fn mouse_actions(
         return;
     }
     let Some(cell) = cursor_cell(&windows, &cameras, data.grid()) else { return };
+    let Some(at) = cursor_world(&windows, &cameras) else { return };
     let w = sim.world_mut();
     // Something in hand: the left button drops it, the right turns a piece.
     if !matches!(player.tool, Tool::Empty) {
@@ -2101,12 +2131,14 @@ fn mouse_actions(
         let sel = player.selected;
         // Selecting is local; everything else is a command.
         let me = player.id;
-        if let Some(i) = w.units.iter().position(|u| u.alive && u.owner == me && u.carried_by.is_none() && u.cell() == cell) {
+        let mine = unit_under(at, &layers, |i| w.units.get(i).is_some_and(|u| u.alive && u.owner == me && u.carried_by.is_none()));
+        if let Some(i) = mine.or_else(|| w.units.iter().position(|u| u.alive && u.owner == me && u.carried_by.is_none() && u.cell() == cell)) {
             player.selected = i;
             status.say(format!("selected unit {i} ({})", w.units[i].kind));
             return;
         }
-        let cmd = if let Some(p) = w.units.iter().position(|u| u.alive && u.owner != me && u.is_priest && u.cell() == cell) {
+        let enemy_priest = unit_under(at, &layers, |i| w.units.get(i).is_some_and(|u| u.alive && u.owner != me && u.is_priest));
+        let cmd = if let Some(p) = enemy_priest.or_else(|| w.units.iter().position(|u| u.alive && u.owner != me && u.is_priest && u.cell() == cell)) {
             Command::Capture { unit: sel, priest: p }
         } else if let Some(a) = w.structures.iter().position(|s| s.is_altar && s.owner == me && s.covers(cell)).filter(|_| w.units.get(sel).is_some_and(|u| u.carrying.is_some())) {
             Command::Sacrifice { unit: sel, altar: a }
