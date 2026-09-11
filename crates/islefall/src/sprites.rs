@@ -8,6 +8,7 @@
 //! centre) whatever the block size of the current frame.
 
 use bevy::asset::RenderAssetUsages;
+use etagere::{size2, AtlasAllocator};
 use bevy::image::{Image, ImageSampler, TextureAtlasLayout};
 use bevy::math::{URect, UVec2, Vec2};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -17,8 +18,6 @@ use thiserror::Error;
 
 /// Largest atlas edge we are willing to build.
 const MAX_ATLAS_EDGE: u32 = 8192;
-/// Blocks are packed on shelves no wider than this.
-const SHELF_WIDTH: u32 = 2048;
 /// Gap between packed blocks, to keep nearest-neighbour sampling clean.
 const PADDING: u32 = 1;
 
@@ -64,6 +63,37 @@ pub enum AtlasError {
     BadRect(usize),
 }
 
+/// Place `sizes` on one sheet with a pixel of padding round each, the
+/// sheet grown until everything fits. Returns each block's rectangle and
+/// the sheet's used width and height.
+fn pack(sizes: &[UVec2]) -> Result<(Vec<URect>, u32, u32), AtlasError> {
+    let area: u64 = sizes.iter().map(|s| ((s.x + PADDING) * (s.y + PADDING)) as u64).sum();
+    let mut edge = ((area as f64).sqrt() * 1.1).ceil().max(16.0) as u32;
+    loop {
+        let mut alloc = AtlasAllocator::new(size2(edge as i32, edge as i32));
+        let mut rects = Vec::with_capacity(sizes.len());
+        let (mut width, mut height) = (0u32, 0u32);
+        let mut fits = true;
+        for s in sizes {
+            let Some(a) = alloc.allocate(size2((s.x + PADDING) as i32, (s.y + PADDING) as i32)) else {
+                fits = false;
+                break;
+            };
+            let (x, y) = (a.rectangle.min.x as u32, a.rectangle.min.y as u32);
+            rects.push(URect::new(x, y, x + s.x, y + s.y));
+            width = width.max(x + s.x);
+            height = height.max(y + s.y);
+        }
+        if fits {
+            return Ok((rects, width, height));
+        }
+        if edge >= MAX_ATLAS_EDGE {
+            return Err(AtlasError::TooLarge { width: edge, height: edge });
+        }
+        edge = (edge + edge / 2).min(MAX_ATLAS_EDGE);
+    }
+}
+
 /// Pack the records at `offsets` into an atlas, one cell per offset in
 /// order. Records that fail to decode or are empty become 1x1 transparent
 /// cells so atlas indices stay aligned with frame indices.
@@ -73,7 +103,6 @@ pub fn build_atlas(shp: &ShapeFile, palette: &Palette, offsets: &[usize]) -> Res
         return Err(AtlasError::NoFrames);
     }
 
-    // Shelf packing in entry order: blocks of one shape are similar in size.
     let sizes: Vec<UVec2> = frames
         .iter()
         .map(|f| match f {
@@ -81,23 +110,7 @@ pub fn build_atlas(shp: &ShapeFile, palette: &Palette, offsets: &[usize]) -> Res
             _ => UVec2::ONE,
         })
         .collect();
-    let mut rects = Vec::with_capacity(sizes.len());
-    let (mut x, mut y, mut shelf_h, mut width) = (0u32, 0u32, 0u32, 0u32);
-    for s in &sizes {
-        if x > 0 && x + s.x > SHELF_WIDTH {
-            y += shelf_h + PADDING;
-            x = 0;
-            shelf_h = 0;
-        }
-        rects.push(URect::new(x, y, x + s.x, y + s.y));
-        x += s.x + PADDING;
-        shelf_h = shelf_h.max(s.y);
-        width = width.max(x - PADDING);
-    }
-    let height = y + shelf_h;
-    if width > MAX_ATLAS_EDGE || height > MAX_ATLAS_EDGE {
-        return Err(AtlasError::TooLarge { width, height });
-    }
+    let (rects, width, height) = pack(&sizes)?;
 
     let mut rgba = vec![0u8; (width * height * 4) as usize];
     let mut layout = TextureAtlasLayout::new_empty(UVec2::new(width, height));
