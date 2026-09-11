@@ -71,8 +71,8 @@ show a health bar, destroyed ones explode and crack nearby bridges.
 The controls follow the original: take something in hand, left-click
 to put it down, right-click to turn a bridge piece, `Escape` to put it
 back; the hand is empty again once it is placed. With an empty hand,
-left-click on a unit selects it (a pulsing ring round its feet and a
-frame round it show which), left-click elsewhere sends the selected unit
+left-click on a unit selects it (a pulsing ring round its feet shows
+which), left-click elsewhere sends the selected unit
 there along a path around obstacles, left-click on a Storm Geyser sets it
 harvesting crystals to the Temple, left-click on a stunned enemy priest sends
 the selected golem to capture him, left-click on an Obelisk sends it to

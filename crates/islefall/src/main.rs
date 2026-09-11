@@ -2329,7 +2329,6 @@ fn overlays(
     time: Res<Time>,
     mut tracers: Local<Vec<(Vec2, Vec2, f32)>>,
     mut landed: ResMut<Landed>,
-    layers: Query<(&UnitLayer, &GlobalTransform, &Sprite, &ShapeSprite)>,
     white: Res<Solid>,
 ) {
     for e in &existing {
@@ -2338,8 +2337,7 @@ fn overlays(
     let w = sim.world();
     let g = data.grid();
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
-    // The selected unit: a pulsing ring on the ground round its feet and a
-    // frame round its picture.
+    // The selected unit: a pulsing ring on the ground round its feet.
     if let Some(u) = w.units.get(player.selected).filter(|u| u.alive && u.owner == player.id) {
         let hud = &data.cfg.hud;
         let pulse = 0.65 + 0.35 * (time.elapsed_secs() * hud.selection_pulse * std::f32::consts::TAU).sin();
@@ -2351,18 +2349,6 @@ fn overlays(
             let a = k as f32 / dots as f32 * std::f32::consts::TAU;
             let (x, y) = (feet.x + rw * a.cos(), feet.y + rh * a.sin());
             commands.spawn((solid(&white, c, Vec2::new(2.0, 2.0)), Transform::from_translation(Vec3::new(x, y, Z_UNIT - 0.5)), Overlay));
-        }
-        let picture = layers.iter().find(|(l, ..)| l.unit == player.selected && !l.shadow).and_then(|(_, tf, sprite, shape)| {
-            let frame = shape.frames.get(sprite.texture_atlas.as_ref()?.index)?;
-            Some((tf.translation().truncate(), frame.size.as_vec2(), frame.hotspot))
-        });
-        if let Some((at, size, hot)) = picture {
-            let (x0, y0) = (at.x - hot.x - 2.0, at.y + hot.y - size.y - 2.0);
-            let (wd, ht) = (size.x + 4.0, size.y + 4.0);
-            let (cx, cy) = (x0 + wd / 2.0, y0 + ht / 2.0);
-            for (dx, dy, sw, sh) in [(0.0, ht / 2.0, wd, 1.0), (0.0, -ht / 2.0, wd, 1.0), (wd / 2.0, 0.0, 1.0, ht), (-wd / 2.0, 0.0, 1.0, ht)] {
-                commands.spawn((solid(&white, c, Vec2::new(sw, sh)), Transform::from_translation(Vec3::new(cx + dx, cy + dy, 58.5)), Overlay));
-            }
         }
     }
     // Spell icons over their bearers, the selected caster's reach, and casting, prayer, paralysis and invisibility marks.

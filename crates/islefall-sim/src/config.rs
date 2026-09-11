@@ -348,9 +348,9 @@ pub struct Hud {
     pub lines: Vec<String>,
     pub victory: String,
     pub defeat: String,
-    /// The selected unit's mark: a ring on the ground round its feet and
-    /// a frame round its picture, in this colour, the ring this wide and
-    /// tall in source pixels, pulsing this many times a second.
+    /// The selected unit's mark: a ring on the ground round its feet, in
+    /// this colour, this wide and tall in source pixels, pulsing this
+    /// many times a second.
     #[serde(default = "default_selection_colour")]
     pub selection_colour: [f32; 3],
     #[serde(default = "default_selection_ring")]
