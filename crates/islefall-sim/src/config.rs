@@ -401,6 +401,25 @@ pub struct Hud {
     pub selection_ring: [f32; 2],
     #[serde(default = "default_selection_pulse")]
     pub selection_pulse: f32,
+    /// The crystal a harvesting Transport is seen carrying: this type's
+    /// frames, cycled, drawn this many source pixels above its feet at
+    /// this scale (the crystal lying on the ground is drawn full size).
+    #[serde(default = "default_carried_crystal")]
+    pub carried_crystal: Option<String>,
+    #[serde(default = "default_carried_lift")]
+    pub carried_lift: f32,
+    #[serde(default = "default_carried_scale")]
+    pub carried_scale: f32,
+}
+
+fn default_carried_crystal() -> Option<String> {
+    Some("nugget".into())
+}
+fn default_carried_lift() -> f32 {
+    12.0
+}
+fn default_carried_scale() -> f32 {
+    0.5
 }
 
 fn default_selection_colour() -> [f32; 3] {
@@ -533,6 +552,7 @@ pub struct SoundEvents {
     pub pickup: SoundCue,
     pub sacrificed: SoundCue,
     pub harvested: SoundCue,
+    pub dropped: SoundCue,
     pub piece_placed: SoundCue,
     pub bridge_cracked: SoundCue,
     pub bridge_fell: SoundCue,
@@ -560,6 +580,7 @@ impl SoundEvents {
             EventKind::Pickup => &self.pickup,
             EventKind::Sacrificed => &self.sacrificed,
             EventKind::Harvested => &self.harvested,
+            EventKind::Dropped => &self.dropped,
             EventKind::PiecePlaced => &self.piece_placed,
             EventKind::BridgeCracked => &self.bridge_cracked,
             EventKind::BridgeFell => &self.bridge_fell,

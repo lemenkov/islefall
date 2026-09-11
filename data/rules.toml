@@ -247,6 +247,12 @@ defeat = "Defeat. Your High Priest was sacrificed."
 selection_colour = [1.0, 0.9, 0.2]
 selection_ring = [22.0, 11.0]
 selection_pulse = 1.5
+# A harvesting Golem is seen carrying a Storm Crystal (the `nugget` type's
+# frames, cycled) this many source pixels above its feet, at this scale of
+# the crystal lying on the ground.
+carried_crystal = "nugget"
+carried_lift = 12.0
+carried_scale = 0.5
 
 # How a structure's frames animate. Frames labelled `idle_label` (or the
 # label of the structure's level) loop: geysers spout, batteries turn,
@@ -399,6 +405,8 @@ moved = { property = "moveSound", variants = true }
 pickup = { property = "pickupSound", file = "priestPickUp.wav" }
 sacrificed = { file = "priestSacrifice2.WAV" }
 harvested = { file = "geyserMined1.WAV" }
+# A Transport setting down its load: the type's own `dropSound`.
+dropped = { property = "dropSound", file = "golemDrop.wav" }
 piece_placed = { file = "dropPiece-500.wav" }
 bridge_cracked = { file = "bridgecrack.wav" }
 bridge_fell = { file = "bridgeFall.WAV" }

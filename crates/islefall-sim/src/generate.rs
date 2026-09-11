@@ -178,7 +178,7 @@ pub fn skirmish(cfg: &Config, seed: u64, players: usize, foot: &dyn Fn(&str) -> 
         map.islands.push(IslandDef { owner: Some(k as u8), theme: theme.clone(), origin: [origin.x, origin.y], size: [fw, fh], remove: Vec::new(), cells });
         map.structures.push(PlacementDef { owner: k as u8, kind: cfg.fort.altar.clone(), at: [origin.x + altar_at.x, origin.y + altar_at.y], spell: None, frame: None });
         map.structures.push(PlacementDef { owner: k as u8, kind: temple_kind, at: [origin.x + temple_at.x, origin.y + temple_at.y], spell: None, frame: None });
-        map.units.push(UnitDef { owner: k as u8, kind: cfg.fort.priest.clone(), at: [origin.x + priest_at.x, origin.y + priest_at.y], move_to: None });
+        map.units.push(UnitDef { owner: k as u8, kind: cfg.fort.priest.clone(), at: [origin.x + priest_at.x, origin.y + priest_at.y], move_to: None, harvest: None });
         taken.push((origin.x - g.geyser_spacing, origin.y - g.geyser_spacing, origin.x + fw + g.geyser_spacing, origin.y + fh + g.geyser_spacing));
         if k == 0 {
             map.camera = [origin.x + mid.x, origin.y + mid.y];

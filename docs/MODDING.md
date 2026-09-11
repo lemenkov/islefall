@@ -150,7 +150,9 @@ is neutral; its `theme` (sun, thunder, wind, rain) chooses its ground and
 the Temple's look on it. An opponent may name its own `shooter` and
 `generator` types and the `knowledge` bits it starts with, so each
 faction fights with its own weapons. A structure's position is its
-hotspot cell, the bottom-right cell of its footprint. The layout is placed
+hotspot cell, the bottom-right cell of its footprint. A unit may be given
+a first order: `move_to = [x, y]` walks it there, `harvest = [x, y]` sets
+it harvesting the geyser on that cell. The layout is placed
 with costs and Energy switched off, then the reserves are set to
 `start_power` and the rules apply.
 

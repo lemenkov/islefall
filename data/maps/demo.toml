@@ -59,9 +59,10 @@ origin = [48, 46]
 size = [28, 13]
 
 # Bridge cells laid by the map; connections and tiles follow from adjacency.
+# The spur south from (26,4) reaches the neutral geyser island at (26,8).
 [[bridges]]
 owner = 0
-cells = [[24, 4], [25, 4], [26, 4], [27, 4], [28, 4], [28, 3], [28, 2], [26, 3], [26, 5], [26, 6], [29, 3], [27, 2], [25, 5], [27, 3]]
+cells = [[24, 4], [25, 4], [26, 4], [27, 4], [28, 4], [28, 3], [28, 2], [26, 3], [26, 5], [26, 6], [26, 7], [29, 3], [27, 2], [25, 5], [27, 3]]
 
 [[structures]]
 owner = 0
@@ -255,11 +256,12 @@ kind = "priest"
 at = [2, 8]
 move_to = [13, 10]
 
+# The Golem sets off over the bridge to harvest the neutral geyser.
 [[units]]
 owner = 0
 kind = "sunwalker"
 at = [5, 8]
-move_to = [11, 6]
+harvest = [30, 11]
 
 [[units]]
 owner = 1

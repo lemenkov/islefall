@@ -122,6 +122,9 @@ pub enum EventKind {
     Sacrificed,
     /// A unit took a crystal from a geyser.
     Harvested,
+    /// A Transport set down what it carried: crystals at the Temple, a
+    /// priest on the ground; `kind` is the Transport.
+    Dropped,
     PiecePlaced,
     BridgeCracked,
     BridgeFell,
@@ -423,6 +426,13 @@ impl World {
             let Some(next) = self.units[i].peek() else { continue };
             let u = &self.units[i];
             let (from, into) = (u.cell(), next.cell(u.subcell));
+            if !u.is_air && into != from && !self.is_walkable(into) {
+                // The ground ahead has gone (a bridge fell) or something was
+                // built on it: stop here, and a task will look for another way.
+                self.units[i].path.clear();
+                self.units[i].waited = 0;
+                continue;
+            }
             if u.is_air || into == from || self.standing_on(into, Some(i)).is_none() {
                 self.units[i].waited = 0;
                 self.units[i].step();
@@ -1743,6 +1753,7 @@ impl World {
 
     /// Advance standing tasks for units that are not walking.
     fn run_tasks(&mut self) {
+        let wait = self.cfg.ticks(self.cfg.walking.wait_seconds);
         for i in 0..self.units.len() {
             let u = &self.units[i];
             if !u.alive || u.is_moving() {
@@ -1825,11 +1836,19 @@ impl World {
                 self.units[i].task = Task::Idle;
                 continue;
             };
+            // A way that could not be found is looked for again after the
+            // walking wait rather than given up: whoever stood in it, or
+            // on the cell the unit was making for, may have moved on.
+            if u.waited > 0 {
+                self.units[i].waited -= 1;
+                continue;
+            }
+            let work_ticks = self.cfg.ticks(self.cfg.economy.work_seconds);
             if carrying == 0 {
                 if g.stock <= 0 {
                     self.units[i].task = Task::Idle;
                 } else if g.is_adjacent(at) {
-                    if work + 1 < self.cfg.ticks(self.cfg.economy.work_seconds) {
+                    if work + 1 < work_ticks {
                         self.units[i].task = Task::Harvest { geyser, temple, carrying, work: work + 1 };
                     } else {
                         let take = self.cfg.economy.nugget_power.min(g.stock);
@@ -1839,29 +1858,35 @@ impl World {
                             self.structure_version += 1;
                         }
                         self.units[i].task = Task::Harvest { geyser, temple, carrying: take, work: 0 };
-                        let (kind, at, owner) = (self.structures[geyser].kind.clone(), self.structures[geyser].centre(), self.units[i].owner);
-                        self.emit(EventKind::Harvested, &kind, at, owner);
+                        let (kind, centre, owner) = (self.structures[geyser].kind.clone(), self.structures[geyser].centre(), self.units[i].owner);
+                        self.emit(EventKind::Harvested, &kind, centre, owner);
+                        // The unit's own pick-up sound, a Golem's grunt.
+                        let kind = self.units[i].kind.clone();
+                        self.emit(EventKind::Pickup, &kind, at, owner);
                         if !self.walk_to_adjacent(i, temple) {
-                            self.units[i].task = Task::Idle;
+                            self.units[i].waited = wait;
                         }
                     }
                 } else if !self.walk_to_adjacent(i, geyser) {
-                    self.units[i].task = Task::Idle;
+                    self.units[i].waited = wait;
                 }
             } else if t.is_adjacent(at) {
-                if work + 1 < self.cfg.ticks(self.cfg.economy.work_seconds) {
+                if work + 1 < work_ticks {
                     self.units[i].task = Task::Harvest { geyser, temple, carrying, work: work + 1 };
                 } else {
-                    let slot = self.slot(self.units[i].owner);
+                    let owner = self.units[i].owner;
+                    let slot = self.slot(owner);
                     self.powers[slot] += carrying;
+                    let kind = self.units[i].kind.clone();
+                    self.emit(EventKind::Dropped, &kind, at, owner);
                     let more = self.structures[geyser].stock > 0;
                     self.units[i].task = if more { Task::Harvest { geyser, temple, carrying: 0, work: 0 } } else { Task::Idle };
                     if more && !self.walk_to_adjacent(i, geyser) {
-                        self.units[i].task = Task::Idle;
+                        self.units[i].waited = wait;
                     }
                 }
             } else if !self.walk_to_adjacent(i, temple) {
-                self.units[i].task = Task::Idle;
+                self.units[i].waited = wait;
             }
         }
     }
@@ -2290,6 +2315,49 @@ mod tests {
         assert_eq!(w.structures[g].kind, "emptygeyser");
         assert!(!w.order_harvest(u, g), "nothing left to harvest");
         let _ = t;
+    }
+
+    #[test]
+    fn a_harvester_waits_for_a_fallen_bridge_rather_than_giving_up() {
+        let mut w = world();
+        w.push_island(IslandMap::rect(Cell::new(10, 0), 6, 6), 0);
+        for x in 8..10 {
+            w.place_bridge(Cell::new(x, 1));
+        }
+        let geyser = TypeRules { foot_x: 3, foot_y: 3, cost: 400, is_geyser: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        let g = w.drop_structure("geyser", &geyser, Cell::new(14, 4)).unwrap();
+        w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
+        let u = w.spawn_unit("sunwalker", &golem, Cell::new(4, 1)).unwrap();
+        assert!(w.order_harvest(u, g));
+        // The way there falls before it gets across: it stops at the edge.
+        w.step(&test_scripts());
+        assert!(w.destroy_bridge(Cell::new(8, 1)));
+        assert!(w.destroy_bridge(Cell::new(9, 1)));
+        for _ in 0..200 {
+            w.step(&test_scripts());
+            assert!(w.is_ground(w.units[u].cell()), "never walks out over the gap");
+        }
+        assert!(matches!(w.units[u].task, Task::Harvest { .. }), "still on the job while the bridge is down");
+        assert_eq!(w.units[u].carried_crystals(), 0);
+        for x in 8..10 {
+            assert!(w.place_bridge(Cell::new(x, 1)));
+        }
+        let mut seen = (false, false);
+        for _ in 0..6000 {
+            w.step(&test_scripts());
+            for e in w.take_events() {
+                seen.0 |= e.what == EventKind::Pickup && e.kind == "sunwalker";
+                seen.1 |= e.what == EventKind::Dropped && e.kind == "sunwalker";
+            }
+            if w.units[u].task == Task::Idle {
+                break;
+            }
+        }
+        assert_eq!(w.powers[0], 400, "delivered everything once the bridge was back");
+        assert_eq!(w.units[u].task, Task::Idle, "and stood down when the geyser ran dry");
+        assert_eq!(seen, (true, true), "the Golem's own pick-up and drop sounds");
     }
 
     #[test]

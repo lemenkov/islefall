@@ -75,6 +75,9 @@ pub struct UnitDef {
     pub kind: String,
     pub at: [i32; 2],
     pub move_to: Option<[i32; 2]>,
+    /// A geyser cell the unit sets off to harvest once the layout stands.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harvest: Option<[i32; 2]>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

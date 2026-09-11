@@ -210,7 +210,15 @@ Storm Power is the currency (the manual). Islefall models:
 - A Storm Crystal (`nugget`) is worth its `cost`, 200, so a Transport carries
   200 per trip. Harvesting takes one second next to the geyser, delivering
   one second next to the Temple; the unit repeats until the geyser is empty,
-  when it becomes an `emptygeyser`.
+  when it becomes an `emptygeyser`, and only then stands idle for its next
+  order. While it works it keeps moving on the spot and plays its
+  `pickupSound` (a Golem's grunt) as it takes the crystal and its
+  `dropSound` as it hands it in (`sounds.events.pickup` and `dropped`);
+  on the way home the crystal is drawn over it (`hud.carried_crystal`,
+  the `nugget` frames, `hud.carried_lift` pixels above its feet). A way it
+  cannot find, because someone stands where it was going or a bridge is
+  down, is looked for again after `walking.wait_seconds` rather than
+  abandoned.
 - The Temple is read as the `residence` type (flag `residence`); crystals
   handed in there become Storm Power.
 - Dropping a structure costs its `cost` property; bridge pieces and golems

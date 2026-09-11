@@ -165,7 +165,7 @@ pub fn fort_to_map(fortfile: &Fort, mission: Option<&Mission>, cfg: &Config, nam
             map.structures.push(PlacementDef { owner: our as u8, kind, at: [at.x + origin.x, at.y + origin.y], spell: None, frame: None });
         }
         for (kind, at) in units {
-            map.units.push(UnitDef { owner: our as u8, kind, at: [at.x + origin.x, at.y + origin.y], move_to: None });
+            map.units.push(UnitDef { owner: our as u8, kind, at: [at.x + origin.x, at.y + origin.y], move_to: None, harvest: None });
         }
         if our == 0 {
             map.camera = [origin.x + cw / 2, origin.y + ch / 2];
@@ -188,7 +188,7 @@ pub fn fort_to_map(fortfile: &Fort, mission: Option<&Mission>, cfg: &Config, nam
 fn place_item(item: &Item, at: Cell, owner: u8, fc: &crate::config::FortRules, map: &mut MapDef, report: &mut Report, island: Option<usize>) {
     let key = code_key(item.code);
     if let Some(u) = fc.units.get(&key) {
-        map.units.push(UnitDef { owner, kind: u.clone(), at: [at.x, at.y], move_to: None });
+        map.units.push(UnitDef { owner, kind: u.clone(), at: [at.x, at.y], move_to: None, harvest: None });
         return;
     }
     let kind = if item.code == fort::CODE_TEMPLE {

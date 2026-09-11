@@ -170,6 +170,19 @@ impl Unit {
         !self.path.is_empty()
     }
 
+    /// Standing at a geyser or Temple, taking crystals or setting them down.
+    pub fn is_working(&self) -> bool {
+        matches!(self.task, Task::Harvest { work, .. } if work > 0)
+    }
+
+    /// Storm Power in crystals the unit carries home from a geyser.
+    pub fn carried_crystals(&self) -> i32 {
+        match self.task {
+            Task::Harvest { carrying, .. } => carrying,
+            _ => 0,
+        }
+    }
+
     /// Advance one tick along the path, straight towards the next waypoint.
     /// Leftover movement after reaching a waypoint is not carried over, so a
     /// unit takes a whole tick per waypoint at most once per cell.

@@ -1535,6 +1535,14 @@ fn setup_map(
                 if let Some(to) = u.move_to {
                     w.order_move(i, map::cell(to));
                 }
+                if let Some(at) = u.harvest {
+                    let cell = map::cell(at);
+                    match w.structures.iter().position(|s| s.stock > 0 && s.covers(cell)) {
+                        Some(g) if w.order_harvest(i, g) => {}
+                        Some(_) => warn!("map: unit {} at {:?} cannot reach the geyser at {:?}", u.kind, u.at, at),
+                        None => warn!("map: no geyser to harvest at {:?}", at),
+                    }
+                }
             }
             None => warn!("map: unit {} at {:?} could not be placed", u.kind, u.at),
         }
@@ -2079,7 +2087,8 @@ fn sync_units(
             }
             layer.facing = unit.facing;
         }
-        shape.playing = unit.is_moving();
+        // Walking, or working a geyser or Temple on the spot.
+        shape.playing = unit.is_moving() || unit.is_working();
         if !shape.playing && shape.step != 0 {
             shape.step = 0;
             let frame = shape.sequence[0];
@@ -2403,6 +2412,22 @@ fn overlays(
                     let range = data.rules(spell).spell_range;
                     let size = Vec2::new(((2 * range + 1) * g.cell_w) as f32, ((2 * range + 1) * g.cell_h) as f32);
                     commands.spawn((solid(&white, Color::srgba(0.6, 0.4, 1.0, 0.12), size), Transform::from_translation(Vec3::new(p.x, p.y + g.cell_h as f32 / 2.0, 58.0)), Overlay));
+                }
+            }
+        }
+        // The crystal a harvester carries home, over its body.
+        if u.carried_crystals() > 0 {
+            if let Some(kind) = data.cfg.hud.carried_crystal.as_deref() {
+                if let Some(shape) = lib.get_or_load(&data.install, palette, kind, &mut images, &mut layouts) {
+                    let seq = animation_sequence(&shape.labels, "A");
+                    if !seq.is_empty() {
+                        let step = (time.elapsed_secs() * data.cfg.controls.animation_fps) as usize % seq.len();
+                        let (_, row) = u.pos_f32();
+                        let hud = &data.cfg.hud;
+                        let at = Vec3::new(p.x, p.y + hud.carried_lift, depth_z(Z_STRUCTURE, row) + 0.01);
+                        let e = world::spawn_frame(&mut commands, shape, seq[step], at.truncate(), at.z);
+                        commands.entity(e).insert((Overlay, Transform::from_translation(at).with_scale(Vec3::splat(hud.carried_scale))));
+                    }
                 }
             }
         }
