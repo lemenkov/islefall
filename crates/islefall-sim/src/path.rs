@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Grid path search: A* over eight neighbours with integer costs.
+//! Grid path search: A* over eight neighbours with integer costs, on top
+//! of the `pathfinding` crate.
 
-use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap};
+use pathfinding::prelude::astar;
 
 use crate::grid::Cell;
 
 /// Cost of a straight step; diagonals cost [`DIAGONAL`].
 const STRAIGHT: u32 = 10;
 const DIAGONAL: u32 = 14;
-/// Give up after this many expansions so a bad request cannot stall a tick.
-const MAX_EXPANSIONS: usize = 200_000;
 
 const NEIGHBOURS: [(i32, i32); 8] = [(0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1)];
 
@@ -29,7 +27,9 @@ pub fn find_path(from: Cell, to: Cell, walkable: impl Fn(Cell) -> bool) -> Optio
 }
 
 /// Like [`find_path`], but `cost` returns `None` for blocked cells and a
-/// multiplier (1 for plain ground) for the cost of entering a cell.
+/// multiplier (1 for plain ground) for the cost of entering a cell. The
+/// search is the `pathfinding` crate's A*, which visits successors in a
+/// fixed order, so every machine finds the same path.
 pub fn find_path_costed(from: Cell, to: Cell, cost: impl Fn(Cell) -> Option<u32>) -> Option<Vec<Cell>> {
     let walkable = |c: Cell| cost(c).is_some();
     if from == to {
@@ -38,52 +38,22 @@ pub fn find_path_costed(from: Cell, to: Cell, cost: impl Fn(Cell) -> Option<u32>
     if !walkable(to) {
         return None;
     }
-    let mut open = BinaryHeap::new();
-    let mut best: HashMap<Cell, u32> = HashMap::new();
-    let mut came_from: HashMap<Cell, Cell> = HashMap::new();
-    best.insert(from, 0);
-    open.push(Reverse((heuristic(from, to), 0u32, from.x, from.y)));
-    let mut expansions = 0;
-    while let Some(Reverse((_, g, x, y))) = open.pop() {
-        let cur = Cell::new(x, y);
-        if cur == to {
-            let mut path = vec![to];
-            let mut c = to;
-            while let Some(&p) = came_from.get(&c) {
-                if p == from {
-                    break;
-                }
-                path.push(p);
-                c = p;
-            }
-            path.reverse();
-            return Some(path);
-        }
-        if g > best.get(&cur).copied().unwrap_or(u32::MAX) {
-            continue; // stale entry
-        }
-        expansions += 1;
-        if expansions > MAX_EXPANSIONS {
-            return None;
-        }
+    let successors = |&cur: &Cell| {
+        let mut next = Vec::with_capacity(8);
         for (dx, dy) in NEIGHBOURS {
-            let next = cur.offset(dx, dy);
-            if !walkable(next) {
-                continue;
-            }
+            let n = cur.offset(dx, dy);
+            let Some(multiplier) = cost(n) else { continue };
             if dx != 0 && dy != 0 && !(walkable(cur.offset(dx, 0)) && walkable(cur.offset(0, dy))) {
                 continue; // no corner cutting
             }
             let step = if dx != 0 && dy != 0 { DIAGONAL } else { STRAIGHT };
-            let ng = g + step * cost(next).unwrap_or(1).max(1);
-            if ng < best.get(&next).copied().unwrap_or(u32::MAX) {
-                best.insert(next, ng);
-                came_from.insert(next, cur);
-                open.push(Reverse((ng + heuristic(next, to), ng, next.x, next.y)));
-            }
+            next.push((n, step * multiplier.max(1)));
         }
-    }
-    None
+        next
+    };
+    let (mut path, _) = astar(&from, successors, |&c| heuristic(c, to), |&c| c == to)?;
+    path.remove(0);
+    Some(path)
 }
 
 #[cfg(test)]

@@ -17,3 +17,4 @@ thiserror = "2.0.20"
 rand = "0.10.2"
 rand_pcg = { version = "0.10.2", features = ["serde"] }
 xxhash-rust = { version = "0.8.18", features = ["xxh3"] }
+pathfinding = "4.14.0"
