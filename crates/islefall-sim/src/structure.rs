@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Things placed on the map that occupy a footprint of cells.
 
 use serde::{Deserialize, Serialize};

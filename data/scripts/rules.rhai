@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 // Islefall rule hooks. The simulation calls these at decision points; the
 // numbers they work with come from rules.toml. Scripts must be
 // deterministic: same inputs, same result, no randomness, no time.

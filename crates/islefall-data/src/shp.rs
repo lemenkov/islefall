@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Decoder for NetStorm's `_shapes.shp` sprite cache.
 //!
 //! Layout summary (full description in `docs/FORMATS.md`):

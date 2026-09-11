@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Island shapes on the grid and the terrain piece each cell needs.
 
 use serde::{Deserialize, Serialize};

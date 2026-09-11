@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Everything a player can do, as data. The app, a replay file and (in
 //! time) the network all speak commands; `World::apply` is the one door
 //! into the simulation, so the same commands in the same order give the

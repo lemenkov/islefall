@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! The original's campaign scenarios as maps: the geyser and extra
 //! islands, bridges and structures of a `.fort` file's world table, and
 //! its players' fortresses seated round them on islands of our own

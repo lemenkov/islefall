@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Pictures outside the sprite cache: the palette-indexed GIF cloud
 //! textures the sky is made of (first frame only), and PNGs a mod may
 //! bring instead.

@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! The bridge tile set (`bridge.type`).
 //!
 //! Bridges are one cell wide. A cell's tile is chosen by which of its four

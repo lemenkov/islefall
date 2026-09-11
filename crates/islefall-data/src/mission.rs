@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Mission texts: the `*.english` files in `netstorm.tarc`. Each starts
 //! with a `[Header]` of `key = value` lines (start money, the players'
 //! technologies, which `.fort` to load) before the briefing pages.

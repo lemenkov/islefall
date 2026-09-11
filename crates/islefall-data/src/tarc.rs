@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! `netstorm.tarc`: a flat archive of text resources (`*.type`, `*.english`,
 //! `*.fort`), each file XOR-obfuscated with a repeating 13-byte key.
 //!

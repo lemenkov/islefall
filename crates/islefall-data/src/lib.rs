@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Loaders for the original NetStorm data files.
 //!
 //! Islefall does not ship any game data. These loaders read the files of a

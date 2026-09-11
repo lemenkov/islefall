@@ -206,4 +206,9 @@ real files.
 
 ## License
 
-Apache-2.0. See `LICENSE` and `NOTICE`.
+Apache-2.0 for the code, data, documentation and emblem; the ignore list
+and `Cargo.lock` are public domain (CC0-1.0). See `LICENSE` and `NOTICE`.
+The repository follows the
+[REUSE](https://reuse.software) specification: every file names its
+copyright holder and license in an SPDX header or in `REUSE.toml`, the
+license text lives in `LICENSES/`, and `reuse lint` passes.

@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! The Islefall simulation.
 //!
 //! Everything here is deterministic and free of rendering concerns: integer

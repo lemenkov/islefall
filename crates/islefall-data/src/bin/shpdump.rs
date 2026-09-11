@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Inspect a NetStorm `_shapes.shp`: print statistics or render a container
 //! to a PNG sprite sheet.
 //!

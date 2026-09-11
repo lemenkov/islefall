@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Inspect a NetStorm `netstorm.tarc` archive.
 //!
 //! `tarcdump --help` lists the commands: `list`, `cat`, `extract`, `types`.

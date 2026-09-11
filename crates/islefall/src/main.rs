@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Islefall entry point.
 //!
 //! Every rule, number and key comes from the data directory: `rules.toml`

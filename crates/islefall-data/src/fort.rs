@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Campaign scenarios: the `*.fort` files in `netstorm.tarc`, a saved
 //! starting position for each mission of the original game.
 //!

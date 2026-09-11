@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Map files: the islands, bridges, structures, units and opponents a
 //! scene starts with, loaded from TOML.
 

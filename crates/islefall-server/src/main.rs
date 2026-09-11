@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! The relay server: takes commands from every client, stamps them into
 //! turns on a fixed clock, and sends each turn to everyone. It runs no
 //! simulation of its own yet; clients report their world hashes and the

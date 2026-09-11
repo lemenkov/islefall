@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! The island terrain set (`isle.type`).
 //!
 //! The 317 frames are grouped by animation label into terrain pieces, and

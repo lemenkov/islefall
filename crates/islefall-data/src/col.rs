@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! `*.COL` palette files: an 8-byte header followed by 256 RGB triplets.
 
 use std::path::Path;

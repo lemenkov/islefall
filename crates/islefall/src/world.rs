@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Drawing the simulation: a shape library that caches one atlas per type,
 //! and a first scene with an island, an altar and the High Priest.
 

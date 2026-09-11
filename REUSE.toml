@@ -1,0 +1,20 @@
+version = 1
+SPDX-PackageName = "Islefall"
+SPDX-PackageSupplier = "Peter Lemenkov <lemenkov@gmail.com>"
+SPDX-PackageDownloadLocation = "https://github.com/lemenkov/islefall"
+
+# Prose and the emblem carry no header of their own; they are Apache-2.0
+# like the code.
+[[annotations]]
+path = ["README.md", "NOTICE", "docs/**", "assets/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Peter Lemenkov <lemenkov@gmail.com>"
+SPDX-License-Identifier = "Apache-2.0"
+
+# What the tools produce is nobody's work: the ignore list and the lock file
+# are public domain.
+[[annotations]]
+path = [".gitignore", "Cargo.lock"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "CC0-1.0"

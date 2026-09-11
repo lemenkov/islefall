@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Rule hooks in Rhai. The engine is sandboxed: no file, time or random
 //! access, so the same inputs always give the same result.
 

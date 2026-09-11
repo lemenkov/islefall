@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Bridge pieces: the multi-cell shapes a player drops as one unit.
 //!
 //! NetStorm's tutorial calls them "oddly shaped bridge pieces" that are

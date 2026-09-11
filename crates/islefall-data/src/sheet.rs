@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! A sprite sheet a mod brings for a type: one picture plus a TOML index
 //! of its frames in the type's animation order. `shpdump export` writes
 //! the original sprites in this form as a starting point for new art.

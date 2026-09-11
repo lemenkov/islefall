@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Turn decoded NetStorm frames into a Bevy texture atlas.
 //!
 //! Each frame's stored block is packed as its own atlas rectangle, and the

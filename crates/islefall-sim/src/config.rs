@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Game rules and parameters, loaded from `rules.toml`. The code carries
 //! no defaults: a world cannot exist without a loaded configuration.
 

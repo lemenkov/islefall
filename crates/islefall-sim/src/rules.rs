@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Per-type rules derived from the `typeflags` and properties of a type file.
 //!
 //! The flags are read as follows, from how they are distributed over the

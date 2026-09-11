@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Islands made up on the spot: a fortress island for a player, and whole
 //! skirmish maps of fortresses and geyser islands, the way the original
 //! made its battlefields afresh each game. Everything is driven by a seed

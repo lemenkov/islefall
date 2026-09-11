@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! A simple opponent: grows bridges from its own ground towards a target
 //! and drops shooters at its bridge ends. Deterministic: it only looks at
 //! the world and its own piece queue.

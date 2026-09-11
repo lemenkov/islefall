@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Grid path search: A* over eight neighbours with integer costs, on top
 //! of the `pathfinding` crate.
 

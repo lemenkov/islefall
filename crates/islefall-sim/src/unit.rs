@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Units: things that stand on cells and move between them.
 //!
 //! Positions are fixed point with [`SUBCELL`] steps per cell so that the

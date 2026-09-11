@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! What clients and the server say to each other, and how it is framed.
 //!
 //! Islefall plays in lockstep: clients send commands, the server stamps

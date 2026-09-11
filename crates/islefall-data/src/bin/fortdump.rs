@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Show a campaign scenario from `netstorm.tarc`.
 //!
 //! `fortdump --help` lists the commands: `list`, `show <name>` (e.g. `capturethepriest`).

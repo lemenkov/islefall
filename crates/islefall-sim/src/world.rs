@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! The whole simulated state and its fixed-rate tick.
 
 use serde::{Deserialize, Serialize};

@@ -1,4 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
+
 //! Which `_shapes.shp` container belongs to which type.
 //!
 //! The sprite cache has one container per object type, in the order the
