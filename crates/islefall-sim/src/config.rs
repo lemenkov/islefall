@@ -762,6 +762,9 @@ pub struct Flags {
     pub obelisk: Vec<String>,
     pub spell: Vec<String>,
     pub energy_source_classes: Vec<String>,
+    /// Edge Farms: no bridge may attach to the island edge they grow on.
+    #[serde(default)]
+    pub edge_farm: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

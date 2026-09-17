@@ -256,6 +256,24 @@ pub fn spawn_structure(
     i: usize,
 ) {
     let st = &world.structures[i];
+    // An Edge Farm's frames mirror the island tiles: it is drawn as the
+    // ploughed version of the very piece it grows on.
+    if st.blocks_bridges {
+        let g = &world.cfg.grid;
+        let cell = st.cell;
+        let piece = world.islands.iter().find_map(|isl| isl.piece_at(cell)).unwrap_or(islefall_data::isle::Piece::Filled);
+        let theme = world.island_theme_at(cell);
+        let frames = install.type_def(&st.kind).map(|d| isle::frames(d, theme, piece)).unwrap_or_default();
+        let Some(shape) = lib.get_or_load(install, palette, &st.kind, images, layouts) else { return };
+        if let Some(&frame) = frames.get(variation(cell, frames.len().max(1))).filter(|&&f| f < shape.frames.len()) {
+            let mut plan = structure_frames(shape, &world.cfg.animation, &[], cell, &st.kind, st.variant, st.level, "sun");
+            plan.sequence = vec![frame];
+            plan.base = None;
+            let e = spawn_frame(commands, shape, frame, cell_to_world(cell, g), Z_TERRAIN + 0.75);
+            commands.entity(e).insert((StructureSprite(i), StructureKey::of(st), plan));
+        }
+        return;
+    }
     {
         let Some(shape) = lib.get_or_load(install, palette, &st.kind, images, layouts) else { return };
         let ground = match world.island_theme_at(st.centre()) {

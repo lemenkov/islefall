@@ -99,6 +99,8 @@ pub struct TypeRules {
     pub is_transport: bool,
     /// An Altar (`dais` flag): where captured priests are sacrificed.
     pub is_altar: bool,
+    /// An Edge Farm: bridges may not attach to the edge cell it grows on.
+    pub is_edge_farm: bool,
     /// Energy required to place the type, if any.
     pub energy: Option<EnergyNeed>,
     /// Energy produced (Generators and Temples).
@@ -216,6 +218,7 @@ impl TypeRules {
             is_priest,
             is_transport: !is_priest && is_unit && !is_flyer,
             is_altar: has(&f.altar),
+            is_edge_farm: has(&f.edge_farm),
             energy,
             produces,
             tech_bit: def.get_i64("techBit").filter(|b| (0..=255).contains(b)).map(|b| b as u8),
@@ -264,6 +267,7 @@ impl TypeRules {
             is_priest: false,
             is_transport: false,
             is_altar: false,
+            is_edge_farm: false,
             energy: None,
             produces: None,
             tech_bit: None,

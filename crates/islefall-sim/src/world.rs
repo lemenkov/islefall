@@ -53,6 +53,9 @@ pub enum PieceError {
     /// The piece touches only ground belonging to someone else.
     #[error("may only be built off your own island or your own bridge end")]
     NotOwnGround,
+    /// The only island edge the piece touches has an Edge Farm on it.
+    #[error("an Edge Farm grows on {0:?}: bridges may not attach there")]
+    EdgeFarm(Cell),
 }
 
 /// Why a drop was refused.
@@ -515,13 +518,27 @@ impl World {
                 return Err(PieceError::NotSky(c));
             }
         }
-        let attached = cells.iter().any(|&c| {
-            [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().any(|&(dx, dy)| {
-                let n = c.offset(dx, dy);
-                self.is_land(n) || self.is_open_end(n)
-            })
-        });
-        if attached { Ok(()) } else { Err(PieceError::NoAttachment) }
+        let neighbours = || cells.iter().flat_map(|&c| [(0, -1), (1, 0), (0, 1), (-1, 0)].into_iter().map(move |(dx, dy)| c.offset(dx, dy)));
+        let attached = neighbours().any(|n| self.attaches_to(n));
+        if attached {
+            return Ok(());
+        }
+        // Land it would have attached to, but for an Edge Farm.
+        match neighbours().find(|&n| self.is_land(n) && self.farmed(n)) {
+            Some(n) => Err(PieceError::EdgeFarm(n)),
+            None => Err(PieceError::NoAttachment),
+        }
+    }
+
+    /// Whether a bridge piece may attach to `cell`: island land without an
+    /// Edge Farm, or an open bridge end.
+    fn attaches_to(&self, cell: Cell) -> bool {
+        (self.is_land(cell) && !self.farmed(cell)) || self.is_open_end(cell)
+    }
+
+    /// Whether a bridge-blocking structure (an Edge Farm) covers the cell.
+    pub fn farmed(&self, cell: Cell) -> bool {
+        self.structures.iter().any(|s| s.blocks_bridges && s.covers(cell))
     }
 
     pub fn place_piece(&mut self, cells: &[Cell]) -> Result<(), PieceError> {
@@ -544,7 +561,7 @@ impl World {
         let own = cells.iter().any(|&c| {
             [(0, -1), (1, 0), (0, 1), (-1, 0)].iter().any(|&(dx, dy)| {
                 let n = c.offset(dx, dy);
-                (self.is_land(n) || self.is_open_end(n)) && self.ground_owner(n) == Some(owner)
+                self.attaches_to(n) && self.ground_owner(n) == Some(owner)
             })
         });
         if own { Ok(()) } else { Err(PieceError::NotOwnGround) }
@@ -881,6 +898,7 @@ impl World {
         self.start_refresh(owner, kind, rules);
         let mut s = Structure::new(kind, cell, rules.foot_x, rules.foot_y, rules.walk);
         s.drop_blocking = rules.drop_blocking;
+        s.blocks_bridges = rules.is_edge_farm;
         s.stock = if rules.is_geyser && self.cfg.economy.geyser_stock_from_cost { rules.cost } else { 0 };
         s.is_temple = rules.is_temple;
         s.is_outpost = rules.is_outpost;
@@ -2654,6 +2672,22 @@ mod tests {
 
     fn w_ticks(seconds: f64) -> u32 {
         test_config().ticks(seconds)
+    }
+
+    #[test]
+    fn an_edge_farm_keeps_bridges_off_its_cell() {
+        let mut w = world();
+        // The island is 8 wide: (7, 1) is its east rim; a piece at (8, 1) attaches there.
+        let piece = [Cell::new(8, 1)];
+        assert_eq!(w.can_place_piece(&piece), Ok(()));
+        let farm = TypeRules { foot_x: 1, foot_y: 1, is_edge_farm: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        w.drop_structure("efarm", &farm, Cell::new(7, 1)).unwrap();
+        assert_eq!(w.can_place_piece(&piece), Err(PieceError::EdgeFarm(Cell::new(7, 1))));
+        assert_eq!(w.can_place_piece_for(0, &piece), Err(PieceError::EdgeFarm(Cell::new(7, 1))));
+        // The rim cell below is unfarmed; a longer piece reaching it still attaches.
+        assert_eq!(w.can_place_piece(&[Cell::new(8, 1), Cell::new(8, 2)]), Ok(()));
+        // Far from any land, the message is the usual one.
+        assert_eq!(w.can_place_piece(&[Cell::new(20, 20)]), Err(PieceError::NoAttachment));
     }
 
     #[test]

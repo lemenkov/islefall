@@ -22,6 +22,9 @@ pub struct Structure {
     pub walk: Walk,
     /// Whether nothing may be dropped onto the footprint.
     pub drop_blocking: bool,
+    /// Whether no bridge may attach to the cells (an Edge Farm).
+    #[serde(default)]
+    pub blocks_bridges: bool,
     /// Storm crystals left, for geysers.
     pub stock: i32,
     /// Whether units deliver crystals here.
@@ -115,6 +118,7 @@ impl Structure {
             foot_y: foot_y.max(1),
             walk,
             drop_blocking: false,
+            blocks_bridges: false,
             stock: 0,
             is_temple: false,
             is_outpost: false,

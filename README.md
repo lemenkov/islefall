@@ -92,7 +92,7 @@ selects or gives orders.
 | `Q` `W` `A` `S` (or a click on the slot) | One of the four bridge pieces on offer. |
 | `R` or right-click | Turns the piece in hand; the panel shows it turned. |
 | `1` to `6` | Sun Cannon, Disc Thrower, Generator, Workshop, tree, Wind Generator (the last needs Knowledge from a sacrifice). |
-| `7` | An Outpost, for claiming the neutral island. |
+| `7` / `8` | An Outpost, for claiming the neutral island; an Edge Farm, which stops bridges attaching to the edge cell it is ploughed on. |
 | `U` / `I` | A Golem, or a Balloon that flies anywhere. |
 | `Escape` | Puts the thing in hand back. |
 

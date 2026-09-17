@@ -136,9 +136,13 @@ From the manual and the tutorial texts:
   see the letter table in `FORMATS.md`. Where a bridge meets island land,
   the island's rim cell is overlaid with a `bridgeconnector` frame.
 
-Not yet modelled: an Edge Farm blocking bridges off an island edge and
-bridge ownership (you may connect to enemy open ends but not build off
-them).
+The manual: bridges may not be attached where an Edge Farm grows.
+Islefall: a type with an `edge_farm` flag (`efarm`, one cell, free, drops
+on rims) blocks bridge pieces from attaching to the island cells it
+covers, yours and the enemy's alike; a piece whose only landfall is a
+farmed cell is refused with a message naming it. It is drawn as the
+ploughed version of the island tile it grows on, since its frames mirror
+the island set. Bridge ownership is in the Ownership section.
 
 ## Dropping structures
 
@@ -327,7 +331,10 @@ chance to hit were doubled after the manual was written); the roll comes
 from dice seeded by `combat.dice_seed`, so every machine in a network game
 sees the same misses. A missed shot still flies and lands.
 
-Not yet modelled: unit-versus-unit ground combat (no walker shoots).
+No unit shoots on the ground: the manual gives every Ground Transport
+(Golem, Sail Skater, Crystal Crab, Bulf) and the High Priest a range and
+damage of "n/a", and the data carries no weapon for them, so walkers only
+carry, capture and cast. Aerial attackers are the only units that strike.
 
 ## Construction and the Stream of Power
 
