@@ -224,7 +224,9 @@ Storm Power is the currency (the manual). Islefall models:
   are free, as in the manual ("the Temple gives you the power to create
   bridges and Golems").
 
-Not yet modelled: harvesting by aerial Transports without bridges.
+An Aerial Transport (a `balloon` type: Balloon, Air Ship, Cloud Floater)
+harvests the same way but flies straight to the geyser and back, needing
+no bridge, as the manual says.
 
 ## Energy
 
@@ -317,8 +319,15 @@ refuels, hunts Transports, cracks bridges or feeds on kills is set there
 too. Balloons are Battle units: they cost, need Energy and production,
 and are placed anywhere.
 
-Not yet modelled: the Cloud Floater's one-in-twenty hit chance and
-unit-versus-unit ground combat (no walker shoots).
+The manual: the vapour-like Cloud Floater is hard to hit, only one shot in
+twenty connects. Islefall: `[combat.hit_chance]` gives the share of shots
+that connect with a unit of each type (the shipped rules say one in ten
+for `rainballoon`, since its type file notes both its hit points and the
+chance to hit were doubled after the manual was written); the roll comes
+from dice seeded by `combat.dice_seed`, so every machine in a network game
+sees the same misses. A missed shot still flies and lands.
+
+Not yet modelled: unit-versus-unit ground combat (no walker shoots).
 
 ## Construction and the Stream of Power
 

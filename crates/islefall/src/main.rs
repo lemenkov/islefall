@@ -2573,7 +2573,8 @@ fn overlays(
                         let step = (time.elapsed_secs() * data.cfg.controls.animation_fps) as usize % seq.len();
                         let (_, row) = u.pos_f32();
                         let hud = &data.cfg.hud;
-                        let at = Vec3::new(p.x, p.y + hud.carried_lift, depth_z(Z_STRUCTURE, row) + 0.01);
+                        let z = if u.is_air { Z_UNIT + 0.01 } else { depth_z(Z_STRUCTURE, row) + 0.01 };
+                        let at = Vec3::new(p.x, p.y + hud.carried_lift, z);
                         let e = world::spawn_frame(&mut commands, shape, seq[step], at.truncate(), at.z);
                         commands.entity(e).insert((Overlay, Transform::from_translation(at).with_scale(Vec3::splat(hud.carried_scale))));
                     }

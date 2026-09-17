@@ -796,6 +796,15 @@ pub struct Combat {
     pub explosion_radius: i32,
     pub explosion_damage: i32,
     pub default_delay_between_shots: f64,
+    /// The share of shots that connect with a unit of each type; every
+    /// shot at a type not listed connects (the manual's Cloud Floater,
+    /// "only one shot in twenty").
+    #[serde(default)]
+    pub hit_chance: BTreeMap<String, f64>,
+    /// Seed of the dice those rolls come from; the same seed and commands
+    /// give the same misses on every machine.
+    #[serde(default)]
+    pub dice_seed: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

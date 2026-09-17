@@ -232,6 +232,9 @@ pub struct World {
     /// Each owner's Altar level: the highest unit level a sacrifice offers.
     #[serde(default)]
     pub altar_levels: Vec<u8>,
+    /// The dice for shots that may miss, seeded by the rules.
+    #[serde(default = "fresh_dice")]
+    pub dice: Pcg32,
     /// Whether the player's drops need Energy; off while a map is laid out.
     pub energy_enforced: bool,
     /// Whether island rims refuse structures; off while a map is laid
@@ -244,6 +247,10 @@ pub struct World {
     pub refreshing: Vec<(u8, String, u32)>,
 }
 
+fn fresh_dice() -> Pcg32 {
+    Pcg32::seed_from_u64(0)
+}
+
 fn yes() -> bool {
     true
 }
@@ -252,6 +259,7 @@ impl World {
     /// A world running under `cfg`.
     pub fn new(cfg: Config) -> World {
         let players = cfg.sim.max_players;
+        let dice = Pcg32::seed_from_u64(cfg.combat.dice_seed);
         let queue = PieceQueue::from_defs(&cfg.bridges.pieces, cfg.bridges.piece_slots, cfg.bridges.queue_seed);
         World {
             cfg,
@@ -284,6 +292,7 @@ impl World {
             knowledge: 0,
             pending_knowledge: Vec::new(),
             altar_levels: vec![1; players],
+            dice,
             energy_enforced: true,
             rims_enforced: true,
             refreshing: Vec::new(),
@@ -1849,6 +1858,12 @@ impl World {
             match target {
                 Target::Structure(j) => self.damage_structure_by(j, w.damage, Some(owner), scripts),
                 Target::Unit(j) => {
+                    // A vapour-like target: only a share of the shots connect.
+                    if let Some(&chance) = self.cfg.combat.hit_chance.get(&self.units[j].kind) {
+                        if self.dice.random_range(0.0..1.0) >= chance {
+                            continue;
+                        }
+                    }
                     let dmg = if self.units[j].is_air { w.air_damage } else { w.damage };
                     self.damage_unit_by(j, dmg, Some(owner), scripts);
                 }
@@ -2580,6 +2595,65 @@ mod tests {
         assert_eq!(w.auto_choose_knowledge(0, &test_scripts()), None, "everything known and the Altar at the top");
         assert!(!w.pending_choice(0), "a sacrifice with nothing to give is still spent");
         assert_eq!(w.altar_level(1), 1, "other players keep their own Altar level");
+    }
+
+    #[test]
+    fn an_aerial_transport_harvests_without_a_bridge() {
+        let mut w = world();
+        // A geyser island across open sky, no bridge to it.
+        w.push_island(IslandMap::rect(Cell::new(14, 0), 6, 6), 0);
+        let geyser = TypeRules { foot_x: 3, foot_y: 3, cost: 400, is_geyser: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        let g = w.drop_structure("geyser", &geyser, Cell::new(18, 4)).unwrap();
+        w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
+        let walker = w.spawn_unit("sunwalker", &golem, Cell::new(4, 1)).unwrap();
+        assert!(!w.order_harvest(walker, g), "a Golem cannot cross the sky");
+        let balloon = TypeRules { is_unit: true, is_transport: true, is_air: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
+        let b = w.spawn_unit("sunballoon", &balloon, Cell::new(4, 3)).unwrap();
+        assert!(w.order_harvest(b, g), "a Balloon needs no bridge");
+        let mut carried = false;
+        for _ in 0..9000 {
+            w.step(&test_scripts());
+            carried |= w.units[b].carried_crystals() > 0;
+            if w.units[b].task == Task::Idle {
+                break;
+            }
+        }
+        assert!(carried);
+        assert_eq!(w.powers[0], 400, "every crystal flown home");
+        assert_eq!(w.structures[g].kind, "emptygeyser");
+    }
+
+    #[test]
+    fn only_a_share_of_shots_connect_with_a_cloud_floater() {
+        let scripts = test_scripts();
+        let thrower = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 400, range: 8, hp_per_sec: 12, damage_per_shot: 12, delay_between_shots: 1.0, air_attack: Some(AirAttack { air_range: 12, air_damage: 24, ground: true }), air_damage_per_shot: 24, ..TypeRules::plain() };
+        let floater = TypeRules { is_unit: true, is_transport: true, is_air: true, max_hit_points: 100_000, speed: 0.0, threat: 15, ..TypeRules::plain() };
+        let hits_after = |chance: Option<f64>, ticks: u32| {
+            let mut w = world();
+            w.cfg.combat.hit_chance.clear();
+            if let Some(c) = chance {
+                w.cfg.combat.hit_chance.insert("rainballoon".into(), c);
+            }
+            w.drop_structure("sunarcher", &thrower, Cell::new(3, 2)).unwrap();
+            let f = w.spawn_unit_for(1, "rainballoon", &floater, Cell::new(6, 2)).unwrap();
+            for _ in 0..ticks {
+                w.step(&scripts);
+            }
+            (100_000 - w.units[f].hp) / 24
+        };
+        let ticks = w_ticks(60.0);
+        let every = hits_after(None, ticks);
+        assert!(every >= 55, "a type not listed is hit by every shot: {every}");
+        assert_eq!(hits_after(Some(0.0), ticks), 0, "nothing connects at zero");
+        let tenth = hits_after(Some(0.1), ticks);
+        assert!((1..=20).contains(&tenth), "about one in ten connects: {tenth} of {every}");
+        assert_eq!(hits_after(Some(0.1), ticks), tenth, "the seeded dice roll the same again");
+    }
+
+    fn w_ticks(seconds: f64) -> u32 {
+        test_config().ticks(seconds)
     }
 
     #[test]

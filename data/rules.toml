@@ -183,6 +183,15 @@ explosion_damage = 150
 # Seconds between shots when a type has no `delayBetweenShots`, as handed
 # to the `shot_delay` hook (which gives cannons five seconds).
 default_delay_between_shots = 1.0
+# Seed of the dice for shots that may miss (below).
+dice_seed = 5
+# The share of shots that connect with a unit of each type; a type not
+# listed is hit by every shot. The manual says only one shot in twenty
+# connects with the vapour-like Cloud Floater; the type file notes that
+# both its hit points and the chance to hit were later doubled, so one in
+# ten against 300 hit points.
+[combat.hit_chance]
+rainballoon = 0.1
 
 [priest]
 # Cells from an own Temple within which a priest regenerates (guess).

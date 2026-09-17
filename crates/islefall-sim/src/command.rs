@@ -6,6 +6,7 @@
 //! into the simulation, so the same commands in the same order give the
 //! same game everywhere.
 
+use rand::RngExt as _;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -183,6 +184,12 @@ impl World {
             h.i32(*p);
         }
         h.u64(self.knowledge as u64);
+        for a in &self.altar_levels {
+            h.u64(*a as u64);
+        }
+        h.u64(self.pending_knowledge.len() as u64);
+        // The dice: two worlds whose rolls diverged would hit differently.
+        h.u64(self.dice.clone().random::<u64>());
         for k in &self.known_tech {
             for b in k {
                 h.u64(*b as u64);
