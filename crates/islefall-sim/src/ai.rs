@@ -45,6 +45,8 @@ pub enum AiMove {
     Generator { kind: String, at: Cell },
     /// A drop was tried and refused; why, for the log.
     Refused { kind: String, why: String },
+    /// A sacrifice was spent: a type name, or "upgrade" for the Altar.
+    Knowledge { choice: String },
     Nothing,
 }
 
@@ -67,6 +69,11 @@ impl Ai {
 
     /// Call once per simulation tick; acts every `every` ticks.
     pub fn tick(&mut self, world: &mut World, kit: &AiKit, scripts: &Scripts) -> Option<AiMove> {
+        if world.pending_choice(self.owner) {
+            if let Some(choice) = world.auto_choose_knowledge(self.owner, scripts) {
+                return Some(AiMove::Knowledge { choice });
+            }
+        }
         self.ticks += 1;
         if self.ticks < self.every {
             return None;

@@ -72,13 +72,18 @@ fn salvage_refund(cost, hp, max_hp, refund_percent) {
     cost * refund_percent * health / 10000
 }
 
-// Which Knowledge bit a sacrifice grants: the lowest one the owner lacks.
-// `known` and `all` are arrays of bits.
-fn knowledge_grant(known, all) {
-    for bit in all {
-        if !known.contains(bit) {
-            return bit;
-        }
+// What a computer player (or a player with `knowledge.auto_choose`) takes
+// from a sacrifice: the name of one of the `offered` types (those of a
+// level the Altar allows that the owner does not know yet, cheapest level
+// first), or "upgrade" to raise the Altar, or () for nothing. `known` are
+// the type names already known. The default learns everything on offer
+// before raising the Altar.
+fn knowledge_choice(known, offered, altar_level, max_level) {
+    if offered.len() > 0 {
+        return offered[0];
+    }
+    if altar_level < max_level {
+        return "upgrade";
     }
     ()
 }

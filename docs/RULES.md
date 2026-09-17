@@ -187,10 +187,10 @@ Islefall: a priest at or below half health is stunned and takes no orders.
 A Transport ordered to capture walks next to him and picks him up; the
 priest then follows the carrier and is not shot at. Ordered to sacrifice,
 the carrier walks to the altar's centre cell, the priest dies and the
-player's Knowledge counter rises by one. A priest within 8 cells of an own
-Temple heals two points per second and leaves the stun above half health.
-The heal range and rate are Islefall's guesses; Knowledge does not yet
-unlock anything.
+player chooses what the sacrifice teaches (see Knowledge). A priest
+within 8 cells of an own Temple heals two points per second and leaves
+the stun above half health. The heal range and rate are Islefall's
+guesses.
 
 The manual: a priest whose bridge is blown out from under him does not
 fall but floats in the clouds until a bridge is rebuilt beneath him, when
@@ -199,8 +199,6 @@ priest. Islefall: a priest over fallen ground gets `floating` instead of
 dying, cannot move, lands the moment his cell is ground again, and may be
 captured by a `balloon`-flagged Transport whether or not he is stunned.
 A Transport that falls releases the priest it carried.
-
-Not yet modelled: what each sacrifice actually teaches.
 
 ## Storm Power
 
@@ -447,9 +445,24 @@ altar does not.
 ## Knowledge
 
 Types with a `techBit` need that Knowledge before their owner can build
-them; types without one are known from the start. Each sacrifice grants the
-lowest bit the owner lacks among the shipped types, which is Islefall's
-ordering, not the game's: the manual only says the Furies grant Knowledge.
+them; types without one are known from the start.
+
+The manual's multiplayer rules: a sacrifice lets the player choose the
+Knowledge of one of the available Level One units, or upgrade the Altar;
+after an upgrade the next sacrifice offers Level Two units, and after
+another Level Three, so the advanced units cost two or three priests.
+The campaign decides the Knowledge for you. Islefall: every sacrifice
+leaves a choice pending for its owner (`pending_knowledge`); the
+`Learn` command spends it on a type whose `level` the owner's Altar
+level allows and whose bit the owner lacks, `UpgradeAltar` on raising the
+Altar up to `knowledge.altar_levels`. The game shows the offer in a panel
+until you choose; computer players, and the player when
+`knowledge.auto_choose` is set, choose through the `knowledge_choice`
+hook, which by default learns everything on offer before raising the
+Altar. The Altar level is per player, not per building, so a rebuilt
+Altar keeps it. Not modelled: Rank (the manual: knowing every unit, the
+next sacrifice returns the island to Level One and raises the Rank), and
+the level shown on the island.
 
 ## Open questions
 

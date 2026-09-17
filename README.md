@@ -112,7 +112,7 @@ Generators show where units can be placed.
 | Open ground | Sends the selected unit there along a path around obstacles. |
 | A Storm Geyser | Sets the unit harvesting crystals to the Temple until the geyser is empty. |
 | A stunned enemy priest | Sends the selected Golem to capture him. |
-| Your altar, while he is carried | Sacrifices him for Knowledge. |
+| Your altar, while he is carried | Sacrifices him; a panel then offers the Knowledge of a unit, or an Altar upgrade that unlocks the next level. |
 | An Obelisk | Sends the unit to learn the Spell there. |
 
 **Other keys**

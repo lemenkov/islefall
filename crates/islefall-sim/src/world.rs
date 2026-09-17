@@ -226,8 +226,12 @@ pub struct World {
     pub types: BTreeMap<String, TypeRules>,
     /// Knowledge granted to the player by sacrifices.
     pub knowledge: u32,
-    /// Owners whose sacrifice has not been turned into a tech bit yet.
+    /// Owners with a sacrifice whose Knowledge has not been chosen yet,
+    /// one entry per sacrifice.
     pub pending_knowledge: Vec<u8>,
+    /// Each owner's Altar level: the highest unit level a sacrifice offers.
+    #[serde(default)]
+    pub altar_levels: Vec<u8>,
     /// Whether the player's drops need Energy; off while a map is laid out.
     pub energy_enforced: bool,
     /// Whether island rims refuse structures; off while a map is laid
@@ -279,6 +283,7 @@ impl World {
             types: BTreeMap::new(),
             knowledge: 0,
             pending_knowledge: Vec::new(),
+            altar_levels: vec![1; players],
             energy_enforced: true,
             rims_enforced: true,
             refreshing: Vec::new(),
@@ -1138,6 +1143,100 @@ impl World {
         self.known_tech[self.slot(owner)].contains(&bit)
     }
 
+    /// The level of an owner's Altar: the highest unit level a sacrifice offers.
+    pub fn altar_level(&self, owner: u8) -> u8 {
+        self.altar_levels.get(self.slot(owner)).copied().unwrap_or(1).max(1)
+    }
+
+    /// Whether the owner has a sacrifice whose Knowledge is still to be chosen.
+    pub fn pending_choice(&self, owner: u8) -> bool {
+        self.pending_knowledge.contains(&owner)
+    }
+
+    /// The types a sacrifice offers the owner now: those with a Knowledge
+    /// bit the owner lacks, of a level the Altar allows, lowest level first.
+    pub fn knowledge_choices(&self, owner: u8) -> Vec<String> {
+        let slot = self.slot(owner);
+        let altar = self.altar_level(owner) as i64;
+        let mut offered: Vec<(i64, String)> = self
+            .types
+            .iter()
+            .filter_map(|(name, r)| {
+                let bit = r.tech_bit?;
+                let level = r.level.max(1);
+                (!self.known_tech[slot].contains(&bit) && level <= altar).then(|| (level, name.clone()))
+            })
+            .collect();
+        offered.sort();
+        offered.dedup();
+        offered.into_iter().map(|(_, n)| n).collect()
+    }
+
+    /// The names of the types the owner knows, for the hook.
+    pub fn known_kinds(&self, owner: u8) -> Vec<String> {
+        let slot = self.slot(owner);
+        let mut v: Vec<String> = self.types.iter().filter(|(_, r)| r.tech_bit.is_some_and(|b| self.known_tech[slot].contains(&b))).map(|(n, _)| n.clone()).collect();
+        v.sort();
+        v
+    }
+
+    fn take_pending_choice(&mut self, owner: u8) -> Result<(), String> {
+        let i = self.pending_knowledge.iter().position(|&o| o == owner).ok_or("no sacrifice awaits a choice")?;
+        self.pending_knowledge.remove(i);
+        Ok(())
+    }
+
+    /// Spend a sacrifice on the Knowledge of `kind`. Returns its bit.
+    pub fn learn(&mut self, owner: u8, kind: &str) -> Result<u8, String> {
+        let kind = kind.to_lowercase();
+        if !self.knowledge_choices(owner).iter().any(|k| *k == kind) {
+            return Err(format!("{kind} is not on offer"));
+        }
+        let bit = self.types.get(&kind).and_then(|r| r.tech_bit).ok_or("no Knowledge bit")?;
+        self.take_pending_choice(owner)?;
+        self.grant_tech(owner, bit);
+        let at = self.structures.iter().find(|s| s.is_altar && s.owner == owner).map(|s| s.centre()).unwrap_or(Cell::new(0, 0));
+        self.emit(EventKind::Learned, &kind, at, owner);
+        Ok(bit)
+    }
+
+    /// Spend a sacrifice on raising the Altar a level. Returns the new level.
+    pub fn upgrade_altar(&mut self, owner: u8) -> Result<u8, String> {
+        let level = self.altar_level(owner);
+        if level >= self.cfg.knowledge.altar_levels {
+            return Err(format!("the Altar is already at level {level}"));
+        }
+        self.take_pending_choice(owner)?;
+        let slot = self.slot(owner);
+        if self.altar_levels.len() <= slot {
+            self.altar_levels.resize(slot + 1, 1);
+        }
+        self.altar_levels[slot] = level + 1;
+        Ok(level + 1)
+    }
+
+    /// Let the `knowledge_choice` hook spend the owner's pending sacrifice:
+    /// what it chose, if anything.
+    pub fn auto_choose_knowledge(&mut self, owner: u8, scripts: &Scripts) -> Option<String> {
+        if !self.pending_choice(owner) {
+            return None;
+        }
+        let (known, offered) = (self.known_kinds(owner), self.knowledge_choices(owner));
+        let choice = scripts.knowledge_choice(&known, &offered, self.altar_level(owner) as i64, self.cfg.knowledge.altar_levels as i64).ok().flatten();
+        let ok = match &choice {
+            Some(c) if c.eq_ignore_ascii_case("upgrade") => self.upgrade_altar(owner).is_ok(),
+            Some(c) => self.learn(owner, c).is_ok(),
+            None => false,
+        };
+        if !ok {
+            // Nothing taken, or a choice the rules refuse: the sacrifice is
+            // spent all the same rather than stalling the owner for good.
+            let _ = self.take_pending_choice(owner);
+            return None;
+        }
+        choice
+    }
+
     /// Give an Obelisk a Spell from the rules' pool, by weight, from a
     /// draw seeded by the rules and the Obelisk's index: the same map
     /// always holds the same Spells.
@@ -1876,7 +1975,11 @@ impl World {
                         if owner == 0 {
                             self.knowledge += 1;
                         }
-                        self.pending_knowledge.push(owner);
+                        // The Furies have something to offer: a unit at the
+                        // Altar's level, or a higher Altar.
+                        if !self.knowledge_choices(owner).is_empty() || self.altar_level(owner) < self.cfg.knowledge.altar_levels {
+                            self.pending_knowledge.push(owner);
+                        }
                         let (kind, victim) = (self.units[p].kind.clone(), self.units[p].owner);
                         self.emit(EventKind::Sacrificed, &kind, centre, owner);
                         self.judge(victim, centre);
@@ -2446,6 +2549,37 @@ mod tests {
         w.cfg.production.temple_types.push("priest".into());
         w.place_unit_for(0, "priest", &free, Cell::new(7, 1)).unwrap();
         w.place_unit_for(0, "priest", &free, Cell::new(7, 2)).unwrap();
+    }
+
+    #[test]
+    fn a_sacrifice_offers_the_altar_level_units_or_an_upgrade() {
+        let mut w = world();
+        w.register_type("windarcher", TypeRules { tech_bit: Some(7), level: 1, ..TypeRules::plain() });
+        w.register_type("windbattery", TypeRules { tech_bit: Some(4), level: 1, ..TypeRules::plain() });
+        w.register_type("thundercannon", TypeRules { tech_bit: Some(19), level: 2, ..TypeRules::plain() });
+        w.register_type("suncannon", TypeRules { level: 1, ..TypeRules::plain() });
+        assert_eq!(w.learn(0, "windarcher"), Err("no sacrifice awaits a choice".into()));
+        w.pending_knowledge.push(0);
+        assert_eq!(w.knowledge_choices(0), vec!["windarcher".to_string(), "windbattery".to_string()], "level one only, no bit-less types");
+        assert!(w.learn(0, "thundercannon").is_err(), "level two needs a raised Altar");
+        assert_eq!(w.learn(0, "windarcher"), Ok(7));
+        assert!(w.knows_tech(0, 7) && !w.pending_choice(0));
+        assert!(w.take_events().iter().any(|e| e.what == EventKind::Learned && e.kind == "windarcher"));
+        w.pending_knowledge.push(0);
+        assert_eq!(w.upgrade_altar(0), Ok(2));
+        assert_eq!(w.altar_level(0), 2);
+        w.pending_knowledge.push(0);
+        assert_eq!(w.knowledge_choices(0), vec!["windbattery".to_string(), "thundercannon".to_string()], "level two now on offer, lowest level first");
+        // The hook learns what is on offer before raising the Altar.
+        assert_eq!(w.auto_choose_knowledge(0, &test_scripts()).as_deref(), Some("windbattery"));
+        w.pending_knowledge.push(0);
+        assert_eq!(w.auto_choose_knowledge(0, &test_scripts()).as_deref(), Some("thundercannon"));
+        w.pending_knowledge.push(0);
+        assert_eq!(w.auto_choose_knowledge(0, &test_scripts()).as_deref(), Some("upgrade"));
+        w.pending_knowledge.push(0);
+        assert_eq!(w.auto_choose_knowledge(0, &test_scripts()), None, "everything known and the Altar at the top");
+        assert!(!w.pending_choice(0), "a sacrifice with nothing to give is still spent");
+        assert_eq!(w.altar_level(1), 1, "other players keep their own Altar level");
     }
 
     #[test]

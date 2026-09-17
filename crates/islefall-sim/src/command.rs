@@ -38,6 +38,9 @@ pub enum Command {
     Pray { unit: usize },
     Salvage { structure: usize },
     Upgrade { structure: usize },
+    /// Spend a sacrifice on the Knowledge of a type, or on raising the Altar.
+    Learn { kind: String },
+    UpgradeAltar,
     /// Battlemaster tools: crack, harden or destroy a bridge cell outright.
     CrackBridge { at: Cell },
     HardenBridge { at: Cell },
@@ -149,6 +152,14 @@ impl World {
                 let kind = self.structures.get(*structure).map(|s| s.kind.clone()).ok_or_else(|| format!("no structure {structure}"))?;
                 let level = self.upgrade_workshop(owner, *structure).map_err(|e| format!("cannot upgrade {kind}: {e}"))?;
                 done(format!("{kind} upgraded to level {level}: {} slots", self.structures[*structure].slots))
+            }
+            Command::Learn { kind } => {
+                let bit = self.learn(owner, kind).map_err(|e| format!("cannot learn {kind}: {e}"))?;
+                done(format!("the Furies grant the Knowledge of {kind} ({bit})"))
+            }
+            Command::UpgradeAltar => {
+                let level = self.upgrade_altar(owner).map_err(|e| format!("cannot raise the Altar: {e}"))?;
+                done(format!("the Altar rises to level {level}"))
             }
             Command::CrackBridge { at } => {
                 if self.crack_bridge(*at) { done(format!("cracked {at:?}")) } else { Err(format!("nothing to crack at {at:?}")) }

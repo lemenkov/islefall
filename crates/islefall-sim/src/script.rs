@@ -88,13 +88,14 @@ impl Scripts {
         v.as_int().map(|i| i as i32).map_err(|t| ScriptError::Call { hook: "salvage_refund", message: format!("expected int, got {t}") })
     }
 
-    pub fn knowledge_grant(&self, known: &[u8], all: &[u8]) -> Result<Option<u8>, ScriptError> {
-        let to_arr = |v: &[u8]| -> Array { v.iter().map(|&b| Dynamic::from(b as i64)).collect() };
-        let v = self.call("knowledge_grant", (to_arr(known), to_arr(all)))?;
+    /// A type name from `offered`, `"upgrade"`, or nothing.
+    pub fn knowledge_choice(&self, known: &[String], offered: &[String], altar_level: i64, max_level: i64) -> Result<Option<String>, ScriptError> {
+        let to_arr = |v: &[String]| -> Array { v.iter().map(|s| Dynamic::from(s.clone())).collect() };
+        let v = self.call("knowledge_choice", (to_arr(known), to_arr(offered), altar_level, max_level))?;
         if v.is_unit() {
             return Ok(None);
         }
-        v.as_int().map(|i| Some(i.clamp(0, 255) as u8)).map_err(|t| ScriptError::Call { hook: "knowledge_grant", message: format!("expected int or (), got {t}") })
+        v.into_string().map(Some).map_err(|t| ScriptError::Call { hook: "knowledge_choice", message: format!("expected string or (), got {t}") })
     }
 
     pub fn workshop_can_produce(&self, workshop: Theme, kind: Theme, level: i64) -> Result<bool, ScriptError> {
@@ -187,8 +188,10 @@ mod tests {
         assert!(!s.fires_straight("sunArcher", &[]).unwrap());
         assert_eq!(s.damage_per_shot(16, 5.0).unwrap(), 80);
         assert_eq!(s.salvage_refund(400, 50, 100, 25).unwrap(), 50);
-        assert_eq!(s.knowledge_grant(&[0, 2], &[0, 2, 3, 4]).unwrap(), Some(3));
-        assert_eq!(s.knowledge_grant(&[0], &[0]).unwrap(), None);
+        let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(s.knowledge_choice(&names(&["windbattery"]), &names(&["windarcher", "windblocker"]), 1, 3).unwrap().as_deref(), Some("windarcher"));
+        assert_eq!(s.knowledge_choice(&names(&["windbattery"]), &[], 1, 3).unwrap().as_deref(), Some("upgrade"), "nothing left at this level: raise the Altar");
+        assert_eq!(s.knowledge_choice(&[], &[], 3, 3).unwrap(), None, "everything known, the Altar at the top");
         assert!(s.target_priority(25, 3, true, false).unwrap() > s.target_priority(5, 1, false, false).unwrap());
         assert!(s.target_priority(5, 9, false, true).unwrap() > s.target_priority(25, 1, true, false).unwrap(), "a shooter stays on its target");
         assert!(s.workshop_can_produce(Theme::Sun, Theme::Wind, 1).unwrap(), "a Sun Workshop builds a Wind Generator");

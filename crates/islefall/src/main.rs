@@ -882,7 +882,7 @@ fn main() {
     .add_systems(Update, (common_keys, animate, auto_screenshot))
     .add_systems(
         Update,
-        (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, grant_knowledge, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
+        (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, knowledge_chooser, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(
@@ -1775,6 +1775,7 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>, mut 
             Some(AiMove::Shooter { kind, at }) => info!("opponent {} drops a {kind} at {at:?}", ai.owner),
             Some(AiMove::Generator { kind, at }) => info!("opponent {} drops a {kind} for Energy at {at:?}", ai.owner),
             Some(AiMove::Refused { kind, why }) => info!("opponent {} could not drop a {kind}: {why}", ai.owner),
+            Some(AiMove::Knowledge { choice }) => info!("opponent {} spends a sacrifice on {choice}", ai.owner),
             _ => {}
         }
     }
@@ -2050,6 +2051,7 @@ fn hud(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, status: Res<Stat
         t.replace("{power}", &w.powers[me].to_string())
             .replace("{knowledge}", &w.knowledge.to_string())
             .replace("{techs}", &w.known_tech[me].len().to_string())
+            .replace("{altar}", &w.altar_level(player.id).to_string())
             .replace("{tool}", &tool)
             .replace("{status}", &status.0)
             .replace("{opponents}", &opponents.to_string())
@@ -2066,34 +2068,111 @@ fn hud(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, status: Res<Stat
     }
 }
 
-/// Turn each sacrifice into the Knowledge bit the `knowledge_grant` hook picks.
-fn grant_knowledge(mut sim: ResMut<Sim>, data: Res<GameData>) {
-    let w = sim.world_mut();
-    if w.pending_knowledge.is_empty() {
-        return;
-    }
-    let mut bits: Vec<u8> = data.install.types.values().filter_map(|t| TypeRules::from_type(t, &data.cfg, &data.scripts).ok().and_then(|r| r.tech_bit)).collect();
-    bits.sort_unstable();
-    bits.dedup();
-    let pending = std::mem::take(&mut w.pending_knowledge);
-    for owner in pending {
-        let known: Vec<u8> = w.known_tech[owner as usize % data.cfg.sim.max_players].iter().copied().collect();
-        match data.scripts.knowledge_grant(&known, &bits) {
-            Ok(Some(bit)) => {
-                w.grant_tech(owner, bit);
-                let unlocked: Vec<&str> = data
-                    .install
-                    .types
-                    .iter()
-                    .filter(|(_, t)| t.get_i64("techBit") == Some(bit as i64))
-                    .map(|(k, _)| k.as_str())
-                    .collect();
-                info!("owner {owner} gains Knowledge {bit}: {unlocked:?}");
-            }
-            Ok(None) => info!("owner {owner} already knows everything"),
-            Err(e) => warn!("{e}"),
+/// The Furies' offer after a sacrifice: a panel listing the units the
+/// Altar's level allows, and the Altar's upgrade, until one is chosen.
+#[derive(Component)]
+struct KnowledgePanel;
+
+/// Spend the sacrifice on this type, or on the Altar when `None`.
+#[derive(Component)]
+struct KnowledgeButton(Option<String>);
+
+#[allow(clippy::too_many_arguments)]
+fn knowledge_chooser(
+    mut commands: Commands,
+    mut sim: ResMut<Sim>,
+    data: Res<GameData>,
+    player: Res<Player>,
+    mut status: ResMut<Status>,
+    mut rec: ResMut<Recording>,
+    panels: Query<Entity, With<KnowledgePanel>>,
+    clicks: Query<(&Interaction, &KnowledgeButton), Changed<Interaction>>,
+) {
+    let me = player.id;
+    for (i, b) in &clicks {
+        if *i == Interaction::Pressed {
+            let cmd = match &b.0 {
+                Some(kind) => Command::Learn { kind: kind.clone() },
+                None => Command::UpgradeAltar,
+            };
+            rec.issue(sim.world_mut(), &data.scripts, &mut status, cmd);
         }
     }
+    let pending = sim.world().pending_choice(me);
+    if pending && data.cfg.knowledge.auto_choose {
+        // The campaign's way: the rules choose, through the same commands a click would send.
+        let w = sim.world();
+        let (known, offered) = (w.known_kinds(me), w.knowledge_choices(me));
+        let cmd = match data.scripts.knowledge_choice(&known, &offered, w.altar_level(me) as i64, data.cfg.knowledge.altar_levels as i64) {
+            Ok(Some(c)) if c.eq_ignore_ascii_case("upgrade") => Some(Command::UpgradeAltar),
+            Ok(Some(kind)) => Some(Command::Learn { kind }),
+            Ok(None) => None,
+            Err(e) => {
+                warn!("{e}");
+                None
+            }
+        };
+        match cmd {
+            Some(cmd) => {
+                rec.issue(sim.world_mut(), &data.scripts, &mut status, cmd);
+            }
+            None => {
+                // Nothing to take: the sacrifice is spent on nothing.
+                let _ = sim.world_mut().auto_choose_knowledge(me, &data.scripts);
+            }
+        }
+        return;
+    }
+    let shown = !panels.is_empty();
+    if pending == shown {
+        return;
+    }
+    for e in &panels {
+        commands.entity(e).despawn();
+    }
+    if !pending {
+        return;
+    }
+    let w = sim.world();
+    let sb = &data.cfg.sidebar;
+    let offered = w.knowledge_choices(me);
+    let (level, top) = (w.altar_level(me), data.cfg.knowledge.altar_levels);
+    let name_of = |stem: &str| data.install.type_def(stem).and_then(|d| d.get_str("description")).unwrap_or(stem).to_string();
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(sb.width + 24.0),
+                top: px(70),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(4),
+                padding: UiRect::all(px(8)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.05, 0.05, 0.12, 0.92)),
+            KnowledgePanel,
+        ))
+        .with_children(|panel| {
+            panel.spawn((Text::new(format!("The Furies offer Knowledge (Altar level {level})")), TextFont { font_size: (sb.font_size + 2.0).into(), ..default() }, TextColor(Color::srgb(1.0, 0.9, 0.4))));
+            for stem in &offered {
+                let lvl = data.rules(stem).level.max(1);
+                panel
+                    .spawn((Button, Node { padding: UiRect::all(px(4)), ..default() }, BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.08)), KnowledgeButton(Some(stem.clone()))))
+                    .with_children(|b| {
+                        b.spawn((Text::new(format!("{} (level {lvl})", name_of(stem))), TextFont { font_size: sb.font_size.into(), ..default() }, TextColor(Color::WHITE)));
+                    });
+            }
+            if offered.is_empty() {
+                panel.spawn((Text::new("Nothing new at this level."), TextFont { font_size: sb.font_size.into(), ..default() }, TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7))));
+            }
+            if level < top {
+                panel
+                    .spawn((Button, Node { padding: UiRect::all(px(4)), ..default() }, BackgroundColor(Color::srgba(1.0, 0.9, 0.4, 0.15)), KnowledgeButton(None)))
+                    .with_children(|b| {
+                        b.spawn((Text::new(format!("Upgrade the Altar to level {}", level + 1)), TextFont { font_size: sb.font_size.into(), ..default() }, TextColor(Color::srgb(1.0, 0.9, 0.4))));
+                    });
+            }
+        });
 }
 
 /// Give every simulation unit its sprites, then keep them at the simulated

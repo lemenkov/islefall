@@ -78,6 +78,15 @@ unit_rate = "medium"
 refresh_rates = { slow = 3.0, medium = 2.0, fast = 1.0 }
 refresh_min_seconds = 2.0
 
+# What a sacrifice teaches (the manual's multiplayer rules): the owner
+# chooses the Knowledge of one unit whose `level` the Altar allows, or
+# raises the Altar so the next sacrifice offers the next level, up to
+# `altar_levels`. With `auto_choose` the `knowledge_choice` hook in
+# scripts/rules.rhai picks for the player as it does for the opponents.
+[knowledge]
+altar_levels = 3
+auto_choose = false
+
 [air]
 # Type classes of structures that launch an aerial attacker.
 base_classes = ["Air Attack Base"]
@@ -242,13 +251,13 @@ stalag = "islandstalag"
 stalag_frame = 8
 
 # The text in the corner of the screen. Placeholders: {power}, {knowledge},
-# {techs}, {tool}, {status} (the last thing the game had to say) and
+# {techs}, {altar} (the Altar's level), {tool}, {status} (the last thing the game had to say) and
 # {opponents} (players still in). The last two lines show when the game
 # is decided.
 [hud]
 font_size = 14.0
 lines = [
-    "Storm Power {power}   Knowledge {knowledge} ({techs} techs)",
+    "Storm Power {power}   Knowledge {knowledge} ({techs} techs)   Altar level {altar}",
     "Tool: {tool}   Opponents standing: {opponents}",
     "{status}",
 ]

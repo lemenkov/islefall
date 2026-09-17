@@ -26,6 +26,8 @@ pub struct Config {
     pub energy: Energy,
     pub air: Air,
     pub production: Production,
+    #[serde(default)]
+    pub knowledge: Knowledge,
     pub construction: Construction,
     pub spells: Spells,
     pub ai: AiConfig,
@@ -653,6 +655,25 @@ impl Production {
     /// Seconds per hundred Storm Power at the configured Unit Rate.
     pub fn refresh_rate(&self) -> f64 {
         self.refresh_rates.get(&self.unit_rate).copied().unwrap_or(0.0)
+    }
+}
+
+/// What a sacrifice teaches (the manual's multiplayer rules): the owner
+/// chooses a unit of a level the Altar allows, or raises the Altar so
+/// the next sacrifice offers the next level.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Knowledge {
+    /// How far an Altar can be raised (the manual: Levels One to Three).
+    pub altar_levels: u8,
+    /// Let the `knowledge_choice` hook choose for the player too, as the
+    /// campaign did, instead of asking.
+    pub auto_choose: bool,
+}
+
+impl Default for Knowledge {
+    fn default() -> Self {
+        Knowledge { altar_levels: 3, auto_choose: false }
     }
 }
 
