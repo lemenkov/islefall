@@ -94,6 +94,10 @@ pub enum DropError {
     /// The owner has no Temple, needed for Temple-provided types.
     #[error("needs a Temple")]
     NoTemple,
+    /// One was placed a moment ago and the Production window has not
+    /// offered the type again yet; `ticks` to go.
+    #[error("not back on offer yet ({ticks} ticks to go)")]
+    Refreshing { ticks: u32 },
 }
 
 /// Something that happened, for sounds and effects. The simulation never
@@ -230,6 +234,10 @@ pub struct World {
     /// out, since the original's geyser islands are all rim.
     #[serde(default = "yes")]
     pub rims_enforced: bool,
+    /// Types placed a moment ago, per owner, with the ticks until the
+    /// Production window offers them again.
+    #[serde(default)]
+    pub refreshing: Vec<(u8, String, u32)>,
 }
 
 fn yes() -> bool {
@@ -273,6 +281,7 @@ impl World {
             pending_knowledge: Vec::new(),
             energy_enforced: true,
             rims_enforced: true,
+            refreshing: Vec::new(),
         }
     }
 
@@ -855,6 +864,7 @@ impl World {
             return Err(DropError::NotEnoughPower { cost: price, have: self.powers[slot] });
         }
         self.powers[slot] -= price;
+        self.start_refresh(owner, kind, rules);
         let mut s = Structure::new(kind, cell, rules.foot_x, rules.foot_y, rules.walk);
         s.drop_blocking = rules.drop_blocking;
         s.stock = if rules.is_geyser && self.cfg.economy.geyser_stock_from_cost { rules.cost } else { 0 };
@@ -1004,6 +1014,7 @@ impl World {
         }
         self.powers[slot] -= rules.cost;
         let i = self.spawn_unit_for(owner, kind, rules, cell).ok_or(DropError::NotGround(cell))?;
+        self.start_refresh(owner, kind, rules);
         self.emit(EventKind::Built, kind, cell, owner);
         Ok(i)
     }
@@ -1018,12 +1029,55 @@ impl World {
     /// has them in production, except Temple-provided types, which need a Temple.
     pub fn check_production(&self, owner: u8, kind: &str, rules: &TypeRules) -> Result<(), DropError> {
         if self.is_temple_type(kind) {
-            return if self.structures.iter().any(|s| s.is_temple && s.complete() && s.owner == owner) { Ok(()) } else { Err(DropError::NoTemple) };
+            if !self.structures.iter().any(|s| s.is_temple && s.complete() && s.owner == owner) {
+                return Err(DropError::NoTemple);
+            }
+            return self.check_refresh(owner, kind);
         }
         if rules.energy.is_none() {
             return Ok(());
         }
-        if self.in_production(owner, kind) { Ok(()) } else { Err(DropError::NotInProduction) }
+        if !self.in_production(owner, kind) {
+            return Err(DropError::NotInProduction);
+        }
+        self.check_refresh(owner, kind)
+    }
+
+    /// Whether the Production window offers `kind` again to `owner`.
+    fn check_refresh(&self, owner: u8, kind: &str) -> Result<(), DropError> {
+        match self.refresh_ticks(owner, kind) {
+            Some(ticks) => Err(DropError::Refreshing { ticks }),
+            None => Ok(()),
+        }
+    }
+
+    fn refresh_ticks(&self, owner: u8, kind: &str) -> Option<u32> {
+        self.refreshing.iter().find(|(o, k, _)| *o == owner && k.eq_ignore_ascii_case(kind)).map(|(_, _, t)| *t)
+    }
+
+    /// Seconds until `kind` is back on offer to `owner`, if it is not now.
+    pub fn refresh_left(&self, owner: u8, kind: &str) -> Option<f64> {
+        self.refresh_ticks(owner, kind).map(|t| t as f64 / self.cfg.sim.tick_hz as f64)
+    }
+
+    /// A unit was placed: take it off offer for its refresh time.
+    fn start_refresh(&mut self, owner: u8, kind: &str, rules: &TypeRules) {
+        if !self.energy_enforced || rules.refresh_seconds <= 0.0 {
+            return;
+        }
+        let ticks = self.cfg.ticks(rules.refresh_seconds);
+        match self.refreshing.iter_mut().find(|(o, k, _)| *o == owner && k.eq_ignore_ascii_case(kind)) {
+            Some(r) => r.2 = ticks,
+            None => self.refreshing.push((owner, kind.to_lowercase(), ticks)),
+        }
+    }
+
+    /// Count the refresh waits down.
+    fn run_refresh(&mut self) {
+        for r in &mut self.refreshing {
+            r.2 = r.2.saturating_sub(1);
+        }
+        self.refreshing.retain(|r| r.2 > 0);
     }
 
     fn is_temple_type(&self, kind: &str) -> bool {
@@ -1945,6 +1999,7 @@ impl World {
         self.run_spells();
         self.run_tasks();
         self.run_construction();
+        self.run_refresh();
         self.run_air_bases();
         self.run_flyers(scripts);
         self.last_shots.clear();
@@ -2360,6 +2415,37 @@ mod tests {
         assert_eq!(w.powers[0], 400, "delivered everything once the bridge was back");
         assert_eq!(w.units[u].task, Task::Idle, "and stood down when the geyser ran dry");
         assert_eq!(seen, (true, true), "the Golem's own pick-up and drop sounds");
+    }
+
+    #[test]
+    fn a_placed_unit_leaves_the_offer_until_it_refreshes() {
+        let mut w = world();
+        w.energy_enforced = true;
+        w.powers[0] = 10_000;
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        w.energy_enforced = false;
+        w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        w.step(&test_scripts());
+        w.energy_enforced = true;
+        // Golems come from the Temple and refresh like anything else.
+        w.cfg.production.temple_types = vec!["sunwalker".into()];
+        let golem = TypeRules { is_unit: true, refresh_seconds: 2.0, ..TypeRules::plain() };
+        w.place_unit_for(0, "sunwalker", &golem, Cell::new(5, 1)).unwrap();
+        let again = w.place_unit_for(0, "sunwalker", &golem, Cell::new(6, 1));
+        assert_eq!(again, Err(DropError::Refreshing { ticks: w.cfg.ticks(2.0) }));
+        assert_eq!(w.refresh_left(0, "sunwalker").map(|s| s.ceil() as i64), Some(2));
+        assert!(w.refresh_left(1, "sunwalker").is_none(), "each owner waits for their own");
+        let ticks = w.cfg.ticks(2.0);
+        for _ in 0..ticks {
+            w.step(&test_scripts());
+        }
+        assert!(w.refresh_left(0, "sunwalker").is_none());
+        w.place_unit_for(0, "sunwalker", &golem, Cell::new(6, 1)).unwrap();
+        // A type without a refresh time is never held back.
+        let free = TypeRules { is_unit: true, ..TypeRules::plain() };
+        w.cfg.production.temple_types.push("priest".into());
+        w.place_unit_for(0, "priest", &free, Cell::new(7, 1)).unwrap();
+        w.place_unit_for(0, "priest", &free, Cell::new(7, 2)).unwrap();
     }
 
     #[test]

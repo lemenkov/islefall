@@ -946,6 +946,13 @@ struct PowerText;
 struct PieceBox;
 #[derive(Component)]
 struct PieceSlotButton(usize);
+/// The price under a build entry, or the seconds until it is on offer again.
+#[derive(Component)]
+struct BuildCost {
+    stem: String,
+    cost: i64,
+}
+
 #[derive(Component)]
 struct BuildButton {
     stem: String,
@@ -1061,7 +1068,7 @@ fn spawn_sidebar(commands: &mut Commands, data: &GameData, lib: &mut ShapeLibrar
                     }
                     row.spawn((Node { flex_direction: FlexDirection::Column, ..default() },)).with_children(|col| {
                         col.spawn((Text::new(name), TextFont { font_size: sb.font_size.into(), ..default() }, TextColor(Color::WHITE)));
-                        col.spawn((Text::new(if cost > 0 { cost.to_string() } else { String::new() }), TextFont { font_size: sb.font_size.into(), ..default() }, TextColor(Color::srgb(1.0, 0.85, 0.3))));
+                        col.spawn((Text::new(if cost > 0 { cost.to_string() } else { String::new() }), TextFont { font_size: sb.font_size.into(), ..default() }, TextColor(Color::srgb(1.0, 0.85, 0.3)), BuildCost { stem: stem.clone(), cost }));
                     });
                 });
             }
@@ -1094,7 +1101,8 @@ fn sidebar_update(
     sim: Res<Sim>,
     data: Res<GameData>,
     player: Res<Player>,
-    mut texts: Query<&mut Text, With<PowerText>>,
+    mut texts: Query<&mut Text, (With<PowerText>, Without<BuildCost>)>,
+    mut costs: Query<(&BuildCost, &mut Text, &mut TextColor), Without<PowerText>>,
     boxes: Query<Entity, With<PieceBox>>,
     slots: Query<Entity, With<PieceSlotButton>>,
     mut slot_buttons: Query<(&PieceSlotButton, &mut BackgroundColor), Without<BuildButton>>,
@@ -1183,9 +1191,28 @@ fn sidebar_update(
             Tool::Spawn(stem) => b.spawn && *stem == b.stem,
             Tool::Bridge(..) | Tool::Empty => false,
         };
-        let wanted = if chosen { Color::srgba(1.0, 0.9, 0.4, 0.35) } else { Color::srgba(0.0, 0.0, 0.0, 0.25) };
+        // Off offer while the unit refreshes: the entry goes dark.
+        let refreshing = w.refresh_left(player.id, &b.stem).is_some();
+        let wanted = if chosen {
+            Color::srgba(1.0, 0.9, 0.4, 0.35)
+        } else if refreshing {
+            Color::srgba(0.0, 0.0, 0.0, 0.6)
+        } else {
+            Color::srgba(0.0, 0.0, 0.0, 0.25)
+        };
         if bg.0 != wanted {
             bg.0 = wanted;
+        }
+    }
+    // The price gives way to the seconds until the unit is on offer again.
+    for (c, mut text, mut colour) in &mut costs {
+        let (wanted, tint) = match w.refresh_left(player.id, &c.stem) {
+            Some(s) => (format!("{} s", s.ceil() as i64), Color::srgba(0.8, 0.8, 0.8, 0.8)),
+            None => (if c.cost > 0 { c.cost.to_string() } else { String::new() }, Color::srgb(1.0, 0.85, 0.3)),
+        };
+        if text.0 != wanted {
+            text.0 = wanted;
+            colour.0 = tint;
         }
     }
     // The piece in hand lights its slot up.
@@ -1216,6 +1243,10 @@ fn sidebar_clicks(
     }
     for (i, b) in &builds {
         if *i != Interaction::Pressed {
+            continue;
+        }
+        if let Some(s) = sim.world().refresh_left(player.id, &b.stem) {
+            status.say(format!("{} is back on offer in {:.0} s", b.stem, s.ceil()));
             continue;
         }
         let rules = data.rules(&b.stem);
@@ -2288,6 +2319,10 @@ fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<Ga
         (None, Some(i)) => (data.cfg.controls.build_tools[i].clone(), false),
         _ => return,
     };
+    if let Some(s) = sim.world().refresh_left(player.id, &stem) {
+        status.say(format!("{stem} is back on offer in {:.0} s", s.ceil()));
+        return;
+    }
     // Picking a Battle unit puts it into production at a Workshop, as the manual's menu would.
     let rules = data.rules(&stem);
     if rules.energy.is_some() && !sim.world().in_production(player.id, &stem) {

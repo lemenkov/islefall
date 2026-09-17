@@ -111,6 +111,8 @@ pub struct TypeRules {
     pub is_outpost: bool,
     /// Seconds a stream takes to build the type once placed in play.
     pub build_seconds: f64,
+    /// Seconds after placing one before the type is on offer again.
+    pub refresh_seconds: f64,
     /// Holds a Spell for Transports to read.
     pub is_obelisk: bool,
     /// A Spell: cast around the caster within `spell_range` cells.
@@ -186,6 +188,7 @@ impl TypeRules {
         )?;
         let cost = def.get_i64("cost").unwrap_or(0).clamp(0, i32::MAX as i64);
         let build_seconds = scripts.construction_seconds(cost, def.get_f64("constructionRate").unwrap_or(0.0), cfg.construction.power_per_rate)?.max(0.0);
+        let refresh_seconds = scripts.refresh_seconds(cost, level, cfg.production.refresh_rate(), cfg.production.refresh_min_seconds)?.max(0.0);
         let air_damage_per_shot = match air_attack {
             Some(a) if a.air_damage > 0 => scripts.damage_per_shot(a.air_damage as i64, delay)?,
             _ => 0,
@@ -219,6 +222,7 @@ impl TypeRules {
             is_workshop: has(&f.workshop),
             is_outpost: cfg.production.outpost_types.iter().any(|t| t.eq_ignore_ascii_case(&def.name)),
             build_seconds,
+            refresh_seconds,
             is_obelisk: has(&f.obelisk),
             is_spell: has(&f.spell),
             spell_range: def.get_i64("range").unwrap_or(0).clamp(0, 1000) as i32,
@@ -266,6 +270,7 @@ impl TypeRules {
             is_workshop: false,
             is_outpost: false,
             build_seconds: 0.0,
+            refresh_seconds: 0.0,
             is_obelisk: false,
             is_spell: false,
             spell_range: 0,

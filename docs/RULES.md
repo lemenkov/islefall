@@ -164,12 +164,13 @@ has `mayDropOnRim`, no cell may be a natural island's edge.
 | `emplacement`, `factory`, `fence`, `tree`, `vortex`, `dais` | Category markers, no rule attached yet. | - |
 
 Ownership, Storm Power costs and the Energy requirement ("the proper Energy
-influencing the space") are not modelled yet.
+influencing the space") are covered in their own sections below.
 
 ## Units
 
 - `walker`, `flyer` and `balloon` mark mobile types; those without `priest`
-  are Transports. Flyers and balloons are not yet special: they walk.
+  are Transports. Flyers and balloons cross the sky in straight lines
+  (see Air below).
 - Facing uses the eight walk animations `A` to `H`: north, north-east, east,
   south-east, south, south-west, west, north-west.
 - Units have `maxHitPoints` and `threat`; shooters prefer the highest
@@ -225,10 +226,7 @@ Storm Power is the currency (the manual). Islefall models:
   are free, as in the manual ("the Temple gives you the power to create
   bridges and Golems").
 
-Not yet modelled: harvesting by aerial Transports without bridges, the 25%
-refund for destroying enemy units, Energy requirements from Temples and
-Generators, Workshops putting Knowledge into production, and capturing and
-sacrificing enemy High Priests.
+Not yet modelled: harvesting by aerial Transports without bridges.
 
 ## Energy
 
@@ -364,8 +362,18 @@ Workshops; Temple-provided types (`production.temple_types`, the Golem)
 need an own Temple instead. The `workshop_can_produce` hook decides
 alignment: the tutorial's Sun Workshop produces a Wind Generator, so only
 units above level one must match the Workshop's theme. Picking a building
-tool puts the type into the first able Workshop with a free slot. Build
-time (`constructionRate`) and the Storm Power Stream are not modelled.
+tool puts the type into the first able Workshop with a free slot.
+
+The manual's Unit Rate: once a unit is placed it leaves the Production
+window and comes back after a while, slow, medium or fast. Islefall keeps
+the type on the panel but takes it off offer: `production.unit_rate`
+picks an entry of `refresh_rates` (seconds per hundred Storm Power of the
+unit's price), and the `refresh_seconds` hook turns that and
+`refresh_min_seconds` into the wait, so a Sun Cannon at 400 comes back in
+eight seconds at medium and a free Golem in two (the figures are guesses;
+the manual gives none). The panel shows the seconds in place of the
+price; every player, the computer ones included, waits the same way.
+Build time is the shell's construction below.
 
 ## The opponent
 

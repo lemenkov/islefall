@@ -69,6 +69,14 @@ upgrade_cost_percent = 100
 temple_types = ["sunwalker"]
 # Outposts: claim a neutral island, ward it, and take in Storm Crystals.
 outpost_types = ["outpost"]
+# The manual's Unit Rate: once a unit is placed it leaves the Production
+# window and comes back after a while. `refresh_seconds` in
+# scripts/rules.rhai takes the unit's price, the chosen rate in seconds
+# per hundred Storm Power, and the least any unit waits (guesses: a Sun
+# Cannon at 400 waits eight seconds at medium, a free Golem two).
+unit_rate = "medium"
+refresh_rates = { slow = 3.0, medium = 2.0, fast = 1.0 }
+refresh_min_seconds = 2.0
 
 [air]
 # Type classes of structures that launch an aerial attacker.

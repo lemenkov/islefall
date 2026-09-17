@@ -627,6 +627,33 @@ pub struct Production {
     pub upgrade_cost_percent: i32,
     pub temple_types: Vec<String>,
     pub outpost_types: Vec<String>,
+    /// How quickly a placed unit comes back on offer (the manual's Unit
+    /// Rate: slow, medium or fast): the chosen entry of `refresh_rates`,
+    /// seconds per hundred Storm Power of the unit's price, and the least
+    /// any unit waits, both fed to the `refresh_seconds` hook.
+    #[serde(default = "default_unit_rate")]
+    pub unit_rate: String,
+    #[serde(default = "default_refresh_rates")]
+    pub refresh_rates: BTreeMap<String, f64>,
+    #[serde(default = "default_refresh_min_seconds")]
+    pub refresh_min_seconds: f64,
+}
+
+fn default_unit_rate() -> String {
+    "medium".into()
+}
+fn default_refresh_rates() -> BTreeMap<String, f64> {
+    [("slow".to_string(), 3.0), ("medium".to_string(), 2.0), ("fast".to_string(), 1.0)].into_iter().collect()
+}
+fn default_refresh_min_seconds() -> f64 {
+    2.0
+}
+
+impl Production {
+    /// Seconds per hundred Storm Power at the configured Unit Rate.
+    pub fn refresh_rate(&self) -> f64 {
+        self.refresh_rates.get(&self.unit_rate).copied().unwrap_or(0.0)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -870,6 +897,9 @@ impl Config {
         }
         if self.production.workshop_slots.is_empty() || self.construction.power_per_rate <= 0.0 {
             return bad("production.workshop_slots needs a level and construction.power_per_rate must be positive");
+        }
+        if !self.production.refresh_rates.contains_key(&self.production.unit_rate) || self.production.refresh_min_seconds < 0.0 {
+            return bad("production.unit_rate must name an entry of production.refresh_rates");
         }
         if self.effects.fps <= 0.0 || self.effects.burning_below <= 0.0 || self.effects.flame_seconds <= 0.0 || self.effects.smoke_seconds <= 0.0 {
             return bad("effects need positive burning_below, flame_seconds and smoke_seconds");

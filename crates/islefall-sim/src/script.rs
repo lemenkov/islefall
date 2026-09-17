@@ -142,6 +142,11 @@ impl Scripts {
         v.as_float().map_err(|t| ScriptError::Call { hook: "construction_seconds", message: format!("expected float, got {t}") })
     }
 
+    pub fn refresh_seconds(&self, cost: i64, level: i64, rate: f64, minimum: f64) -> Result<f64, ScriptError> {
+        let v = self.call("refresh_seconds", (cost, level, rate, minimum))?;
+        v.as_float().map_err(|t| ScriptError::Call { hook: "refresh_seconds", message: format!("expected float, got {t}") })
+    }
+
     pub fn kill_reward(&self, cost: i64, percent: i64) -> Result<i32, ScriptError> {
         let v = self.call("kill_reward", (cost, percent))?;
         v.as_int().map(|i| i as i32).map_err(|t| ScriptError::Call { hook: "kill_reward", message: format!("expected int, got {t}") })
@@ -198,6 +203,8 @@ mod tests {
         assert_eq!(s.bridge_hit("hard", 80).unwrap(), "none");
         assert_eq!(s.construction_seconds(400, 10.0, 5.0).unwrap(), 8.0, "a Sun Cannon stands in eight seconds");
         assert_eq!(s.construction_seconds(400, 0.0, 5.0).unwrap(), 1.0, "no rate: a moment");
+        assert_eq!(s.refresh_seconds(400, 1, 2.0, 2.0).unwrap(), 8.0, "a Sun Cannon is back on offer in eight seconds");
+        assert_eq!(s.refresh_seconds(0, 1, 2.0, 2.0).unwrap(), 2.0, "a free Golem waits the minimum");
         assert_eq!(s.kill_reward(1200, 25).unwrap(), 300);
         assert_eq!(s.sound_gain(0.0, 4.0, -5.0, -9.0, 4.0, 6.0).unwrap(), -5.0, "centre at the reference zoom: the file's own gain");
         assert_eq!(s.sound_gain(1.0, 4.0, 0.0, -9.0, 4.0, 6.0).unwrap(), -9.0, "the edge loses edge_db");

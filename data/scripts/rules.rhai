@@ -147,6 +147,14 @@ fn construction_seconds(cost, construction_rate, power_per_rate) {
     cost / (construction_rate * power_per_rate)
 }
 
+// Seconds a placed unit stays out of the Production window before it can
+// be placed again (the manual's Unit Rate): `rate` seconds per hundred
+// Storm Power of its `cost`, never less than `minimum`.
+fn refresh_seconds(cost, level, rate, minimum) {
+    let wait = cost / 100.0 * rate;
+    if wait > minimum { wait } else { minimum }
+}
+
 // Storm Power awarded for destroying an enemy's unit or structure: a share
 // of its cost (the manual: 25%, adjustable by the Battlemaster).
 fn kill_reward(cost, percent) {
