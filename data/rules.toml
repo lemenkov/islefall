@@ -418,7 +418,7 @@ colours = { sky = [0.16, 0.19, 0.33], sun = [0.35, 0.62, 0.25], thunder = [0.45,
 # Keys for the piece slots, as in the original Production window.
 slot_keys = ["Q", "W", "A", "S", "Z", "X"]
 # Buildings on the number keys.
-build_tools = ["suncannon", "sunarcher", "sunbattery", "sunfactory", "treetwo", "windbattery", "outpost", "efarm"]
+build_tools = ["suncannon", "sunarcher", "sunbattery", "sunfactory", "treetwo", "windbattery", "outpost", "edgefarm"]
 # Units on letter keys: the Golem and the Balloon.
 unit_keys = ["U", "I"]
 unit_tools = ["sunwalker", "sunballoon"]

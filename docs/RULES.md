@@ -137,7 +137,7 @@ From the manual and the tutorial texts:
   the island's rim cell is overlaid with a `bridgeconnector` frame.
 
 The manual: bridges may not be attached where an Edge Farm grows.
-Islefall: a type with an `edge_farm` flag (`efarm`, one cell, free, drops
+Islefall: a type with an `edge_farm` flag (`edgefarm`, one cell, free, drops
 on rims) blocks bridge pieces from attaching to the island cells it
 covers, yours and the enemy's alike; a piece whose only landfall is a
 farmed cell is refused with a message naming it. It is drawn as the
