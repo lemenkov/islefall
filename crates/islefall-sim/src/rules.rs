@@ -123,6 +123,8 @@ pub struct TypeRules {
     pub cast_seconds: f64,
     pub pray_seconds: f64,
     pub effect_seconds: f64,
+    /// Creatures a Summons Spell conjures (`spawns`).
+    pub spawns: u32,
     /// An aerial attacker (`flyer` flag): launched by a base, never a Transport.
     pub is_flyer: bool,
     /// Flies: an attacker or an Aerial Transport; needs no ground and never falls.
@@ -232,6 +234,7 @@ impl TypeRules {
             cast_seconds: def.get_f64("casttime").unwrap_or(cfg.spells.default_cast_seconds).max(0.0),
             pray_seconds: def.get_f64("praytime").unwrap_or(0.0).max(0.0),
             effect_seconds: def.get_f64("effecttime").unwrap_or(0.0).max(0.0),
+            spawns: def.get_i64("spawns").unwrap_or(0).clamp(0, 64) as u32,
             is_flyer,
             is_air,
             air_attack,
@@ -281,6 +284,7 @@ impl TypeRules {
             cast_seconds: 0.0,
             pray_seconds: 0.0,
             effect_seconds: 0.0,
+            spawns: 0,
             is_flyer: false,
             is_air: false,
             air_attack: None,

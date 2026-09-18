@@ -115,7 +115,7 @@ rainflyer = { life_seconds = 60.0, refuels = false, hunts_transports = true, cra
 default_cast_seconds = 2.0
 prayer = "bombspecialone"
 seed = 7
-pool = { bombexplodesmall = 3, bombexplodemedium = 2, bombheal = 2, bombhardener = 2, bombparalyze = 1, bombinvisible = 1, bombtreason = 1, bombexplodelarge = 1 }
+pool = { bombexplodesmall = 3, bombexplodemedium = 2, bombheal = 2, bombhardener = 2, bombparalyze = 1, bombinvisible = 1, bombtreason = 1, bombexplodelarge = 1, bombmeteor = 1, bomblightingzap = 1, bomblightingwave = 1, bombgraviton = 1, bombimano = 1, bombiimano = 1, bombiiimano = 1, bombtwister = 1, bombiitwister = 1, bombiiitwister = 1 }
 
 # What each Spell does within its `range` (cells around the caster, never
 # the caster): damage deals `amount` hit points to everything; heal brings
@@ -135,6 +135,24 @@ bombhardener = { kind = "harden" }
 bombparalyze = { kind = "paralyse" }
 bombinvisible = { kind = "invisible" }
 bombtreason = { kind = "treason" }
+# The Offensive Spells (the manual's handbook lists no figures for them:
+# amounts are guesses, scaled by their price): Bombardment rains meteors,
+# Thunder Strike and Thunderstorm strike with lightning, Graviton pulls
+# down only what flies. `effect` names the picture drawn where they land.
+bombmeteor = { kind = "damage", amount = 300, effect = { type = "meteoreffect", label = "A" } }
+bomblightingzap = { kind = "damage", amount = 500, effect = { type = "lightning", label = "A" } }
+bomblightingwave = { kind = "damage", amount = 350, effect = { type = "lightning", label = "A" } }
+bombgraviton = { kind = "damage", amount = 400, air_only = true }
+# The Summons: Hydra, Hydra Wave and Hydra Flood conjure Man o'Wars, and
+# Whirlwind, Twister and Vortex conjure Dust Devils, as many as the
+# Spell's `spawns` property says; having no base to refuel at, the
+# creatures fall when their time is up.
+bombimano = { kind = "summon", unit = "rainflyer" }
+bombiimano = { kind = "summon", unit = "rainflyer" }
+bombiiimano = { kind = "summon", unit = "rainflyer" }
+bombtwister = { kind = "summon", unit = "windflyer" }
+bombiitwister = { kind = "summon", unit = "windflyer" }
+bombiiitwister = { kind = "summon", unit = "windflyer" }
 
 [bridges]
 # Seconds an unsupported bridge cell stays cracked before it crumbles.

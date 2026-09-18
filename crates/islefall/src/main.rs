@@ -623,10 +623,22 @@ fn structure_effects(
             spawn_effect(&mut commands, &data, &mut lib, &mut images, &mut layouts, boom, cell_to_world(e.at, g), Z_UNIT + 3.0);
         }
     }
-    let Some(sparkle) = &fx.building else { return };
     let Some(w) = sim.world.as_ref() else { return };
     let rng = rng.get_or_insert_with(|| Pcg32::seed_from_u64(0x5851_F42D_4C95_7F2D));
     let mut next = || rng.random::<f32>();
+    // A Spell that lands with a picture: meteors or lightning scattered
+    // over the cells it reaches, a few per cast.
+    for e in happenings.0.iter().filter(|e| e.what == islefall_sim::EventKind::Cast) {
+        let Some(art) = data.cfg.spells.effects.get(&e.kind).and_then(|x| x.effect.clone()) else { continue };
+        let range = data.rules(&e.kind).spell_range.max(1);
+        let strikes = (range * range / 4).clamp(1, 12);
+        for _ in 0..strikes {
+            let dx = ((next() * 2.0 - 1.0) * range as f32).round() as i32;
+            let dy = ((next() * 2.0 - 1.0) * range as f32).round() as i32;
+            spawn_effect(&mut commands, &data, &mut lib, &mut images, &mut layouts, &art, cell_to_world(e.at.offset(dx, dy), g), Z_UNIT + 3.0);
+        }
+    }
+    let Some(sparkle) = &fx.building else { return };
     let dt = time.delta_secs();
     for s in w.structures.iter().filter(|s| !s.complete()) {
         let expected = fx.sparkles_per_cell * (s.foot_x * s.foot_y) as f32 * dt;

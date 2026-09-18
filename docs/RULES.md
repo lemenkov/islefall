@@ -445,9 +445,23 @@ seeded draw from `spells.pool`. Reading needs a Transport next to the
 Obelisk; casting (`X`) pays the cost at once and lands after the cast
 time on everything within the range in cells; praying (`Y`) takes the
 prayer time. `[spells.effects]` maps each Spell to its effect and, for
-damage, a guessed amount. Not modelled: Summons (Hydra, Twister, Vortex,
-Whirlwind), Thunderstorm, Thunder Strike, Bombardment, Graviton, and the
-Spell icon in the original's overlay style.
+damage, a guessed amount.
+
+The higher Spells, whose figures the handbook does not give: Bombardment
+(`bombmeteor`), Thunder Strike (`bomblightingzap`) and Thunderstorm
+(`bomblightingwave`) deal guessed damage scaled by their price, and the
+game scatters the `effect` picture named for them (meteors, lightning)
+over the cells they reach; Graviton (`bombgraviton`) is read as a pull on
+what flies, damaging only air units (a guess; `air_only`). The Summons
+conjure a base's attackers beside the caster: Hydra, Hydra Wave and Hydra
+Flood (`bombimano`, `bombiimano`, `bombiiimano`) Man o'Wars and
+Whirlwind, Twister and Vortex (`bombtwister`, `bombiitwister`,
+`bombiiitwister`) Dust Devils, as many as the Spell's `spawns` property
+says (`unit` and `count` in `[spells.effects]` override); with no base to
+refuel at they fall when their `life_seconds` are up. Which creature
+each Summons conjures is Islefall's reading of the names (`bombImano` to
+`bombIIIMano`), not stated by the data. Not modelled: the Spell icon in
+the original's overlay style.
 
 ## Winning
 

@@ -695,12 +695,27 @@ pub struct SpellEffect {
     pub kind: EffectKind,
     #[serde(default)]
     pub amount: i32,
+    /// Damage only what flies (Graviton).
+    #[serde(default)]
+    pub air_only: bool,
+    /// A Summons: the unit type conjured, this many of them (0: the
+    /// Spell's own `spawns` property, else one).
+    #[serde(default)]
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub count: u32,
+    /// What the game draws where the Spell lands.
+    #[serde(default)]
+    pub effect: Option<EffectSprite>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EffectKind {
     Damage,
+    /// Conjure `unit`s beside the caster; they fight like a base's
+    /// attackers and, having no base, fall when their time is up.
+    Summon,
     Heal,
     Harden,
     Paralyse,

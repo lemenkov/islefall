@@ -1378,11 +1378,31 @@ impl World {
         use crate::config::EffectKind::*;
         match effect.kind {
             Damage => {
-                for i in structures.into_iter().rev() {
-                    self.damage_structure(i, effect.amount);
+                if !effect.air_only {
+                    for i in structures.into_iter().rev() {
+                        self.damage_structure(i, effect.amount);
+                    }
                 }
                 for i in units {
-                    self.damage_unit(i, effect.amount);
+                    if !effect.air_only || self.units[i].is_air {
+                        self.damage_unit(i, effect.amount);
+                    }
+                }
+            }
+            Summon => {
+                let count = if effect.count > 0 { effect.count } else { rules.spawns.max(1) };
+                if let Some((kind, creature)) = effect.unit.as_deref().and_then(|k| self.types.get(&k.to_lowercase()).cloned().map(|r| (k.to_lowercase(), r))) {
+                    // They take off in a ring round the caster, over sky or land alike.
+                    let ring = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)];
+                    for k in 0..count as usize {
+                        let (dx, dy) = ring[k % ring.len()];
+                        let step = 1 + (k / ring.len()) as i32;
+                        let cell = at.offset(dx * step, dy * step);
+                        if let Some(u) = self.spawn_unit_for(owner, &kind, &creature, cell) {
+                            self.emit(EventKind::Launched, &kind, cell, owner);
+                            let _ = u;
+                        }
+                    }
                 }
             }
             Heal => {
@@ -2688,6 +2708,33 @@ mod tests {
         assert_eq!(w.can_place_piece(&[Cell::new(8, 1), Cell::new(8, 2)]), Ok(()));
         // Far from any land, the message is the usual one.
         assert_eq!(w.can_place_piece(&[Cell::new(20, 20)]), Err(PieceError::NoAttachment));
+    }
+
+    #[test]
+    fn a_summons_spell_conjures_creatures_that_fall_when_their_time_is_up() {
+        let scripts = test_scripts();
+        let mut w = world();
+        w.energy_enforced = false;
+        let flyer = TypeRules { is_unit: true, is_flyer: true, is_air: true, max_hit_points: 50, speed: 8.0, range: 30, hp_per_sec: 15, damage_per_shot: 15, delay_between_shots: 1.0, air_attack: Some(AirAttack { air_range: 0, air_damage: 0, ground: true }), ..TypeRules::plain() };
+        w.register_type("windflyer", flyer);
+        w.cfg.air.attackers.get_mut("windflyer").expect("the rules know the Dust Devil").life_seconds = 3.0;
+        let hydra = TypeRules { is_spell: true, spell_range: 30, cast_seconds: 0.1, cost: 0, spawns: 2, ..TypeRules::plain() };
+        w.register_type("bombtwister", hydra);
+        w.powers[0] = 1000;
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
+        let u = w.spawn_unit("sunwalker", &golem, Cell::new(4, 1)).unwrap();
+        w.units[u].spell = Some("bombtwister".into());
+        w.order_cast(u).unwrap();
+        for _ in 0..10 {
+            w.step(&scripts);
+        }
+        let devils: Vec<usize> = w.units.iter().enumerate().filter(|(_, x)| x.kind == "windflyer" && x.alive).map(|(i, _)| i).collect();
+        assert_eq!(devils.len(), 2, "the Whirlwind's `spawns`");
+        assert!(devils.iter().all(|&i| w.units[i].owner == 0 && w.units[i].base.is_none()));
+        for _ in 0..w.cfg.ticks(3.0) + 5 {
+            w.step(&scripts);
+        }
+        assert!(devils.iter().all(|&i| !w.units[i].alive), "no base to refuel at: they fall");
     }
 
     #[test]
