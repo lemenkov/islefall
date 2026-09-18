@@ -128,8 +128,10 @@ From the manual and the tutorial texts:
   then crumbles. Islefall cracks unsupported cells at once and drops them
   four seconds later; platforms and the structures on them fall immediately.
 - Destroying a bridge cell destroys adjacent cracked cells too (the manual's
-  "shock"). Explosions of units nearby crack un-cracked bridges; not modelled
-  yet since there is no combat.
+  "shock"). A structure destroyed nearby explodes: bridge cells within
+  `combat.explosion_radius` crack, and cracked ones fall (the manual's
+  explosions of units cracking bridges; walkers and flyers that die do
+  not explode).
 - Hardened bridges (`hard` frames, the Bridge Harden spell) do not crack from
   damage but still crumble when unsupported.
 - A bridge cell's tile is chosen by which of its four neighbours are ground;
@@ -165,7 +167,8 @@ has `mayDropOnRim`, no cell may be a natural island's edge.
 | `dropBlocking` | Nothing may later be dropped onto the footprint. Currently every structure blocks drops, so the flag is recorded but not yet distinguishing. | Medium |
 | `mayDropOnRim` | The footprint may include island rim cells. | Medium |
 | `mayDropOnIsle` | Not yet used. Probably: may be dropped on platforms created by other structures. | Low |
-| `emplacement`, `factory`, `fence`, `tree`, `vortex`, `dais` | Category markers, no rule attached yet. | - |
+| `fence` | A barricade post; see Barricades below. | High |
+| `emplacement`, `factory`, `tree`, `vortex`, `dais` | Category markers, no rule attached yet. | - |
 
 Ownership, Storm Power costs and the Energy requirement ("the proper Energy
 influencing the space") are covered in their own sections below.
@@ -291,6 +294,23 @@ From the type properties and the manual:
 - Salvaging one of your own structures refunds 25% of its cost scaled by
   its remaining health, and shocks bridges like an explosion but damages
   nothing else (the manual).
+
+## Barricades
+
+The manual: the Sun Barricade repels enemy fire; an acidic barrier is
+created by aligning two Acid Barricade posts along a straight horizontal
+or vertical line and dissolves every enemy unit that comes between the
+posts; the Arc Spires form barricades (Damage 50). Islefall: two
+complete posts of one `fence` type and owner on the same row or column,
+within the type's `range` of each other, raise a barrier over the cells
+strictly between them, drawn as a beam in the type's colour
+(`[fences] colours`). What the barrier does is `[fences] effects` by
+type: `shield` stops any enemy shot whose line would cross it, so the
+shooter finds no target there until a post falls; `dissolve` kills an
+enemy walker standing between the posts; `arc` deals the type's
+`hpPerSec` to one every second. Flyers pass over acid and arcs. A post's
+`range` and `hpPerSec` belong to its barrier: posts never shoot. Which
+effect belongs to which barricade is Islefall's reading of the manual.
 
 ## Air
 
@@ -499,8 +519,9 @@ nothing left to offer (every bit known, the Altar at the top) clears the
 owner's Knowledge, returns the Altar to level one and raises the Rank;
 Battle units (types that need Energy) placed from then on get
 `knowledge.rank_bonus_percent` more hit points and damage per Rank.
-Units already standing keep their figures. Not modelled: the name, level
-and Rank printed on the island.
+Units already standing keep their figures. As the manual says other
+players can see your level printed on your island, each player's name,
+Altar level and Rank stand over their Altar (`hud.island_labels`).
 
 ## Open questions
 

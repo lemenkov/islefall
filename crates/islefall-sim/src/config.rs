@@ -28,6 +28,8 @@ pub struct Config {
     pub production: Production,
     #[serde(default)]
     pub knowledge: Knowledge,
+    #[serde(default)]
+    pub fences: Fences,
     pub construction: Construction,
     pub spells: Spells,
     pub ai: AiConfig,
@@ -414,6 +416,24 @@ pub struct Hud {
     pub carried_lift: f32,
     #[serde(default = "default_carried_scale")]
     pub carried_scale: f32,
+    /// The manual's island label, name, Level and Rank, printed over each
+    /// player's Altar: whether, how far above it, and how large.
+    #[serde(default = "yes")]
+    pub island_labels: bool,
+    #[serde(default = "default_island_label_lift")]
+    pub island_label_lift: f32,
+    #[serde(default = "default_island_label_size")]
+    pub island_label_size: f32,
+}
+
+fn yes() -> bool {
+    true
+}
+fn default_island_label_lift() -> f32 {
+    36.0
+}
+fn default_island_label_size() -> f32 {
+    11.0
 }
 
 fn default_carried_crystal() -> Option<String> {
@@ -784,6 +804,30 @@ pub struct Flags {
     /// Edge Farms: no bridge may attach to the island edge they grow on.
     #[serde(default)]
     pub edge_farm: Vec<String>,
+    /// Barricade posts: two of a kind in line raise a barrier between them.
+    #[serde(default)]
+    pub fence: Vec<String>,
+}
+
+/// What a barricade does between its posts, by type.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FenceEffect {
+    /// Enemy shots do not cross it (the Sun Barricade).
+    Shield,
+    /// Enemy ground units between the posts die (the Acid Barricade).
+    Dissolve,
+    /// Enemy units between the posts take the type's `hpPerSec` (the Arc Spire).
+    Arc,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Fences {
+    /// The effect of each barricade type's barrier.
+    pub effects: BTreeMap<String, FenceEffect>,
+    /// The barrier's colour on screen, by type.
+    pub colours: BTreeMap<String, [f32; 4]>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

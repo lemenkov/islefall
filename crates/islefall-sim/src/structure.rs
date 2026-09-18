@@ -25,6 +25,14 @@ pub struct Structure {
     /// Whether no bridge may attach to the cells (an Edge Farm).
     #[serde(default)]
     pub blocks_bridges: bool,
+    /// A barricade post: pairs with another of its kind in line.
+    #[serde(default)]
+    pub is_fence: bool,
+    /// The post's reach to its pair, and what its arc deals per second.
+    #[serde(default)]
+    pub fence_range: i32,
+    #[serde(default)]
+    pub fence_hp_per_sec: i32,
     /// Storm crystals left, for geysers.
     pub stock: i32,
     /// Whether units deliver crystals here.
@@ -119,6 +127,9 @@ impl Structure {
             walk,
             drop_blocking: false,
             blocks_bridges: false,
+            is_fence: false,
+            fence_range: 0,
+            fence_hp_per_sec: 0,
             stock: 0,
             is_temple: false,
             is_outpost: false,

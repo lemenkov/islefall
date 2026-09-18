@@ -200,6 +200,18 @@ owner = 2
 kind = "rainfence"
 at = [16, 54]
 
+# Two more Acid Barricade posts along the island's top raise an acid
+# barrier between them.
+[[structures]]
+owner = 2
+kind = "rainfence"
+at = [22, 49]
+
+[[structures]]
+owner = 2
+kind = "rainfence"
+at = [27, 49]
+
 [[structures]]
 owner = 2
 kind = "rainaviary"
@@ -245,6 +257,7 @@ at = [64, 56]
 owner = 3
 kind = "thunderfence"
 at = [68, 56]
+
 
 [[structures]]
 owner = 3

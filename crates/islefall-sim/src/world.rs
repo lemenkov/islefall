@@ -58,6 +58,47 @@ pub enum PieceError {
     EdgeFarm(Cell),
 }
 
+/// A barrier between two barricade posts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FenceLine {
+    pub kind: String,
+    pub owner: u8,
+    /// Structure indices of the two posts.
+    pub posts: (usize, usize),
+    /// The posts' centres.
+    pub from: Cell,
+    pub to: Cell,
+    /// The cells strictly between the posts.
+    pub cells: Vec<Cell>,
+    pub effect: crate::config::FenceEffect,
+    pub hp_per_sec: i32,
+}
+
+impl FenceLine {
+    /// Whether the straight line from `a` to `b` crosses the barrier
+    /// between the posts (touching an end counts).
+    pub fn crossed_by(&self, a: Cell, b: Cell) -> bool {
+        let (ax, ay, bx, by) = (a.x as f64 + 0.5, a.y as f64 + 0.5, b.x as f64 + 0.5, b.y as f64 + 0.5);
+        if self.from.y == self.to.y {
+            let y0 = self.from.y as f64 + 0.5;
+            if (ay - y0) * (by - y0) > 0.0 || ay == by {
+                return false;
+            }
+            let x = ax + (bx - ax) * (y0 - ay) / (by - ay);
+            let (x1, x2) = (self.from.x.min(self.to.x) as f64 + 0.5, self.from.x.max(self.to.x) as f64 + 0.5);
+            (x1..=x2).contains(&x)
+        } else {
+            let x0 = self.from.x as f64 + 0.5;
+            if (ax - x0) * (bx - x0) > 0.0 || ax == bx {
+                return false;
+            }
+            let y = ay + (by - ay) * (x0 - ax) / (bx - ax);
+            let (y1, y2) = (self.from.y.min(self.to.y) as f64 + 0.5, self.from.y.max(self.to.y) as f64 + 0.5);
+            (y1..=y2).contains(&y)
+        }
+    }
+}
+
 /// Why a drop was refused.
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
 pub enum DropError {
@@ -540,6 +581,68 @@ impl World {
         (self.is_land(cell) && !self.farmed(cell)) || self.is_open_end(cell)
     }
 
+    /// Every barrier standing now: two complete posts of a kind and owner
+    /// on one row or column within the type's range, and the cells
+    /// strictly between them.
+    pub fn fence_lines(&self) -> Vec<FenceLine> {
+        let posts: Vec<(usize, &Structure)> = self.structures.iter().enumerate().filter(|(_, s)| s.is_fence && s.complete()).collect();
+        let mut lines = Vec::new();
+        for (a, (i, p)) in posts.iter().enumerate() {
+            for (j, q) in posts.iter().skip(a + 1) {
+                if p.kind != q.kind || p.owner != q.owner {
+                    continue;
+                }
+                let (c, d) = (p.centre(), q.centre());
+                let reach = p.fence_range.min(q.fence_range);
+                let cells: Vec<Cell> = if c.y == d.y && (c.x - d.x).abs() <= reach && (c.x - d.x).abs() > 1 {
+                    let (x1, x2) = (c.x.min(d.x), c.x.max(d.x));
+                    (x1 + 1..x2).map(|x| Cell::new(x, c.y)).collect()
+                } else if c.x == d.x && (c.y - d.y).abs() <= reach && (c.y - d.y).abs() > 1 {
+                    let (y1, y2) = (c.y.min(d.y), c.y.max(d.y));
+                    (y1 + 1..y2).map(|y| Cell::new(c.x, y)).collect()
+                } else {
+                    continue;
+                };
+                let Some(&effect) = self.cfg.fences.effects.get(&p.kind) else { continue };
+                lines.push(FenceLine { kind: p.kind.clone(), owner: p.owner, posts: (*i, *j), from: c, to: d, cells, effect, hp_per_sec: p.fence_hp_per_sec });
+            }
+        }
+        lines
+    }
+
+    /// Whether a shot by `shooter` from `from` to `to` would cross an
+    /// enemy's shield barrier.
+    pub fn shielded(&self, shooter: u8, from: Cell, to: Cell, lines: &[FenceLine]) -> bool {
+        lines.iter().filter(|l| l.owner != shooter && l.effect == crate::config::FenceEffect::Shield).any(|l| l.crossed_by(from, to))
+    }
+
+    /// The barricades act: acid dissolves enemy walkers between its posts,
+    /// arcs strike them once a second.
+    fn run_fences(&mut self) {
+        let lines = self.fence_lines();
+        if lines.is_empty() {
+            return;
+        }
+        let second = self.tick % self.cfg.sim.tick_hz.max(1) as u64 == 0;
+        for i in 0..self.units.len() {
+            let u = &self.units[i];
+            if !u.alive || u.is_air || u.carried_by.is_some() {
+                continue;
+            }
+            let (at, owner) = (u.cell(), u.owner);
+            for l in lines.iter().filter(|l| l.owner != owner && l.cells.contains(&at)) {
+                match l.effect {
+                    crate::config::FenceEffect::Dissolve => {
+                        let hp = self.units[i].hp;
+                        self.damage_unit(i, hp);
+                    }
+                    crate::config::FenceEffect::Arc if second => self.damage_unit(i, l.hp_per_sec),
+                    _ => {}
+                }
+            }
+        }
+    }
+
     /// Whether a bridge-blocking structure (an Edge Farm) covers the cell.
     pub fn farmed(&self, cell: Cell) -> bool {
         self.structures.iter().any(|s| s.blocks_bridges && s.covers(cell))
@@ -903,6 +1006,9 @@ impl World {
         let mut s = Structure::new(kind, cell, rules.foot_x, rules.foot_y, rules.walk);
         s.drop_blocking = rules.drop_blocking;
         s.blocks_bridges = rules.is_edge_farm;
+        s.is_fence = rules.is_fence;
+        s.fence_range = rules.fence_range;
+        s.fence_hp_per_sec = rules.fence_hp_per_sec;
         s.stock = if rules.is_geyser && self.cfg.economy.geyser_stock_from_cost { rules.cost } else { 0 };
         s.is_temple = rules.is_temple;
         s.is_outpost = rules.is_outpost;
@@ -919,8 +1025,9 @@ impl World {
             s.slots = self.cfg.production.workshop_slots[0];
         }
         // Rules built without the hook (tests, plain types) shoot at the ground.
+        // A barricade post's range and damage belong to its barrier, not a gun.
         let a = rules.air_attack.unwrap_or(AirAttack { air_range: 0, air_damage: 0, ground: true });
-        {
+        if !rules.is_fence {
             let ground = a.ground && rules.range > 0 && rules.hp_per_sec > 0;
             if ground || a.air_range > 0 {
                 s.weapon = Some(Weapon {
@@ -1856,12 +1963,14 @@ impl World {
     /// fires when its cooldown allows. Cannons only fire along their row or column.
     fn run_combat(&mut self, scripts: &Scripts) {
         let mut shots: Vec<(usize, Target)> = Vec::new();
+        let lines = self.fence_lines();
         for (i, s) in self.structures.iter().enumerate() {
             let Some(w) = s.weapon else { continue };
             if s.cooldown > 0 || !s.complete() || s.paralysed > 0 {
                 continue;
             }
-            let in_range = |c: Cell| s.distance_to(c) <= w.range && (!w.cardinal_only || s.in_line(c));
+            // Within reach, in line for a cannon, and not behind an enemy's Sun Barricade.
+            let in_range = |c: Cell| s.distance_to(c) <= w.range && (!w.cardinal_only || s.in_line(c)) && !self.shielded(s.owner, s.centre(), c, &lines);
             let mut best: Option<(i64, Target)> = None;
             for (j, t) in self.structures.iter().enumerate() {
                 if !w.ground || t.owner == s.owner || t.max_hp == 0 || !in_range(t.centre()) {
@@ -1891,7 +2000,7 @@ impl World {
                     continue;
                 }
                 // Flyers are hit only by air weapons within their own reach.
-                let reachable = if u.is_air { w.air_range > 0 && s.distance_to(u.cell()) <= w.air_range } else { w.ground && in_range(u.cell()) };
+                let reachable = if u.is_air { w.air_range > 0 && s.distance_to(u.cell()) <= w.air_range && !self.shielded(s.owner, s.centre(), u.cell(), &lines) } else { w.ground && in_range(u.cell()) };
                 if !reachable {
                     continue;
                 }
@@ -2192,6 +2301,7 @@ impl World {
         self.run_spells();
         self.run_tasks();
         self.run_construction();
+        self.run_fences();
         self.run_refresh();
         self.run_air_bases();
         self.run_flyers(scripts);
@@ -2824,6 +2934,82 @@ mod tests {
             Err(e) => assert!(e.contains("Workshop") || e.contains("Energy") || e.contains("production"), "{e}"),
         }
         assert_eq!(w.ranked(1, &archer, 400), 400, "another player's Rank is their own");
+    }
+
+    fn fence_type(range: i32, hp_per_sec: i32) -> TypeRules {
+        TypeRules { foot_x: 1, foot_y: 1, is_fence: true, fence_range: range, fence_hp_per_sec: hp_per_sec, max_hit_points: 800, may_drop_on_rim: true, ..TypeRules::plain() }
+    }
+
+    #[test]
+    fn two_posts_in_line_raise_a_barrier_between_them() {
+        let mut w = world();
+        let acid = fence_type(40, 0);
+        w.drop_structure("rainfence", &acid, Cell::new(1, 2)).unwrap();
+        assert!(w.fence_lines().is_empty(), "one post is no barrier");
+        w.drop_structure("rainfence", &acid, Cell::new(5, 2)).unwrap();
+        let lines = w.fence_lines();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].cells, vec![Cell::new(2, 2), Cell::new(3, 2), Cell::new(4, 2)]);
+        assert_eq!(lines[0].effect, crate::config::FenceEffect::Dissolve);
+        // Off the line, or another owner's post, or beyond reach: nothing.
+        w.drop_structure("rainfence", &acid, Cell::new(5, 0)).unwrap();
+        assert_eq!(w.fence_lines().len(), 2, "the new post pairs with the one below it on its column");
+        w.structures.last_mut().unwrap().owner = 1;
+        assert_eq!(w.fence_lines().len(), 1);
+        assert!(FenceLine { kind: String::new(), owner: 0, posts: (0, 1), from: Cell::new(1, 2), to: Cell::new(5, 2), cells: Vec::new(), effect: crate::config::FenceEffect::Shield, hp_per_sec: 0 }.crossed_by(Cell::new(3, 0), Cell::new(3, 5)));
+        assert!(!FenceLine { kind: String::new(), owner: 0, posts: (0, 1), from: Cell::new(1, 2), to: Cell::new(5, 2), cells: Vec::new(), effect: crate::config::FenceEffect::Shield, hp_per_sec: 0 }.crossed_by(Cell::new(7, 0), Cell::new(7, 5)));
+    }
+
+    #[test]
+    fn acid_dissolves_and_arcs_strike_the_enemy_between_the_posts() {
+        let scripts = test_scripts();
+        let mut w = world();
+        w.cfg.fences.effects.insert("rainfence".into(), crate::config::FenceEffect::Dissolve);
+        w.cfg.fences.effects.insert("thunderfence".into(), crate::config::FenceEffect::Arc);
+        let acid = fence_type(40, 0);
+        w.drop_structure("rainfence", &acid, Cell::new(1, 1)).unwrap();
+        w.drop_structure("rainfence", &acid, Cell::new(5, 1)).unwrap();
+        let arc = fence_type(50, 50);
+        w.drop_structure("thunderfence", &arc, Cell::new(1, 3)).unwrap();
+        w.drop_structure("thunderfence", &arc, Cell::new(5, 3)).unwrap();
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 120, ..TypeRules::plain() };
+        let mine = w.spawn_unit_for(0, "sunwalker", &golem, Cell::new(3, 1)).unwrap();
+        let theirs = w.spawn_unit_for(1, "sunwalker", &golem, Cell::new(2, 1)).unwrap();
+        let struck = w.spawn_unit_for(1, "sunwalker", &golem, Cell::new(3, 3)).unwrap();
+        for _ in 0..w.cfg.ticks(1.0) + 1 {
+            w.step(&scripts);
+        }
+        assert!(w.units[mine].alive, "your own barrier spares you");
+        assert!(!w.units[theirs].alive, "dissolved");
+        assert_eq!(w.units[struck].hp, 20, "fifty at the start of each second: two strikes in a second and a tick");
+    }
+
+    #[test]
+    fn a_sun_barricade_repels_enemy_fire() {
+        let scripts = test_scripts();
+        let mut w = world();
+        w.push_island(IslandMap::rect(Cell::new(10, 0), 6, 6), 1);
+        w.cfg.fences.effects.insert("sunfence".into(), crate::config::FenceEffect::Shield);
+        let thrower = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 400, range: 12, hp_per_sec: 12, damage_per_shot: 12, delay_between_shots: 1.0, ..TypeRules::plain() };
+        let tree = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 100, threat: 1, ..TypeRules::plain() };
+        w.drop_structure_for(1, "sunarcher", &thrower, Cell::new(12, 2)).unwrap();
+        let t = w.drop_structure("treetwo", &tree, Cell::new(4, 2)).unwrap();
+        // The shield stands across the line of fire, on the tree's side.
+        let shield = fence_type(45, 0);
+        w.drop_structure("sunfence", &shield, Cell::new(7, 0)).unwrap();
+        w.drop_structure("sunfence", &shield, Cell::new(7, 3)).unwrap();
+        for _ in 0..90 {
+            w.step(&scripts);
+        }
+        assert_eq!(w.structures[t].hp, 100, "the thrower found no target behind the barricade");
+        // A post down, the barrier is gone and the shots land.
+        let post = w.structures.iter().position(|s| s.kind == "sunfence").unwrap();
+        let hp = w.structures[post].hp;
+        w.damage_structure(post, hp);
+        for _ in 0..90 {
+            w.step(&scripts);
+        }
+        assert!(w.structures[t].hp < 100, "shot once the post fell");
     }
 
     #[test]
@@ -3494,3 +3680,4 @@ mod tests {
         assert_eq!(speed_per_tick(&c, 0.0), 1);
     }
 }
+

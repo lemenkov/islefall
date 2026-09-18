@@ -2651,6 +2651,8 @@ fn overlays(
     mut tracers: Local<Vec<(Vec2, Vec2, f32)>>,
     mut landed: ResMut<Landed>,
     white: Res<Solid>,
+    lobby: Res<Lobby>,
+    mut local_name: Local<Option<String>>,
 ) {
     for e in &existing {
         commands.entity(e).despawn();
@@ -2670,6 +2672,42 @@ fn overlays(
             let a = k as f32 / dots as f32 * std::f32::consts::TAU;
             let (x, y) = (feet.x + rw * a.cos(), feet.y + rh * a.sin());
             commands.spawn((solid(&white, c, Vec2::new(2.0, 2.0)), Transform::from_translation(Vec3::new(x, y, Z_UNIT - 0.5)), Overlay));
+        }
+    }
+    // Barriers between barricade posts: a beam in the type's colour.
+    for line in w.fence_lines() {
+        let Some(c) = data.cfg.fences.colours.get(&line.kind) else { continue };
+        let (a, b) = (cell_to_world(line.from, g), cell_to_world(line.to, g));
+        let pulse = 0.8 + 0.2 * (time.elapsed_secs() * 4.0).sin();
+        let colour = Color::srgba(c[0], c[1], c[2], c[3] * pulse);
+        let d = b - a;
+        let mid = (a + b) / 2.0;
+        let beam = solid(&white, colour, Vec2::new(d.length(), 4.0));
+        commands.spawn((beam, Transform::from_translation(mid.extend(Z_UNIT - 0.4)).with_rotation(Quat::from_rotation_z(d.y.atan2(d.x))), Overlay));
+    }
+    // Each player's island label over their Altar: name, Level and Rank
+    // (the manual: other players can see your level, printed on your island).
+    let hud = &data.cfg.hud;
+    if hud.island_labels {
+        let mine = local_name.get_or_insert_with(|| std::env::var("ISLEFALL_NAME").unwrap_or_else(|_| whoami())).clone();
+        for &owner in &w.players {
+            let Some(altar) = w.structures.iter().find(|s| s.is_altar && s.owner == owner) else { continue };
+            let name = lobby
+                .players
+                .iter()
+                .find(|p| p.id == owner)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| if owner == player.id { mine.clone() } else { format!("the {} tribe", theme_name(w.island_theme_at(altar.centre()))) });
+            let label = format!("{name}   Level {}   Rank {}", w.altar_level(owner), w.rank(owner));
+            let pos = cell_to_world(altar.centre(), g) + Vec2::new(0.0, hud.island_label_lift);
+            commands.spawn((
+                Text2d::new(label),
+                TextFont { font_size: hud.island_label_size.into(), ..default() },
+                TextColor(Color::srgba(1.0, 0.95, 0.7, 0.9)),
+                Anchor::BOTTOM_CENTER,
+                Transform::from_translation(pos.extend(Z_UNIT + 1.0)),
+                Overlay,
+            ));
         }
     }
     // Spell icons over their bearers, the selected caster's reach, and casting, prayer, paralysis and invisibility marks.

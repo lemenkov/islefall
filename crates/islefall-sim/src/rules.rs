@@ -101,6 +101,11 @@ pub struct TypeRules {
     pub is_altar: bool,
     /// An Edge Farm: bridges may not attach to the edge cell it grows on.
     pub is_edge_farm: bool,
+    /// A barricade post, its reach to its pair and what its arc deals per
+    /// second: the type's raw `range` and `hpPerSec`, which are no gun's.
+    pub is_fence: bool,
+    pub fence_range: i32,
+    pub fence_hp_per_sec: i32,
     /// Energy required to place the type, if any.
     pub energy: Option<EnergyNeed>,
     /// Energy produced (Generators and Temples).
@@ -221,6 +226,9 @@ impl TypeRules {
             is_transport: !is_priest && is_unit && !is_flyer,
             is_altar: has(&f.altar),
             is_edge_farm: has(&f.edge_farm),
+            is_fence: has(&f.fence),
+            fence_range: def.get_i64("range").unwrap_or(0).clamp(0, 1000) as i32,
+            fence_hp_per_sec: def.get_i64("hpPerSec").unwrap_or(0).clamp(0, 100_000) as i32,
             energy,
             produces,
             tech_bit: def.get_i64("techBit").filter(|b| (0..=255).contains(b)).map(|b| b as u8),
@@ -271,6 +279,9 @@ impl TypeRules {
             is_transport: false,
             is_altar: false,
             is_edge_farm: false,
+            is_fence: false,
+            fence_range: 0,
+            fence_hp_per_sec: 0,
             energy: None,
             produces: None,
             tech_bit: None,

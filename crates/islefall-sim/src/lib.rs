@@ -35,4 +35,4 @@ pub use rules::{EnergyNeed, TypeRules, Walk};
 pub use structure::{Structure, Weapon};
 pub use unit::{Dir8, Pos, Task, Unit};
 pub use command::{Applied, Command, Entry, Replay};
-pub use world::{BridgeState, DropError, Event, EventKind, PieceError, ProductionError, World, speed_per_tick};
+pub use world::{BridgeState, DropError, Event, EventKind, FenceLine, PieceError, ProductionError, World, speed_per_tick};

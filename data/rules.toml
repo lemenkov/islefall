@@ -58,6 +58,9 @@ obelisk = ["buried"]
 spell = ["bomb"]
 # Edge Farms: no bridge may attach to the island edge cell they grow on.
 edge_farm = ["edgefarm"]
+# Barricade posts: two complete posts of a kind and owner on one row or
+# column, within the type's `range`, raise a barrier between them.
+fence = ["fence"]
 # Type classes (the `class` property) that produce Energy of their theme.
 energy_source_classes = ["Source of Energy"]
 
@@ -85,6 +88,13 @@ refresh_min_seconds = 2.0
 # raises the Altar so the next sacrifice offers the next level, up to
 # `altar_levels`. With `auto_choose` the `knowledge_choice` hook in
 # scripts/rules.rhai picks for the player as it does for the opponents.
+# Barricades (the manual): the Sun Barricade repels enemy fire, the Acid
+# Barricade dissolves every enemy unit that comes between its posts, the
+# Arc Spires form barricades that strike with the type's `hpPerSec`.
+[fences]
+effects = { sunfence = "shield", rainfence = "dissolve", thunderfence = "arc" }
+colours = { sunfence = [1.0, 0.85, 0.3, 0.45], rainfence = [0.4, 1.0, 0.5, 0.45], thunderfence = [0.7, 0.8, 1.0, 0.55] }
+
 [knowledge]
 altar_levels = 3
 auto_choose = false
@@ -306,6 +316,11 @@ selection_pulse = 1.5
 carried_crystal = "nugget"
 carried_lift = 12.0
 carried_scale = 0.5
+# The manual: other players can see your level, printed on your island.
+# Each player's name, Altar level and Rank stand over their Altar.
+island_labels = true
+island_label_lift = 36.0
+island_label_size = 11.0
 
 # How a structure's frames animate. Frames labelled `idle_label` (or the
 # label of the structure's level) loop: geysers spout, batteries turn,
