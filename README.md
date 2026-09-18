@@ -149,7 +149,9 @@ cargo run --release -p islefall-server            # listens on 0.0.0.0:7777
 ISLEFALL_JOIN=host:7777 ISLEFALL_NAME=Peter cargo run --release
 ```
 
-The game starts once every player has connected (two by default; a
+A lobby lists who has joined; press `Enter` when you are ready
+(`ISLEFALL_READY=1` says so at once, for scripts). The game starts once
+every player has connected and is ready (two by default; a
 `server.toml` argument sets `bind`, `turn_ticks`, `min_players`,
 `max_players` and `hash_every_turns`). Clients report world hashes and the
 server tells everyone if they ever disagree. A player who drops can come

@@ -88,5 +88,7 @@ on, and it is also how bugs get reported: a replay file reproduces them.
    config (done); snapshots for rejoin, fetched from a client (done).
 5. Client integration: connect from the command line, lockstep loop
    driving the simulation from received turns (done).
-6. Later: TLS or QUIC, a lobby screen, late joining as a new player, browser transport,
+6. A lobby panel in the client: who has joined, who is ready, `Enter`
+   to toggle (done).
+7. Later: TLS or QUIC, late joining as a new player, browser transport,
    matchmaking, persistence.

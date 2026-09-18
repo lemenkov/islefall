@@ -531,6 +531,68 @@ impl Status {
 #[derive(Component)]
 struct Hud;
 
+/// The wait before an online game: who has joined and who is ready.
+#[derive(Resource, Default)]
+struct Lobby {
+    /// Shown while the game has not started.
+    open: bool,
+    server: String,
+    me_ready: bool,
+    players: Vec<islefall_net::PlayerInfo>,
+}
+
+#[derive(Component)]
+struct LobbyPanel;
+
+/// Draw the lobby while it is open, redrawn when its lines change; `Enter`
+/// toggles readiness, and the server starts once everyone is ready.
+#[allow(clippy::too_many_arguments)]
+fn lobby_panel(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut lobby: ResMut<Lobby>,
+    rec: Res<Recording>,
+    player: Res<Player>,
+    data: Res<GameData>,
+    panels: Query<Entity, With<LobbyPanel>>,
+    mut shown: Local<Option<String>>,
+) {
+    if lobby.open && keys.just_pressed(KeyCode::Enter) {
+        if let Some(net) = rec.net.as_ref() {
+            lobby.me_ready = !lobby.me_ready;
+            net.send(islefall_net::ClientMsg::Ready(lobby.me_ready));
+        }
+    }
+    let text = if lobby.open {
+        let mut lines = vec![format!("Lobby on {}", lobby.server), String::new()];
+        for p in &lobby.players {
+            let me = if p.id == player.id { " (you)" } else { "" };
+            lines.push(format!("{}{}: {}", p.name, me, if p.ready { "ready" } else { "not ready" }));
+        }
+        lines.push(String::new());
+        lines.push(if lobby.me_ready { "Enter: not ready after all".into() } else { "Enter: ready".into() });
+        lines.push("The game starts when everyone is ready.".into());
+        Some(lines.join("\n"))
+    } else {
+        None
+    };
+    if *shown == text {
+        return;
+    }
+    *shown = text.clone();
+    for e in &panels {
+        commands.entity(e).despawn();
+    }
+    let Some(text) = text else { return };
+    let sb = &data.cfg.sidebar;
+    commands.spawn((
+        Node { position_type: PositionType::Absolute, left: px(sb.width + 24.0), top: px(70), padding: UiRect::all(px(10)), ..default() },
+        BackgroundColor(Color::srgba(0.05, 0.05, 0.12, 0.92)),
+        LobbyPanel,
+        children![(Text::new(text), TextFont { font_size: (sb.font_size + 2.0).into(), ..default() }, TextColor(Color::srgb(1.0, 0.95, 0.8)))],
+    ));
+}
+
 /// A missile in flight from a shooter to its target.
 #[derive(Component)]
 struct Projectile {
@@ -830,6 +892,7 @@ fn main() {
     let sky_first = cfg.sounds.ambient.sky_seconds[0];
     let background = cfg.sky.background;
     let mut recording = Recording::default();
+    let mut lobby = Lobby::default();
     if let Ok(addr) = std::env::var("ISLEFALL_JOIN") {
         let name = std::env::var("ISLEFALL_NAME").unwrap_or_else(|_| whoami());
         let mut bytes = std::fs::read(data.join("rules.toml")).unwrap_or_default();
@@ -838,8 +901,13 @@ fn main() {
         bytes.extend(format!("{map:?}").into_bytes());
         let hello = islefall_net::ClientMsg::Hello { protocol: islefall_net::PROTOCOL, name: name.clone(), map: map_name.clone(), data_hash: islefall_net::data_hash(&bytes) };
         let net = Net::connect(&addr, hello).unwrap_or_else(|e| fail(format!("cannot join {addr}: {e}")));
-        net.send(islefall_net::ClientMsg::Ready(true));
-        info!("joined {addr} as {name}; waiting for the others");
+        // Scripts and tests say they are ready at once; a player presses Enter in the lobby.
+        let ready = std::env::var("ISLEFALL_READY").is_ok_and(|v| v == "1");
+        if ready {
+            net.send(islefall_net::ClientMsg::Ready(true));
+        }
+        lobby = Lobby { open: true, server: addr.clone(), me_ready: ready, players: Vec::new() };
+        info!("joined {addr} as {name}; waiting in the lobby");
         recording.net = Some(net);
     }
     if let Some(path) = std::env::var_os("ISLEFALL_RECORD") {
@@ -863,6 +931,7 @@ fn main() {
                 ..default()
             }),
     )
+    .insert_resource(lobby)
     .insert_resource(GameData { install, cfg, scripts, palette, map, data_dir: data.clone() })
     .insert_resource(GlobalVolume::new(Volume::Linear(volume)))
     .insert_resource(ClearColor(Color::srgb(background[0], background[1], background[2])))
@@ -897,7 +966,7 @@ fn main() {
     .add_systems(Update, (common_keys, animate, auto_screenshot))
     .add_systems(
         Update,
-        (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, knowledge_chooser, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
+        (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, knowledge_chooser, lobby_panel, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(
@@ -1763,13 +1832,13 @@ fn spawn_viewer_shape(
     spawn_animated(commands, shape, animation, Vec2::ZERO, Z_UNIT, true);
 }
 
-fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>, mut rec: ResMut<Recording>, mut player: ResMut<Player>, mut status: ResMut<Status>) {
+fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>, mut rec: ResMut<Recording>, mut player: ResMut<Player>, mut status: ResMut<Status>, mut lobby: ResMut<Lobby>) {
     if viewer.paused {
         return;
     }
     let Sim { world: Some(world), ais } = &mut *sim else { return };
     if rec.net.is_some() {
-        online_step(world, ais, &data, &mut rec, &mut player, &mut status);
+        online_step(world, ais, &data, &mut rec, &mut player, &mut status, &mut lobby);
         return;
     }
     if let Some(replay) = rec.replay.as_ref() {
@@ -1974,7 +2043,8 @@ fn verdict(w: &World, data: &GameData, me: u8) -> Option<String> {
 /// Online, the world moves only by the server's turns: every command of
 /// a turn is applied, then the turn's ticks run, the opponents act, and
 /// every so many turns the hash goes back to the server.
-fn online_step(world: &mut World, ais: &mut Vec<Ai>, data: &GameData, rec: &mut Recording, player: &mut Player, status: &mut Status) {
+#[allow(clippy::too_many_arguments)]
+fn online_step(world: &mut World, ais: &mut Vec<Ai>, data: &GameData, rec: &mut Recording, player: &mut Player, status: &mut Status, lobby: &mut Lobby) {
     use islefall_net::{ClientMsg, ServerMsg};
     let Some(net) = rec.net.as_mut() else { return };
     let messages = net.drain();
@@ -1983,6 +2053,7 @@ fn online_step(world: &mut World, ais: &mut Vec<Ai>, data: &GameData, rec: &mut 
             ServerMsg::Resume { map } => {
                 net.started = true;
                 net.awaiting_snapshot = true;
+                lobby.open = false;
                 status.say(format!("back in the game on {map}; waiting for the world"));
             }
             ServerMsg::SnapshotRequest => {
@@ -2023,9 +2094,11 @@ fn online_step(world: &mut World, ais: &mut Vec<Ai>, data: &GameData, rec: &mut 
             ServerMsg::Lobby { players } => {
                 let names: Vec<String> = players.iter().map(|p| format!("{}{}", p.name, if p.ready { " (ready)" } else { "" })).collect();
                 status.say(format!("in the lobby: {}", names.join(", ")));
+                lobby.players = players;
             }
             ServerMsg::Start { map } => {
                 net.started = true;
+                lobby.open = false;
                 status.say(format!("the game starts on {map}"));
             }
             ServerMsg::Turn { turn, commands } => apply_turn(world, ais, data, net, rec.record.as_mut(), player, status, turn, commands),
