@@ -81,6 +81,8 @@ on, and it is also how bugs get reported: a replay file reproduces them.
 
 ## Order of work
 
+(The project-wide plan is in `ROADMAP.md`; this is the network's own.)
+
 1. Commands, replays and the world hash (done).
 2. Snapshots: serde on the world, for saving, loading and sending (done: `World::snapshot` and `World::restore`, binary through postcard; `F5` and `F9` in the app).
 3. A protocol crate shared by client and server (done).

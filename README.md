@@ -11,8 +11,9 @@ definitions from a NetStorm installation you already own, in the way OpenRA
 and OpenTTD use their original games' assets. See `NOTICE`.
 
 Status: early development. The demo map is playable against three
-computer players, the original's campaign scenarios load, and two players
-can meet over a network. There is no campaign flow or lobby yet.
+computer players, the original's campaign scenarios load, and players
+can meet over a network with a lobby. There is no campaign flow or start
+screen yet; `docs/ROADMAP.md` says what works and what comes next.
 
 ## Building
 
@@ -206,6 +207,7 @@ real files.
 | `docs/RULES.md` | How the type flags are read as game rules, with confidence notes. |
 | `docs/MODDING.md` | The data directory: `rules.toml`, the Rhai hooks and map files. |
 | `docs/NETWORK.md` | Lockstep play over the relay. |
+| `docs/ROADMAP.md` | What works, what comes next, and the open questions about the original. |
 | `tools/shp_decode.py` | Python reference decoder used while working out the sprite format. |
 
 ## License

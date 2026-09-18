@@ -525,8 +525,5 @@ Altar level and Rank stand over their Altar (`hud.island_labels`).
 
 ## Open questions
 
-- Whether `yuckWalk` blocks or merely deters.
-- What `mayDropOnIsle` means exactly.
-- The real bridge piece catalogue.
-- Explosion radius and damage; `damageEffect` is always 1 in the data and
-  may select a visual effect rather than a damage class.
+The facts about the original that neither the data nor the manual
+settles are listed in `ROADMAP.md`, with what comes next.
