@@ -490,9 +490,17 @@ until you choose; computer players, and the player when
 `knowledge.auto_choose` is set, choose through the `knowledge_choice`
 hook, which by default learns everything on offer before raising the
 Altar. The Altar level is per player, not per building, so a rebuilt
-Altar keeps it. Not modelled: Rank (the manual: knowing every unit, the
-next sacrifice returns the island to Level One and raises the Rank), and
-the level shown on the island.
+Altar keeps it.
+
+Rank (the manual): once a player knows every unit, the next sacrifice
+returns the island to Level One and raises the Rank, and each Rank adds
+25% to the hits and damage of Battle units. Islefall: a sacrifice with
+nothing left to offer (every bit known, the Altar at the top) clears the
+owner's Knowledge, returns the Altar to level one and raises the Rank;
+Battle units (types that need Energy) placed from then on get
+`knowledge.rank_bonus_percent` more hit points and damage per Rank.
+Units already standing keep their figures. Not modelled: the name, level
+and Rank printed on the island.
 
 ## Open questions
 

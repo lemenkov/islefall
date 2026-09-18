@@ -669,11 +669,15 @@ pub struct Knowledge {
     /// Let the `knowledge_choice` hook choose for the player too, as the
     /// campaign did, instead of asking.
     pub auto_choose: bool,
+    /// The manual: knowing every unit, the next sacrifice returns the
+    /// island to Level One and raises the Rank, and each Rank adds 25% to
+    /// the hits and damage of Battle units.
+    pub rank_bonus_percent: i32,
 }
 
 impl Default for Knowledge {
     fn default() -> Self {
-        Knowledge { altar_levels: 3, auto_choose: false }
+        Knowledge { altar_levels: 3, auto_choose: false, rank_bonus_percent: 25 }
     }
 }
 

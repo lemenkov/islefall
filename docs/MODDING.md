@@ -105,7 +105,7 @@ frame its type file flags `gumpframe`.
 ## Screen text
 
 `[hud]` holds the lines drawn in the corner as templates with `{power}`,
-`{knowledge}`, `{techs}`, `{tool}`, `{status}` and `{opponents}` filled
+`{knowledge}`, `{techs}`, `{altar}`, `{rank}`, `{tool}`, `{status}` and `{opponents}` filled
 in, plus the victory and defeat lines, so a mod can reword or translate
 them.
 

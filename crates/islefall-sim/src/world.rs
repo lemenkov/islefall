@@ -238,6 +238,9 @@ pub struct World {
     /// The dice for shots that may miss, seeded by the rules.
     #[serde(default = "fresh_dice")]
     pub dice: Pcg32,
+    /// Each owner's Rank: how many times they have learnt everything.
+    #[serde(default)]
+    pub ranks: Vec<u8>,
     /// Whether the player's drops need Energy; off while a map is laid out.
     pub energy_enforced: bool,
     /// Whether island rims refuse structures; off while a map is laid
@@ -295,6 +298,7 @@ impl World {
             knowledge: 0,
             pending_knowledge: Vec::new(),
             altar_levels: vec![1; players],
+            ranks: vec![0; players],
             dice,
             energy_enforced: true,
             rims_enforced: true,
@@ -904,8 +908,8 @@ impl World {
         s.is_outpost = rules.is_outpost;
         s.is_obelisk = rules.is_obelisk;
         s.owner = owner;
-        s.hp = rules.max_hit_points;
-        s.max_hp = rules.max_hit_points;
+        s.hp = self.ranked(owner, rules, rules.max_hit_points);
+        s.max_hp = s.hp;
         s.cost = rules.cost;
         s.threat = rules.threat;
         s.is_altar = rules.is_altar;
@@ -921,12 +925,12 @@ impl World {
             if ground || a.air_range > 0 {
                 s.weapon = Some(Weapon {
                     range: rules.range,
-                    damage: rules.damage_per_shot,
+                    damage: self.ranked(owner, rules, rules.damage_per_shot),
                     delay: self.cfg.ticks(rules.delay_between_shots),
                     cardinal_only: rules.cardinal_only,
                     ground,
                     air_range: a.air_range,
-                    air_damage: rules.air_damage_per_shot,
+                    air_damage: self.ranked(owner, rules, rules.air_damage_per_shot),
                 });
             }
         }
@@ -985,14 +989,14 @@ impl World {
         }
         let mut u = Unit::new(kind, cell, speed_per_tick(&self.cfg, rules.speed), self.subcell());
         u.owner = owner;
-        u.hp = rules.max_hit_points.max(1);
+        u.hp = self.ranked(owner, rules, rules.max_hit_points.max(1));
         u.max_hp = u.hp;
         u.threat = rules.threat;
         u.is_priest = rules.is_priest;
         u.is_transport = rules.is_transport;
         u.is_air = rules.is_air;
         u.is_flyer = rules.is_flyer;
-        u.strike = rules.damage_per_shot;
+        u.strike = self.ranked(owner, rules, rules.damage_per_shot);
         u.range = rules.range;
         u.delay = self.cfg.ticks(rules.delay_between_shots);
         u.life = self.attacker_life(kind);
@@ -1173,6 +1177,35 @@ impl World {
     /// The level of an owner's Altar: the highest unit level a sacrifice offers.
     pub fn altar_level(&self, owner: u8) -> u8 {
         self.altar_levels.get(self.slot(owner)).copied().unwrap_or(1).max(1)
+    }
+
+    /// How many times the owner has learnt everything and started over.
+    pub fn rank(&self, owner: u8) -> u8 {
+        self.ranks.get(self.slot(owner)).copied().unwrap_or(0)
+    }
+
+    /// The hits and damage of the owner's new Battle units, as a share of the type's.
+    fn rank_factor(&self, owner: u8) -> f64 {
+        1.0 + self.rank(owner) as f64 * self.cfg.knowledge.rank_bonus_percent as f64 / 100.0
+    }
+
+    fn ranked(&self, owner: u8, rules: &TypeRules, value: i32) -> i32 {
+        if self.energy_enforced && rules.energy.is_some() { (value as f64 * self.rank_factor(owner)).round() as i32 } else { value }
+    }
+
+    /// Everything known and the Altar at the top: the island returns to
+    /// Level One and the Rank rises (the manual).
+    fn rank_up(&mut self, owner: u8) {
+        let slot = self.slot(owner);
+        if self.ranks.len() <= slot {
+            self.ranks.resize(slot + 1, 0);
+        }
+        self.ranks[slot] = self.ranks[slot].saturating_add(1);
+        self.known_tech[slot].clear();
+        if self.altar_levels.len() <= slot {
+            self.altar_levels.resize(slot + 1, 1);
+        }
+        self.altar_levels[slot] = 1;
     }
 
     /// Whether the owner has a sacrifice whose Knowledge is still to be chosen.
@@ -2029,9 +2062,13 @@ impl World {
                             self.knowledge += 1;
                         }
                         // The Furies have something to offer: a unit at the
-                        // Altar's level, or a higher Altar.
+                        // Altar's level, or a higher Altar. Otherwise
+                        // everything is known: the Rank rises instead.
                         if !self.knowledge_choices(owner).is_empty() || self.altar_level(owner) < self.cfg.knowledge.altar_levels {
                             self.pending_knowledge.push(owner);
+                        } else {
+                            self.rank_up(owner);
+                            self.emit(EventKind::Learned, "rank", centre, owner);
                         }
                         let (kind, victim) = (self.units[p].kind.clone(), self.units[p].owner);
                         self.emit(EventKind::Sacrificed, &kind, centre, owner);
@@ -2735,6 +2772,58 @@ mod tests {
             w.step(&scripts);
         }
         assert!(devils.iter().all(|&i| !w.units[i].alive), "no base to refuel at: they fall");
+    }
+
+    #[test]
+    fn knowing_everything_the_next_sacrifice_raises_the_rank() {
+        let mut w = world();
+        w.energy_enforced = true;
+        w.powers[0] = 100_000;
+        let energy = Some(crate::rules::EnergyNeed { theme: Theme::Sun, themed: 0, any: 0 });
+        let archer = TypeRules { tech_bit: Some(7), level: 1, foot_x: 1, foot_y: 1, max_hit_points: 400, range: 8, hp_per_sec: 12, damage_per_shot: 12, delay_between_shots: 1.0, energy: energy.clone(), ..TypeRules::plain() };
+        w.register_type("windarcher", archer.clone());
+        w.cfg.knowledge.altar_levels = 1;
+        // Learn the one thing there is, then sacrifice again.
+        w.pending_knowledge.push(0);
+        assert_eq!(w.learn(0, "windarcher"), Ok(7));
+        assert!(w.knowledge_choices(0).is_empty());
+        w.structures.clear();
+        let golem = TypeRules { is_unit: true, is_transport: true, ..TypeRules::plain() };
+        w.energy_enforced = false;
+        let altar = TypeRules { foot_x: 1, foot_y: 1, is_altar: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        let a = w.drop_structure("dais", &altar, Cell::new(3, 2)).unwrap();
+        let carrier = w.spawn_unit("sunwalker", &golem, Cell::new(3, 3)).unwrap();
+        let victim = w.spawn_unit("priest", &TypeRules { is_unit: true, is_priest: true, ..TypeRules::plain() }, Cell::new(5, 3)).unwrap();
+        w.units[victim].owner = 1;
+        w.units[victim].carried_by = Some(carrier);
+        w.units[carrier].carrying = Some(victim);
+        w.units[carrier].task = Task::Sacrifice { altar: a };
+        w.energy_enforced = true;
+        w.step(&test_scripts());
+        assert!(!w.units[victim].alive, "sacrificed");
+        assert_eq!(w.rank(0), 1);
+        assert!(!w.knows_tech(0, 7) && w.altar_level(0) == 1, "the island is back at Level One");
+        assert!(!w.pending_choice(0));
+        // Battle units placed now are a quarter tougher and harder-hitting.
+        w.grant_tech(0, 7);
+        w.put_into_production(0, "windarcher", &archer, &test_scripts()).ok();
+        w.cfg.production.temple_types.clear();
+        let before = w.structures.len();
+        w.energy_enforced = false;
+        let i = w.drop_structure("windarcher", &archer, Cell::new(6, 2)).unwrap();
+        assert_eq!(w.structures[i].max_hp, 400, "layout drops are not ranked");
+        w.energy_enforced = true;
+        let _ = before;
+        w.pending_knowledge.clear();
+        let j = w.drop_structure_for(0, "windarcher", &archer, Cell::new(1, 1)).map_err(|e| e.to_string());
+        match j {
+            Ok(j) => {
+                assert_eq!(w.structures[j].max_hp, 500);
+                assert_eq!(w.structures[j].weapon.map(|x| x.damage), Some(15));
+            }
+            Err(e) => assert!(e.contains("Workshop") || e.contains("Energy") || e.contains("production"), "{e}"),
+        }
+        assert_eq!(w.ranked(1, &archer, 400), 400, "another player's Rank is their own");
     }
 
     #[test]

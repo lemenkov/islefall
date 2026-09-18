@@ -88,6 +88,10 @@ refresh_min_seconds = 2.0
 [knowledge]
 altar_levels = 3
 auto_choose = false
+# Knowing every unit, the next sacrifice returns the island to Level One
+# (Knowledge and Altar start over) and raises the Rank; each Rank adds
+# this much to the hits and damage of the Battle units placed from then on.
+rank_bonus_percent = 25
 
 [air]
 # Type classes of structures that launch an aerial attacker.
@@ -280,13 +284,13 @@ stalag = "islandstalag"
 stalag_frame = 8
 
 # The text in the corner of the screen. Placeholders: {power}, {knowledge},
-# {techs}, {altar} (the Altar's level), {tool}, {status} (the last thing the game had to say) and
+# {techs}, {altar} (the Altar's level), {rank}, {tool}, {status} (the last thing the game had to say) and
 # {opponents} (players still in). The last two lines show when the game
 # is decided.
 [hud]
 font_size = 14.0
 lines = [
-    "Storm Power {power}   Knowledge {knowledge} ({techs} techs)   Altar level {altar}",
+    "Storm Power {power}   Knowledge {knowledge} ({techs} techs)   Altar level {altar}   Rank {rank}",
     "Tool: {tool}   Opponents standing: {opponents}",
     "{status}",
 ]

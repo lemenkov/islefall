@@ -2064,6 +2064,7 @@ fn hud(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, status: Res<Stat
             .replace("{knowledge}", &w.knowledge.to_string())
             .replace("{techs}", &w.known_tech[me].len().to_string())
             .replace("{altar}", &w.altar_level(player.id).to_string())
+            .replace("{rank}", &w.rank(player.id).to_string())
             .replace("{tool}", &tool)
             .replace("{status}", &status.0)
             .replace("{opponents}", &opponents.to_string())
