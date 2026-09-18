@@ -65,8 +65,12 @@ on, and it is also how bugs get reported: a replay file reproduces them.
   connected and said ready the game starts; every `turn_ticks` ticks the
   server sends the commands it received as one turn. Clients send their
   world hash every `hash_every_turns`, and the server logs agreement
-  or broadcasts a desync with everyone's hashes. It runs no simulation
-  yet, so a client that drops cannot rejoin. The server logs through
+  or broadcasts a desync with everyone's hashes. It runs no simulation:
+  a player who drops and comes back under the same name gets their
+  number back and a `Resume`; the server asks another player for a
+  snapshot (the world plus the opponents' state, before a given turn),
+  relays it, and the returning client holds the turns that arrive
+  meanwhile and applies those from the snapshot's turn on. The server logs through
   `tracing`, filtered by `RUST_LOG`: `info` (the default) shows players
   joining, leaving and refusals, the start and desyncs; `debug` adds
   connections and every hash agreement; `trace` every command relayed.
@@ -81,9 +85,8 @@ on, and it is also how bugs get reported: a replay file reproduces them.
 2. Snapshots: serde on the world, for saving, loading and sending (done: `World::snapshot` and `World::restore`, binary through postcard; `F5` and `F9` in the app).
 3. A protocol crate shared by client and server (done).
 4. A server binary without Bevy: lobby, turn relay, hash checks, a TOML
-   config (done); snapshots for rejoin (to do, needs the server to run
-   the simulation or fetch a snapshot from a client).
+   config (done); snapshots for rejoin, fetched from a client (done).
 5. Client integration: connect from the command line, lockstep loop
    driving the simulation from received turns (done).
-6. Later: TLS or QUIC, a lobby screen, rejoin, browser transport,
+6. Later: TLS or QUIC, a lobby screen, late joining as a new player, browser transport,
    matchmaking, persistence.

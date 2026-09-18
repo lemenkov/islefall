@@ -447,6 +447,9 @@ struct Net {
     hash_every_turns: u64,
     started: bool,
     turns_done: u64,
+    /// Rejoined: the turns arriving now wait here until the snapshot comes.
+    awaiting_snapshot: bool,
+    backlog: Vec<(u64, Vec<(u8, Command)>)>,
 }
 
 impl Net {
@@ -495,7 +498,7 @@ impl Net {
             });
         });
         ready_rx.recv().map_err(|_| "the connection thread stopped".to_string())??;
-        Ok(Net { tx, rx: std::sync::Mutex::new(rx), turn_ticks: 1, hash_every_turns: 0, started: false, turns_done: 0 })
+        Ok(Net { tx, rx: std::sync::Mutex::new(rx), turn_ticks: 1, hash_every_turns: 0, started: false, turns_done: 0, awaiting_snapshot: false, backlog: Vec::new() })
     }
 
     fn send(&self, msg: islefall_net::ClientMsg) {
@@ -1971,12 +1974,44 @@ fn verdict(w: &World, data: &GameData, me: u8) -> Option<String> {
 /// Online, the world moves only by the server's turns: every command of
 /// a turn is applied, then the turn's ticks run, the opponents act, and
 /// every so many turns the hash goes back to the server.
-fn online_step(world: &mut World, ais: &mut [Ai], data: &GameData, rec: &mut Recording, player: &mut Player, status: &mut Status) {
+fn online_step(world: &mut World, ais: &mut Vec<Ai>, data: &GameData, rec: &mut Recording, player: &mut Player, status: &mut Status) {
     use islefall_net::{ClientMsg, ServerMsg};
     let Some(net) = rec.net.as_mut() else { return };
     let messages = net.drain();
     for msg in messages {
         match msg {
+            ServerMsg::Resume { map } => {
+                net.started = true;
+                net.awaiting_snapshot = true;
+                status.say(format!("back in the game on {map}; waiting for the world"));
+            }
+            ServerMsg::SnapshotRequest => {
+                info!("sending a snapshot before turn {} for a returning player", net.turns_done);
+                net.send(ClientMsg::Snapshot { turn: net.turns_done, world: world.snapshot(), ais: islefall_sim::ai::encode_ais(ais) });
+            }
+            ServerMsg::Snapshot { turn, world: bytes, ais: ai_bytes } => {
+                match (World::restore(&bytes), islefall_sim::ai::decode_ais(&ai_bytes)) {
+                    (Ok(w), Ok(a)) => {
+                        *world = w;
+                        *ais = a;
+                        net.turns_done = turn;
+                        net.awaiting_snapshot = false;
+                        status.say(format!("the world arrived at turn {turn} (tick {})", world.tick));
+                        let mut held = std::mem::take(&mut net.backlog);
+                        held.sort_by_key(|(t, _)| *t);
+                        held.dedup_by_key(|(t, _)| *t);
+                        for (t, commands) in held {
+                            if t >= turn {
+                                apply_turn(world, ais, data, net, rec.record.as_mut(), player, status, t, commands);
+                            }
+                        }
+                    }
+                    (Err(e), _) | (_, Err(e)) => status.say(format!("the snapshot could not be read: {e}")),
+                }
+            }
+            ServerMsg::Turn { turn, commands } if net.awaiting_snapshot => {
+                net.backlog.push((turn, commands));
+            }
             ServerMsg::Welcome { player: id, turn_ticks, hash_every_turns } => {
                 player.id = id;
                 rec.owner = id;
@@ -1993,35 +2028,7 @@ fn online_step(world: &mut World, ais: &mut [Ai], data: &GameData, rec: &mut Rec
                 net.started = true;
                 status.say(format!("the game starts on {map}"));
             }
-            ServerMsg::Turn { turn, commands } => {
-                if turn != net.turns_done {
-                    warn!("turn {turn} arrived, expected {}", net.turns_done);
-                }
-                for (owner, cmd) in &commands {
-                    match world.apply(*owner, cmd, &data.scripts) {
-                        Ok(a) if *owner == player.id => status.say(a.message),
-                        Err(e) if *owner == player.id => status.say(e),
-                        _ => {}
-                    }
-                    if let Some((path, replay)) = rec.record.as_mut() {
-                        replay.record(world.tick, *owner, cmd.clone(), true);
-                        let _ = replay.save(&*path);
-                    }
-                }
-                for _ in 0..net.turn_ticks {
-                    world.step(&data.scripts);
-                    for ai in ais.iter_mut() {
-                        let kit = islefall_sim::ai::AiKit { shooter: (ai.shooter.clone(), data.rules(&ai.shooter)), generator: (ai.generator.clone(), data.rules(&ai.generator)) };
-                        ai.tick(world, &kit, &data.scripts);
-                    }
-                }
-                net.turns_done = turn + 1;
-                if net.hash_every_turns > 0 && (turn + 1) % net.hash_every_turns == 0 {
-                    let hash = world.hash();
-                    info!("turn {turn} (tick {}) hash {hash:016x}", world.tick);
-                    net.send(ClientMsg::Hash { turn, hash });
-                }
-            }
+            ServerMsg::Turn { turn, commands } => apply_turn(world, ais, data, net, rec.record.as_mut(), player, status, turn, commands),
             ServerMsg::Desync { turn, hashes } => {
                 warn!("DESYNC at turn {turn}: {hashes:?}");
                 status.say(format!("DESYNC at turn {turn}: the players' worlds differ"));
@@ -2029,6 +2036,41 @@ fn online_step(world: &mut World, ais: &mut [Ai], data: &GameData, rec: &mut Rec
             ServerMsg::Left(id) => status.say(format!("player {id} left")),
             ServerMsg::Pong(_) => {}
         }
+    }
+}
+
+/// One turn of the server's: its commands, then its ticks with the
+/// opponents acting, then the hash when it is due.
+#[allow(clippy::too_many_arguments)]
+fn apply_turn(world: &mut World, ais: &mut [Ai], data: &GameData, net: &mut Net, record: Option<&mut (PathBuf, Replay)>, player: &Player, status: &mut Status, turn: u64, commands: Vec<(u8, Command)>) {
+    use islefall_net::ClientMsg;
+    if turn != net.turns_done {
+        warn!("turn {turn} arrived, expected {}", net.turns_done);
+    }
+    let mut record = record;
+    for (owner, cmd) in &commands {
+        match world.apply(*owner, cmd, &data.scripts) {
+            Ok(a) if *owner == player.id => status.say(a.message),
+            Err(e) if *owner == player.id => status.say(e),
+            _ => {}
+        }
+        if let Some((path, replay)) = record.as_deref_mut() {
+            replay.record(world.tick, *owner, cmd.clone(), true);
+            let _ = replay.save(&*path);
+        }
+    }
+    for _ in 0..net.turn_ticks {
+        world.step(&data.scripts);
+        for ai in ais.iter_mut() {
+            let kit = islefall_sim::ai::AiKit { shooter: (ai.shooter.clone(), data.rules(&ai.shooter)), generator: (ai.generator.clone(), data.rules(&ai.generator)) };
+            ai.tick(world, &kit, &data.scripts);
+        }
+    }
+    net.turns_done = turn + 1;
+    if net.hash_every_turns > 0 && (turn + 1) % net.hash_every_turns == 0 {
+        let hash = world.hash();
+        info!("turn {turn} (tick {}) hash {hash:016x}", world.tick);
+        net.send(ClientMsg::Hash { turn, hash });
     }
 }
 

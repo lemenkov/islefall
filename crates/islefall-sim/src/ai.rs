@@ -10,6 +10,7 @@ use crate::grid::Cell;
 use crate::pieces::{Piece, PieceQueue};
 use crate::rules::TypeRules;
 use crate::script::Scripts;
+use serde::{Deserialize, Serialize};
 use crate::unit::Task;
 use crate::world::{DropError, World};
 
@@ -19,6 +20,7 @@ pub struct AiKit {
     pub generator: (String, TypeRules),
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Ai {
     pub owner: u8,
     /// Where the bridges are heading, usually the enemy altar.
@@ -326,3 +328,12 @@ mod tests {
     }
 }
 
+/// The opponents' state as bytes, for a snapshot: their counters and piece
+/// queues live outside the world, and a rejoining player needs them too.
+pub fn encode_ais(ais: &[Ai]) -> Vec<u8> {
+    postcard::to_stdvec(ais).unwrap_or_default()
+}
+
+pub fn decode_ais(bytes: &[u8]) -> Result<Vec<Ai>, String> {
+    postcard::from_bytes(bytes).map_err(|e| format!("opponents: {e}"))
+}

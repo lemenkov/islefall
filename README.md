@@ -152,8 +152,9 @@ ISLEFALL_JOIN=host:7777 ISLEFALL_NAME=Peter cargo run --release
 The game starts once every player has connected (two by default; a
 `server.toml` argument sets `bind`, `turn_ticks`, `min_players`,
 `max_players` and `hash_every_turns`). Clients report world hashes and the
-server tells everyone if they ever disagree. `RUST_LOG=debug` makes the
-server log every hash check and connection. `docs/NETWORK.md` explains
+server tells everyone if they ever disagree. A player who drops can come
+back under the same name and is handed the world by another player.
+`RUST_LOG=debug` makes the server log every hash check and connection. `docs/NETWORK.md` explains
 how the command recording underpins this.
 
 ## Inspecting the data

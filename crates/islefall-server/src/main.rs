@@ -58,6 +58,12 @@ struct Game {
     /// Hashes reported per turn, by player.
     hashes: BTreeMap<u64, BTreeMap<u8, u64>>,
     next_id: u8,
+    /// Players who left a running game, by name, keeping their number for
+    /// when they come back.
+    gone: Vec<(String, u8)>,
+    /// Players who rejoined and wait for a snapshot from another.
+    waiting: Vec<u8>,
+    map: String,
 }
 
 impl Game {
@@ -151,9 +157,10 @@ async fn serve(stream: TcpStream, game: Arc<Mutex<Game>>, cfg: ServerConfig) {
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMsg>();
     let id = {
         let mut g = game.lock().await;
+        let returning = g.gone.iter().position(|(n, _)| *n == name).map(|k| g.gone.remove(k).1);
         let refusal = if protocol != PROTOCOL {
             Some(format!("protocol {protocol}, this server speaks {PROTOCOL}"))
-        } else if g.started {
+        } else if g.started && returning.is_none() {
             Some("the game has started".into())
         } else if g.players.len() >= cfg.max_players {
             Some("the game is full".into())
@@ -168,12 +175,34 @@ async fn serve(stream: TcpStream, game: Arc<Mutex<Game>>, cfg: ServerConfig) {
             let _ = islefall_net::send(&mut writer, &ServerMsg::Reject(why)).await;
             return;
         }
-        let id = g.next_id;
-        g.next_id += 1;
-        g.players.push(Player { info: PlayerInfo { id, name: name.clone(), ready: false }, tx, data_hash, map });
+        let id = match returning {
+            Some(id) => id,
+            None => {
+                let id = g.next_id;
+                g.next_id += 1;
+                id
+            }
+        };
+        let ready = g.started;
+        g.players.push(Player { info: PlayerInfo { id, name: name.clone(), ready }, tx, data_hash, map });
         let _ = islefall_net::send(&mut writer, &ServerMsg::Welcome { player: id, turn_ticks: cfg.turn_ticks, hash_every_turns: cfg.hash_every_turns }).await;
         let lobby = g.lobby();
         g.broadcast(&lobby);
+        if g.started {
+            // Back into a running game: the world comes from whoever is
+            // still playing; the turns from now on reach the newcomer
+            // directly and wait on their side for it.
+            let _ = islefall_net::send(&mut writer, &ServerMsg::Resume { map: g.map.clone() }).await;
+            let donor = g.players.iter().find(|p| p.info.id != id).map(|p| (p.info.id, p.tx.clone()));
+            match donor {
+                Some((donor, tx)) => {
+                    let _ = tx.send(ServerMsg::SnapshotRequest);
+                    g.waiting.push(id);
+                    info!(player = id, donor, "rejoined; snapshot requested");
+                }
+                None => info!(player = id, "rejoined a game nobody else is in; nothing to resume from"),
+            }
+        }
         id
     };
     info!(player = id, %name, "joined");
@@ -202,6 +231,7 @@ async fn serve(stream: TcpStream, game: Arc<Mutex<Game>>, cfg: ServerConfig) {
                     let map = g.players[0].map.clone();
                     info!(%map, players = g.players.len(), "starting");
                     g.started = true;
+                    g.map = map.clone();
                     g.broadcast(&ServerMsg::Start { map });
                 }
             }
@@ -232,9 +262,22 @@ async fn serve(stream: TcpStream, game: Arc<Mutex<Game>>, cfg: ServerConfig) {
                     let _ = p.tx.send(ServerMsg::Pong(n));
                 }
             }
+            ClientMsg::Snapshot { turn, world, ais } => {
+                let waiting = std::mem::take(&mut g.waiting);
+                info!(donor = id, turn, bytes = world.len(), to = ?waiting, "snapshot relayed");
+                for w in waiting {
+                    if let Some(p) = g.players.iter().find(|p| p.info.id == w) {
+                        let _ = p.tx.send(ServerMsg::Snapshot { turn, world: world.clone(), ais: ais.clone() });
+                    }
+                }
+            }
         }
     }
     let mut g = game.lock().await;
+    if g.started {
+        g.gone.push((name.clone(), id));
+    }
+    g.waiting.retain(|&w| w != id);
     g.players.retain(|p| p.info.id != id);
     g.broadcast(&ServerMsg::Left(id));
     let lobby = g.lobby();

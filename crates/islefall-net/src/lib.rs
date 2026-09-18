@@ -22,7 +22,7 @@ use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 pub use islefall_sim::Command;
 
 /// Bumped whenever a message changes shape.
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 /// No frame may be longer than this; a snapshot of a large world is far under it.
 pub const MAX_FRAME: usize = 16 << 20;
 
@@ -44,6 +44,9 @@ pub enum ClientMsg {
     /// The client's world hash after applying `turn`, for desync checks.
     Hash { turn: u64, hash: u64 },
     Ping(u64),
+    /// The world (and the opponents' state) as it stands before `turn`,
+    /// sent when the server asks for one on behalf of a rejoining player.
+    Snapshot { turn: u64, world: Vec<u8>, ais: Vec<u8> },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -58,6 +61,13 @@ pub enum ServerMsg {
     Desync { turn: u64, hashes: Vec<(u8, u64)> },
     Left(u8),
     Pong(u64),
+    /// To a player who rejoined a running game: it is on, hold every turn
+    /// until the snapshot comes.
+    Resume { map: String },
+    /// Send a snapshot for a rejoining player.
+    SnapshotRequest,
+    /// The world before `turn`; apply the held turns from there on.
+    Snapshot { turn: u64, world: Vec<u8>, ais: Vec<u8> },
 }
 
 /// Postcard bytes of a message, checked against [`MAX_FRAME`].
