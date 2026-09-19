@@ -21,7 +21,7 @@ use thiserror::Error;
 /// Largest atlas edge we are willing to build.
 const MAX_ATLAS_EDGE: u32 = 8192;
 /// Gap between packed blocks, to keep nearest-neighbour sampling clean.
-const PADDING: u32 = 1;
+const PADDING: u32 = 2;
 
 /// Where one frame lives in the atlas and how to anchor it.
 #[derive(Clone, Copy, Debug)]
@@ -81,10 +81,11 @@ fn pack(sizes: &[UVec2]) -> Result<(Vec<URect>, u32, u32), AtlasError> {
                 fits = false;
                 break;
             };
-            let (x, y) = (a.rectangle.min.x as u32, a.rectangle.min.y as u32);
+            // The block sits a pixel in, leaving room for its extruded border.
+            let (x, y) = (a.rectangle.min.x as u32 + 1, a.rectangle.min.y as u32 + 1);
             rects.push(URect::new(x, y, x + s.x, y + s.y));
-            width = width.max(x + s.x);
-            height = height.max(y + s.y);
+            width = width.max(x + s.x + 1);
+            height = height.max(y + s.y + 1);
         }
         if fits {
             return Ok((rects, width, height));
@@ -93,6 +94,34 @@ fn pack(sizes: &[UVec2]) -> Result<(Vec<URect>, u32, u32), AtlasError> {
             return Err(AtlasError::TooLarge { width: edge, height: edge });
         }
         edge = (edge + edge / 2).min(MAX_ATLAS_EDGE);
+    }
+}
+
+/// Repeat a block's edge pixels into the one-pixel border round it, so a
+/// tile sampled exactly on its edge still reads its own colour and not
+/// the transparent gutter (which showed as hair-thin seams of sky between
+/// ground tiles).
+fn extrude(rgba: &mut [u8], width: u32, height: u32, rect: URect) {
+    let at = |x: u32, y: u32| ((y * width + x) * 4) as usize;
+    let copy = |rgba: &mut [u8], from: (u32, u32), to: (u32, u32)| {
+        if to.0 < width && to.1 < height {
+            let (a, b) = (at(from.0, from.1), at(to.0, to.1));
+            let px = [rgba[a], rgba[a + 1], rgba[a + 2], rgba[a + 3]];
+            rgba[b..b + 4].copy_from_slice(&px);
+        }
+    };
+    if rect.is_empty() || rect.min.x == 0 || rect.min.y == 0 {
+        return;
+    }
+    for x in rect.min.x..rect.max.x {
+        copy(rgba, (x, rect.min.y), (x, rect.min.y - 1));
+        copy(rgba, (x, rect.max.y - 1), (x, rect.max.y));
+    }
+    for y in rect.min.y - 1..=rect.max.y {
+        if y < height {
+            copy(rgba, (rect.min.x, y), (rect.min.x - 1, y));
+            copy(rgba, (rect.max.x - 1, y), (rect.max.x, y));
+        }
     }
 }
 
@@ -131,6 +160,7 @@ pub fn build_atlas(shp: &ShapeFile, palette: &Palette, offsets: &[usize]) -> Res
                 rgba[o..o + 4].copy_from_slice(&[r, g, b, 255]);
             }
         }
+        extrude(&mut rgba, width, height, *rect);
         infos.push(FrameInfo {
             size: UVec2::new(fr.width as u32, fr.height as u32),
             hotspot: Vec2::new(
@@ -145,7 +175,8 @@ pub fn build_atlas(shp: &ShapeFile, palette: &Palette, offsets: &[usize]) -> Res
         TextureDimension::D2,
         rgba,
         TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
+        // Kept on the CPU too: the construction cloud is cut out of these pixels.
+        RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
     );
     image.sampler = ImageSampler::nearest();
     Ok(ShapeAtlas { image, layout, frames: infos })
@@ -180,7 +211,8 @@ pub fn build_sheet_atlases(pic: &Picture, sheet: &Sheet) -> Result<(ShapeAtlas, 
             TextureDimension::D2,
             pic.rgba.clone(),
             TextureFormat::Rgba8UnormSrgb,
-            RenderAssetUsages::RENDER_WORLD,
+            // Kept on the CPU too: the construction cloud is cut out of these pixels.
+        RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
         );
         image.sampler = ImageSampler::nearest();
         image
