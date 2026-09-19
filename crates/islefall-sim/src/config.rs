@@ -59,6 +59,10 @@ pub struct Config {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FringeRules {
+    /// Filled cells at least this many cells from the island's edge are
+    /// drawn with the terrain scrambler's core pieces; 0 never uses them.
+    #[serde(default = "default_core_depth")]
+    pub core_depth: i32,
     #[serde(default = "default_fringe_kind")]
     pub kind: String,
     /// Fringe label by island piece label (the `isle` type's).
@@ -73,6 +77,10 @@ pub struct FringeRules {
     /// Which stalag frame: the last has no player-colour apron.
     #[serde(default = "default_stalag_frame")]
     pub stalag_frame: usize,
+}
+
+fn default_core_depth() -> i32 {
+    2
 }
 
 impl Default for FringeRules {
@@ -335,6 +343,13 @@ pub struct Projectiles {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Animation {
+    /// A structure under construction is drawn as its own outline filled
+    /// with this type's first frame (the original's grey cloud), the
+    /// picture coming through in this many steps as the stream builds it.
+    #[serde(default = "default_construction_cloud")]
+    pub construction_cloud: String,
+    #[serde(default = "default_construction_stages")]
+    pub construction_stages: u32,
     /// Frames with this label loop while the structure stands.
     pub idle_label: String,
     /// Labels of a structure's looks by level, Level One first (a
@@ -379,6 +394,13 @@ pub struct Animation {
     pub ground_label: Option<String>,
     #[serde(default)]
     pub ground_order: Vec<String>,
+}
+
+fn default_construction_cloud() -> String {
+    "mcloud".into()
+}
+fn default_construction_stages() -> u32 {
+    16
 }
 
 fn default_cardinal_order() -> Vec<String> {
@@ -751,6 +773,14 @@ pub enum EffectKind {
 #[serde(deny_unknown_fields)]
 pub struct Construction {
     pub power_per_rate: f64,
+    /// The `constructionRate` of a type that costs something and names
+    /// none (the buildings: a Workshop is seen rising in the original).
+    #[serde(default = "default_construction_rate")]
+    pub default_rate: f64,
+}
+
+fn default_construction_rate() -> f64 {
+    10.0
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

@@ -52,6 +52,7 @@ variables:
 | `ISLEFALL_CAMPAIGN` | Set to anything: go on with the campaign at the first mission not done yet (see The campaign). |
 | `ISLEFALL_MISSION` | Play that mission (`tutorial1`, `thewarbegins`, ...); `fortdump campaign` lists them. |
 | `ISLEFALL_DIFFICULTY` | `easy`, `normal` (the default) or `hard`, for the campaign's later chapters. |
+| `ISLEFALL_POWER` | Start with this much Storm Power, whatever the map or mission grants. |
 | `ISLEFALL_PLAYERS` | How many players a random map is made for. |
 | `ISLEFALL_MAP_EXPORT` | Writes whatever map was loaded as a map file of our own (`file.toml`). |
 | `ISLEFALL_MODE` | `viewer` browses the sprites instead of playing (see below). |

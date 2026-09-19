@@ -196,7 +196,8 @@ impl TypeRules {
             hp_per_sec,
         )?;
         let cost = def.get_i64("cost").unwrap_or(0).clamp(0, i32::MAX as i64);
-        let build_seconds = scripts.construction_seconds(cost, def.get_f64("constructionRate").unwrap_or(0.0), cfg.construction.power_per_rate)?.max(0.0);
+        let rate = def.get_f64("constructionRate").unwrap_or(if cost > 0 { cfg.construction.default_rate } else { 0.0 });
+        let build_seconds = scripts.construction_seconds(cost, rate, cfg.construction.power_per_rate)?.max(0.0);
         let refresh_seconds = scripts.refresh_seconds(cost, level, cfg.production.refresh_rate(), cfg.production.refresh_min_seconds)?.max(0.0);
         let air_damage_per_shot = match air_attack {
             Some(a) if a.air_damage > 0 => scripts.damage_per_shot(a.air_damage as i64, delay)?,

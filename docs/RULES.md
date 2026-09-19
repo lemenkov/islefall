@@ -409,6 +409,13 @@ the manual gives none). The panel shows the seconds in place of the
 price; every player, the computer ones included, waits the same way.
 Build time is the shell's construction below.
 
+A structure under construction is drawn as the original drew it: its
+own outline filled with grey cloud (the `mcloud` type's first frame,
+`animation.construction_cloud`), the real picture coming through from
+the bottom right in `animation.construction_stages` steps as the stream
+builds it, with the sparkles on top. How the original ordered the reveal
+is not known; the diagonal with a ragged front is Islefall's.
+
 ## The opponent
 
 A computer player follows the same rules as you: its drops cost Storm
@@ -491,6 +498,15 @@ is a player; a player whose last High Priest is sacrificed is out, and
 when one player remains of two or more, that player has won. The game
 keeps running afterwards. Nothing else ends a game: losing the Temple or
 altar does not.
+
+## Island ground
+
+The island tile set holds, besides the numbered filled and rim pieces,
+36 more filled textures per theme numbered 0, which its comments call the
+core pieces of the island terrain scrambler. Islefall draws filled cells
+at least `fringe.core_depth` cells from the island's edge with them and
+keeps the numbered filled tiles nearer the rim, which is a reading of
+the name, not a known rule.
 
 ## Knowledge
 

@@ -208,6 +208,10 @@ geyser_stock_from_cost = true
 # (guess: a 400-cost Sun Cannon at rate 10 stands in 8 seconds).
 [construction]
 power_per_rate = 5.0
+# The rate of a type that costs something and names no `constructionRate`
+# (the buildings; the original shows a Workshop rising, so not "a moment"):
+# a 600-cost Workshop stands in 12 seconds.
+default_rate = 10.0
 
 [combat]
 # Cells around an exploding structure that take damage and bridge shock (guess).
@@ -288,6 +292,10 @@ dir = "sprites"
 # three-by-three island (frame 8 is the one without a player's apron).
 [fringe]
 kind = "fringe"
+# The island set's "terrain scrambler": filled ground at least this many
+# cells from an island's edge is drawn with the theme's core pieces (36
+# more textures), the plain filled tiles staying near the rim.
+core_depth = 2
 pieces = { EI = "EA", IO = "IA", HN = "HA", AB = "AB", AE = "AE" }
 hang = 3
 stalag = "islandstalag"
@@ -330,6 +338,12 @@ island_label_size = 11.0
 # rocks, tall clumps; a Temple has three layouts). `tag_flags` mark a
 # frame's role, not its look, and are ignored when grouping.
 [animation]
+# Under construction a structure is its own outline filled with the
+# original's grey cloud (the `mcloud` type's first frame), the picture
+# coming through from the bottom right in this many steps as the stream
+# builds it.
+construction_cloud = "mcloud"
+construction_stages = 16
 idle_label = "A"
 # A Workshop's `A`, `B` and `C` frames are its Levels One to Three.
 levels = ["A", "B", "C"]

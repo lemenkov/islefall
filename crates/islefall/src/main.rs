@@ -1140,7 +1140,12 @@ fn main() {
         Some(c) => c.fort.clone(),
         None => std::env::var("ISLEFALL_MAP").unwrap_or_else(|_| "demo".into()),
     };
-    let map = load_map(&data, &cfg, &scripts, &install, &map_name, campaign.as_ref().map(|c| &c.mission)).unwrap_or_else(|e| fail(e));
+    let mut map = load_map(&data, &cfg, &scripts, &install, &map_name, campaign.as_ref().map(|c| &c.mission)).unwrap_or_else(|e| fail(e));
+    // A purse of your own choosing, whatever the map or mission grants.
+    if let Some(power) = std::env::var("ISLEFALL_POWER").ok().and_then(|p| p.trim().parse::<i32>().ok()) {
+        info!("starting with {power} Storm Power instead of {}", map.start_power);
+        map.start_power = power;
+    }
     if let Ok(out) = std::env::var("ISLEFALL_MAP_EXPORT") {
         match std::fs::write(&out, map.to_toml()) {
             Ok(()) => info!("wrote the map as {out}"),
@@ -1225,6 +1230,7 @@ fn main() {
         paused: campaign.is_some(),
     })
     .insert_resource(CampaignState(campaign))
+    .init_resource::<ConstructionCache>()
     .add_systems(Startup, setup)
     .add_systems(Update, window_icon)
     .add_systems(Startup, move |mut commands: Commands, game: Res<GameData>| {
@@ -3229,16 +3235,144 @@ fn sync_structures(
     }
 }
 
-/// A shell under construction shows through until its stream has built it.
-fn tint_shells(sim: Res<Sim>, mut sprites: Query<(&StructureSprite, &mut Sprite)>) {
+/// The picture of a structure being built: its outline filled with
+/// cloud, the real pixels coming through as the stream builds it.
+#[derive(Component)]
+struct ConstructionSprite {
+    id: u32,
+    stage: u32,
+}
+
+/// Stage pictures already made, by structure type, frame and stage.
+#[derive(Resource, Default)]
+struct ConstructionCache(HashMap<(String, usize, u32), Handle<Image>>);
+
+/// The pixels of one atlas frame, if the atlas is still on the CPU.
+fn frame_pixels(images: &Assets<Image>, layouts: &Assets<TextureAtlasLayout>, image: &Handle<Image>, atlas: &TextureAtlas) -> Option<(UVec2, Vec<u8>)> {
+    let img = images.get(image)?;
+    let data = img.data.as_ref()?;
+    let rect = layouts.get(&atlas.layout)?.textures.get(atlas.index)?;
+    let (w, h) = (rect.width(), rect.height());
+    let stride = img.width() as usize * 4;
+    let mut out = Vec::with_capacity((w * h * 4) as usize);
+    for y in rect.min.y..rect.max.y {
+        let row = y as usize * stride + rect.min.x as usize * 4;
+        out.extend_from_slice(data.get(row..row + w as usize * 4)?);
+    }
+    Some((UVec2::new(w, h), out))
+}
+
+/// One stage of a construction picture: where the structure's frame is
+/// opaque, the real pixel if its place in the reveal order has come, else
+/// the cloud's. The order runs from the bottom right to the top left with
+/// a ragged front.
+fn construction_stage(size: UVec2, real: &[u8], cloud: (UVec2, &[u8]), share: f32) -> Vec<u8> {
+    let (w, h) = (size.x as usize, size.y as usize);
+    let (cw, ch) = (cloud.0.x.max(1) as usize, cloud.0.y.max(1) as usize);
+    let mut out = vec![0u8; w * h * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let i = (y * w + x) * 4;
+            if real[i + 3] == 0 {
+                continue;
+            }
+            // A cheap hash of the 3x3 block the pixel lies in roughens the front.
+            let (bx, by) = ((x / 3) as u32, (y / 3) as u32);
+            let n = (bx.wrapping_mul(0x9E37_79B1) ^ by.wrapping_mul(0x85EB_CA6B)).rotate_left(11).wrapping_mul(0x27D4_EB2F) >> 24;
+            let order = 1.0 - (x as f32 / w as f32 + y as f32 / h as f32) / 2.0 + (n as f32 / 255.0 - 0.5) * 0.25;
+            if order <= share * 1.25 - 0.125 {
+                out[i..i + 4].copy_from_slice(&real[i..i + 4]);
+            } else {
+                let c = ((y % ch) * cw + (x % cw)) * 4;
+                let px = cloud.1.get(c..c + 4).unwrap_or(&[128, 128, 128, 255]);
+                out[i] = px[0];
+                out[i + 1] = px[1];
+                out[i + 2] = px[2];
+                out[i + 3] = 255;
+            }
+        }
+    }
+    out
+}
+
+/// A structure under construction is hidden behind its construction
+/// picture, which steps through its stages as the build goes on and goes
+/// when the structure stands (or falls).
+#[allow(clippy::too_many_arguments)]
+fn tint_shells(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    mut lib: ResMut<ShapeLibrary>,
+    mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    mut cache: ResMut<ConstructionCache>,
+    mut sprites: Query<(&StructureSprite, &world::StructureKey, &mut Sprite, &Transform, &Anchor, Option<&world::StructureBase>), Without<ConstructionSprite>>,
+    shown: Query<(Entity, &ConstructionSprite)>,
+) {
     let w = sim.world();
-    for (s, mut sprite) in &mut sprites {
+    let stages = data.cfg.animation.construction_stages.max(1);
+    // (structure id) -> (kind, image, atlas, place, anchor), from the picture underneath if there is one.
+    let mut building: HashMap<u32, (String, Handle<Image>, TextureAtlas, Vec3, Anchor, bool)> = HashMap::new();
+    for (s, key, mut sprite, tf, anchor, base) in &mut sprites {
         let Some(st) = w.structures.get(s.0) else { continue };
-        let alpha = if st.complete() { 1.0 } else { 0.3 + 0.7 * st.progress() };
-        let wanted = Color::srgba(1.0, 1.0, 1.0, alpha);
+        let wanted = Color::srgba(1.0, 1.0, 1.0, if st.complete() { 1.0 } else { 0.0 });
         if sprite.color != wanted {
             sprite.color = wanted;
         }
+        if st.complete() {
+            continue;
+        }
+        let Some(atlas) = sprite.texture_atlas.clone() else { continue };
+        let is_base = base.is_some();
+        if building.get(&key.id).is_none_or(|b| is_base && !b.5) {
+            building.insert(key.id, (key.kind.clone(), sprite.image.clone(), atlas, tf.translation, *anchor, is_base));
+        }
+    }
+    let progress: HashMap<u32, f32> = w.structures.iter().filter(|s| !s.complete()).map(|s| (s.id, s.progress())).collect();
+    let mut have: HashMap<u32, u32> = HashMap::new();
+    for (e, c) in &shown {
+        let stage = progress.get(&c.id).map(|p| (p * stages as f32) as u32);
+        if stage == Some(c.stage) {
+            have.insert(c.id, c.stage);
+        } else {
+            commands.entity(e).despawn();
+        }
+    }
+    if building.is_empty() {
+        return;
+    }
+    let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+    let cloud = lib.get_or_load(&data.install, palette, &data.cfg.animation.construction_cloud, &mut images, &mut layouts).map(|sh| (sh.image.clone(), TextureAtlas { layout: sh.layout.clone(), index: 0 }));
+    let cloud = cloud.and_then(|(img, atlas)| frame_pixels(&images, &layouts, &img, &atlas));
+    for (id, (kind, image, atlas, at, anchor, _)) in building {
+        let Some(&p) = progress.get(&id) else { continue };
+        let stage = (p * stages as f32) as u32;
+        if have.contains_key(&id) {
+            continue;
+        }
+        let key = (kind, atlas.index, stage);
+        let handle = match cache.0.get(&key) {
+            Some(h) => h.clone(),
+            None => {
+                let Some((size, real)) = frame_pixels(&images, &layouts, &image, &atlas) else { continue };
+                let grey = [128u8, 128, 128, 255];
+                let cloud_ref = cloud.as_ref().map(|(s, d)| (*s, d.as_slice())).unwrap_or((UVec2::ONE, &grey[..]));
+                let rgba = construction_stage(size, &real, cloud_ref, stage as f32 / stages as f32);
+                let mut img = Image::new(
+                    bevy::render::render_resource::Extent3d { width: size.x, height: size.y, depth_or_array_layers: 1 },
+                    bevy::render::render_resource::TextureDimension::D2,
+                    rgba,
+                    bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                    bevy::asset::RenderAssetUsages::RENDER_WORLD,
+                );
+                img.sampler = bevy::image::ImageSampler::nearest();
+                let h = images.add(img);
+                cache.0.insert(key, h.clone());
+                h
+            }
+        };
+        commands.spawn((Sprite::from_image(handle), anchor, Transform::from_translation(at + Vec3::new(0.0, 0.0, 0.002)), ConstructionSprite { id, stage }));
     }
 }
 

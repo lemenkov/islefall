@@ -103,6 +103,20 @@ impl Piece {
     }
 }
 
+/// The "core pieces" of the island terrain scrambler: the extra filled
+/// ground of one theme, for cells well inside an island (the numbered
+/// filled frames then lie nearer the edge). In the file they are the `AA`
+/// frames numbered 0, in theme order.
+pub fn core_frames(def: &TypeDef, theme: Theme) -> Vec<usize> {
+    let label = Piece::Filled.label();
+    let all: Vec<usize> = def.frames.iter().enumerate().filter(|(_, f)| f.animation.eq_ignore_ascii_case(label) && f.number == 0).map(|(i, _)| i).collect();
+    let per = all.len() / Theme::ALL.len();
+    if per == 0 {
+        return Vec::new();
+    }
+    all[theme.index() * per..(theme.index() + 1) * per].to_vec()
+}
+
 /// Frame indices (into `def.frames`) of one piece for one theme.
 pub fn frames(def: &TypeDef, theme: Theme, piece: Piece) -> Vec<usize> {
     let label = piece.label();

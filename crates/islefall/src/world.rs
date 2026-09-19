@@ -185,12 +185,16 @@ pub fn spawn_island(
     let world_grid = cfg.grid.clone();
     let Some(isle_def) = install.type_def("isle") else { return };
     let mut by_piece = HashMap::new();
+    let core = if platform { Vec::new() } else { isle::core_frames(isle_def, theme) };
     let Some(shape) = lib.get_or_load(install, palette, "isle", images, layouts) else { return };
     let mut pieces = Vec::new();
     for cell in island.cells() {
         let Some(piece) = island.piece_at(cell) else { continue };
         pieces.push((cell, piece));
-        let frames = by_piece.entry(piece).or_insert_with(|| isle::frames(isle_def, theme, piece));
+        // Well inside the island the ground is the scrambler's core pieces.
+        let depth = cfg.fringe.core_depth;
+        let inland = depth > 0 && piece == isle::Piece::Filled && (-depth..=depth).all(|dy| (-depth..=depth).all(|dx| island.contains(cell.offset(dx, dy))));
+        let frames = if inland && !core.is_empty() { &core } else { &*by_piece.entry(piece).or_insert_with(|| isle::frames(isle_def, theme, piece)) };
         if frames.is_empty() {
             continue;
         }
