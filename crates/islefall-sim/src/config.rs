@@ -870,10 +870,31 @@ pub struct PieceDef {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Bridges {
+    /// An unattached bridge holds sound this long, then cracks (the
+    /// manual: it "will eventually crack, then crumble and fall").
+    #[serde(default = "default_hold_seconds")]
+    pub hold_seconds: f64,
+    /// Cracked, it holds this long before the first section falls.
     pub crumble_seconds: f64,
+    /// Then it falls section by section from the break outwards: this
+    /// many cells at a time, this long apart.
+    #[serde(default = "default_section_cells")]
+    pub section_cells: u32,
+    #[serde(default = "default_section_seconds")]
+    pub section_seconds: f64,
     pub piece_slots: usize,
     pub queue_seed: u64,
     pub pieces: Vec<PieceDef>,
+}
+
+fn default_hold_seconds() -> f64 {
+    3.0
+}
+fn default_section_cells() -> u32 {
+    3
+}
+fn default_section_seconds() -> f64 {
+    0.6
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

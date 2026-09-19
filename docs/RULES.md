@@ -125,8 +125,14 @@ From the manual and the tutorial texts:
   bridge. Islefall reads "open end" as a bridge cell with exactly one
   connection.
 - A bridge with no connection to an island cracks from its own weight and
-  then crumbles. Islefall cracks unsupported cells at once and drops them
-  four seconds later; platforms and the structures on them fall immediately.
+  then crumbles (the manual: it "will eventually crack, then crumble and
+  fall under its own weight"). Islefall: a stretch of bridge that loses
+  its support holds sound for `bridges.hold_seconds`, cracks, holds
+  cracked for `crumble_seconds`, and then falls section by section from
+  the break outwards, `section_cells` cells every `section_seconds`,
+  taking whatever stands on each section as it goes. Support that comes
+  back in time saves what has not fallen (the cracks stay). Platforms and
+  the structures on them fall immediately.
 - Destroying a bridge cell destroys adjacent cracked cells too (the manual's
   "shock"). A structure destroyed nearby explodes: bridge cells within
   `combat.explosion_radius` crack, and cracked ones fall (the manual's

@@ -247,6 +247,9 @@ pub struct World {
     pub units: Vec<Unit>,
     /// Bridge cells that lost their support, with ticks left before they crumble.
     pub doomed: BTreeMap<Cell, u32>,
+    /// Unsupported bridge cells still sound, with ticks left before they crack.
+    #[serde(default)]
+    pub cracking: BTreeMap<Cell, u32>,
     /// The pieces on offer.
     pub queue: PieceQueue,
     /// Other players' piece queues, made on first use.
@@ -326,6 +329,7 @@ impl World {
             next_structure_id: 1,
             units: Vec::new(),
             doomed: BTreeMap::new(),
+            cracking: BTreeMap::new(),
             queue,
             queues: BTreeMap::new(),
             powers: vec![0; players],
@@ -682,6 +686,8 @@ impl World {
         }
         self.bridge_version += 1;
         self.emit(EventKind::PiecePlaced, "", cells[0], owner);
+        // A piece may join a hanging stretch back to standing ground.
+        self.settle();
         Ok(())
     }
 
@@ -758,21 +764,49 @@ impl World {
     /// structures and units on them. Returns how many cells fell now.
     pub fn settle(&mut self) -> usize {
         let reached = self.supported();
-        let mut changed: Option<Cell> = None;
-        let crumble = self.cfg.ticks(self.cfg.bridges.crumble_seconds);
-        for (c, state) in self.bridges.iter_mut() {
-            if !reached.contains(c) && !self.doomed.contains_key(c) {
-                self.doomed.insert(*c, crumble);
-                if *state != BridgeState::Hard {
-                    *state = BridgeState::Cracked;
+        // Support that came back saves what has not fallen yet.
+        self.doomed.retain(|c, _| !reached.contains(c));
+        self.cracking.retain(|c, _| !reached.contains(c));
+        // What has just lost its support holds for a while, cracks, holds
+        // again, and then falls section by section from the break outwards.
+        let mut fresh: BTreeSet<Cell> = self.bridges.keys().filter(|c| !reached.contains(c) && !self.doomed.contains_key(c)).copied().collect();
+        let b = &self.cfg.bridges;
+        let (hold, crumble, step) = (self.cfg.ticks(b.hold_seconds), self.cfg.ticks(b.crumble_seconds), self.cfg.ticks(b.section_seconds));
+        let per_section = b.section_cells.max(1);
+        while let Some(&start) = fresh.iter().next() {
+            // One detached stretch of bridge.
+            let mut part = vec![start];
+            fresh.remove(&start);
+            let mut k = 0;
+            while k < part.len() {
+                for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+                    let n = part[k].offset(dx, dy);
+                    if fresh.remove(&n) {
+                        part.push(n);
+                    }
                 }
-                changed.get_or_insert(*c);
+                k += 1;
             }
-        }
-        if let Some(c) = changed {
-            self.bridge_version += 1;
-            let owner = self.bridge_owners.get(&c).copied().unwrap_or(0);
-            self.emit(EventKind::BridgeCracked, "", c, owner);
+            // The break is where the stretch comes nearest to standing ground.
+            let gap = |c: &Cell| reached.iter().map(|r| (r.x - c.x).abs() + (r.y - c.y).abs()).min().unwrap_or(0);
+            let nearest = part.iter().map(gap).min().unwrap_or(0);
+            let mut order: BTreeMap<Cell, u32> = part.iter().filter(|c| gap(c) == nearest).map(|c| (*c, 0)).collect();
+            let mut queue: VecDeque<Cell> = order.keys().copied().collect();
+            while let Some(c) = queue.pop_front() {
+                let d = order[&c];
+                for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+                    let n = c.offset(dx, dy);
+                    if part.contains(&n) && !order.contains_key(&n) {
+                        order.insert(n, d + 1);
+                        queue.push_back(n);
+                    }
+                }
+            }
+            for c in part {
+                let section = order.get(&c).copied().unwrap_or(0) / per_section;
+                self.cracking.insert(c, hold);
+                self.doomed.insert(c, hold + crumble + section * step);
+            }
         }
         let falling: Vec<Cell> = self.platforms.cells().filter(|c| !reached.contains(c)).collect();
         if falling.is_empty() {
@@ -837,6 +871,25 @@ impl World {
 
     /// Advance crumbling: doomed cells count down and fall, taking units with them.
     fn crumble(&mut self) {
+        // First the crack, once the hold is over.
+        let mut cracked: Option<Cell> = None;
+        for (c, t) in self.cracking.iter_mut() {
+            *t = t.saturating_sub(1);
+            if *t == 0 {
+                if let Some(state) = self.bridges.get_mut(c) {
+                    if *state == BridgeState::Normal {
+                        *state = BridgeState::Cracked;
+                        cracked.get_or_insert(*c);
+                    }
+                }
+            }
+        }
+        self.cracking.retain(|_, t| *t > 0);
+        if let Some(c) = cracked {
+            self.bridge_version += 1;
+            let owner = self.bridge_owners.get(&c).copied().unwrap_or(0);
+            self.emit(EventKind::BridgeCracked, "", c, owner);
+        }
         let mut fell = Vec::new();
         for (c, t) in self.doomed.iter_mut() {
             *t = t.saturating_sub(1);
@@ -851,6 +904,7 @@ impl World {
         self.emit(EventKind::BridgeFell, "", fell[0], owner);
         for c in &fell {
             self.doomed.remove(c);
+            self.cracking.remove(c);
             self.bridges.remove(c);
         }
         self.prune_bridge_owners();
@@ -2578,17 +2632,74 @@ mod tests {
         assert!(w.destroy_bridge(Cell::new(9, 1)));
         assert!(!w.is_bridge(Cell::new(10, 1)), "cracked neighbour collapsed with the shock");
         assert_eq!(w.bridge_state(Cell::new(11, 1)), Some(BridgeState::Hard), "hard cells do not crack");
-        assert_eq!(w.bridge_state(Cell::new(12, 1)), Some(BridgeState::Cracked), "unsupported cells crack first");
+        assert_eq!(w.bridge_state(Cell::new(12, 1)), Some(BridgeState::Normal), "unsupported cells hold sound for a while");
         assert!(w.is_bridge(Cell::new(8, 1)), "still attached to the island");
-        assert!(w.units[far].alive, "the golem stands on a cracked bridge for now");
-        for _ in 0..CRUMBLE_TICKS + 1 {
+        let (hold, crumble, step) = (w.cfg.ticks(w.cfg.bridges.hold_seconds), CRUMBLE_TICKS, w.cfg.ticks(w.cfg.bridges.section_seconds));
+        for _ in 0..hold {
             w.step(&test_scripts());
         }
+        assert_eq!(w.bridge_state(Cell::new(12, 1)), Some(BridgeState::Cracked), "then they crack");
+        assert_eq!(w.bridge_state(Cell::new(11, 1)), Some(BridgeState::Hard), "hard cells still do not");
+        assert!(w.units[far].alive, "the golem stands on a cracked bridge for now");
+        for _ in 0..crumble {
+            w.step(&test_scripts());
+        }
+        // Three cells hang loose, (11..13, 1): one section, the break at (11, 1).
         assert!(!w.is_bridge(Cell::new(11, 1)), "hard but unsupported: it crumbled");
         assert!(!w.is_bridge(Cell::new(13, 1)));
         assert!(!w.units[far].alive, "the golem fell with the bridge");
+        let _ = step;
         assert!(!w.order_move(far, Cell::new(1, 1)), "dead units take no orders");
         assert!(w.doomed.is_empty());
+    }
+
+    #[test]
+    fn a_detached_bridge_falls_section_by_section_from_the_break() {
+        let scripts = test_scripts();
+        let mut w = world();
+        // Nine cells out from the island's east rim, then the first is blown.
+        for x in 8..17 {
+            assert!(w.place_bridge(Cell::new(x, 1)));
+        }
+        assert!(w.destroy_bridge(Cell::new(8, 1)));
+        let (hold, crumble, step) = (w.cfg.ticks(w.cfg.bridges.hold_seconds), CRUMBLE_TICKS, w.cfg.ticks(w.cfg.bridges.section_seconds));
+        assert_eq!(w.cfg.bridges.section_cells, 3);
+        let standing = |w: &World| (9..17).filter(|&x| w.is_bridge(Cell::new(x, 1))).collect::<Vec<i32>>();
+        for _ in 0..hold + crumble - 1 {
+            w.step(&scripts);
+        }
+        assert_eq!(standing(&w), (9..17).collect::<Vec<_>>(), "all eight still hang there, cracked");
+        w.step(&scripts);
+        assert_eq!(standing(&w), (12..17).collect::<Vec<_>>(), "the section next to the break goes first");
+        for _ in 0..step {
+            w.step(&scripts);
+        }
+        assert_eq!(standing(&w), (15..17).collect::<Vec<_>>(), "then the next");
+        for _ in 0..step {
+            w.step(&scripts);
+        }
+        assert!(standing(&w).is_empty(), "then the last");
+        assert!(w.doomed.is_empty() && w.cracking.is_empty());
+    }
+
+    #[test]
+    fn support_that_returns_saves_what_has_not_fallen() {
+        let scripts = test_scripts();
+        let mut w = world();
+        for x in 8..14 {
+            assert!(w.place_bridge(Cell::new(x, 1)));
+        }
+        assert!(w.destroy_bridge(Cell::new(8, 1)));
+        for _ in 0..w.cfg.ticks(w.cfg.bridges.hold_seconds) + 5 {
+            w.step(&scripts);
+        }
+        assert!(w.place_bridge(Cell::new(8, 1)), "the gap is bridged again");
+        w.settle();
+        for _ in 0..CRUMBLE_TICKS * 3 {
+            w.step(&scripts);
+        }
+        assert!((9..14).all(|x| w.is_bridge(Cell::new(x, 1))), "saved");
+        assert_eq!(w.bridge_state(Cell::new(10, 1)), Some(BridgeState::Cracked), "but the cracks stay");
     }
 
     #[test]
@@ -2614,6 +2725,10 @@ mod tests {
         assert!(w.destroy_bridge(Cell::new(8, 1)));
         assert!(w.platforms.is_empty(), "platform fell");
         assert!(w.structures.is_empty(), "cannon fell with it");
+        assert_eq!(w.bridge_state(Cell::new(9, 1)), Some(BridgeState::Normal), "it holds before it cracks");
+        for _ in 0..w.cfg.ticks(w.cfg.bridges.hold_seconds) {
+            w.step(&test_scripts());
+        }
         assert_eq!(w.bridge_state(Cell::new(9, 1)), Some(BridgeState::Cracked));
         for _ in 0..CRUMBLE_TICKS + 1 {
             w.step(&test_scripts());

@@ -169,8 +169,15 @@ bombiitwister = { kind = "summon", unit = "windflyer" }
 bombiiitwister = { kind = "summon", unit = "windflyer" }
 
 [bridges]
-# Seconds an unsupported bridge cell stays cracked before it crumbles.
+# The manual: an unattached bridge "will eventually crack, then crumble and
+# fall under its own weight". It holds sound for `hold_seconds`, cracks,
+# holds cracked for `crumble_seconds`, and then falls section by section
+# from the break outwards, `section_cells` cells every `section_seconds`.
+# The figures are guesses.
+hold_seconds = 3.0
 crumble_seconds = 4.0
+section_cells = 3
+section_seconds = 0.6
 # Pieces on offer in the Production window (the game allows 2, 4 or 6).
 piece_slots = 4
 # Seed of the player's piece queue.
