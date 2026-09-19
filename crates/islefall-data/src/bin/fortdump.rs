@@ -28,6 +28,8 @@ enum Command {
     List { archive: PathBuf },
     /// Draw a scenario's world table and list its fortresses.
     Show { archive: PathBuf, name: String },
+    /// List the campaign's chapters, their missions and the scenario each plays on.
+    Campaign { archive: PathBuf },
 }
 
 fn main() -> ExitCode {
@@ -42,6 +44,19 @@ fn main() -> ExitCode {
 
 fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
     match command {
+        Command::Campaign { archive } => {
+            let a = Archive::load(&archive)?;
+            for c in islefall_data::campaign::chapters(&a, islefall_data::campaign::Difficulty::Normal) {
+                println!("{} ({})", c.title, c.file);
+                for e in &c.missions {
+                    let m = islefall_data::mission::Mission::load(&a, &e.mission);
+                    let fort = m.as_ref().and_then(|m| m.fort_name(&e.mission, &a)).unwrap_or_else(|| "?".into());
+                    let pages = m.as_ref().map(|m| m.pages().len()).unwrap_or(0);
+                    println!("  {:<28} {:<26} on {:<22} {} pages", e.label, e.mission, fort, pages);
+                }
+            }
+            Ok(())
+        }
         Command::List { archive } => {
             let a = Archive::load(&archive)?;
             for (i, e) in a.entries().iter().enumerate() {

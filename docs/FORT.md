@@ -77,3 +77,20 @@ Sun's is the Residence.
 Where the original stacked buildings (its Temple rose from the altar,
 Capture The Priest's Workshop sits on its Temple), the map loader nudges
 a building to the nearest free cell and says so in the log.
+
+## Missions and the campaign
+
+A scenario is only the board. The mission that plays on it is a text
+file in the same archive, `<name>.english`: a `[Header]` of `key = value`
+lines (`loadFort`, `myStartMoney`, `myTech`, `aiTech`, `ai2StartMoney`
+and so on, `title`), then pages in a small markup, sections named by a
+letter, an optional number and a full stop (`[A.]`, `[A1.]`, `[B.]`),
+with `$Button=label,action,arg` lines (`Tell` opens a page, `DoNothing`
+closes the text, `MissionBegin` starts a mission, `LeaveBattle` leaves),
+and result sections tagged `[Succeeded]` or `[Failed]` together with
+what decided it (`[Succeeded][BadTeamDead]`). The chapters are menus,
+`offical<N>.english`, listing missions in order as
+`$Checked=label,MissionBegin,mission,...`; a second digit picks the
+difficulty (none easy, `1` normal, `2` hard). `fortdump campaign` prints
+the chapters, the missions and the scenario each plays on;
+`crates/islefall-data/src/mission.rs` and `campaign.rs` read them.

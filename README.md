@@ -12,8 +12,9 @@ and OpenTTD use their original games' assets. See `NOTICE`.
 
 Status: early development. The demo map is playable against three
 computer players, the original's campaign scenarios load, and players
-can meet over a network with a lobby. There is no campaign flow or start
-screen yet; `docs/ROADMAP.md` says what works and what comes next.
+can meet over a network with a lobby, and the campaign can be played
+mission after mission. There is no start screen yet; `docs/ROADMAP.md`
+says what works and what comes next.
 
 ## Building
 
@@ -48,6 +49,9 @@ variables:
 | `NETSTORM_DIR` | The NetStorm installation (required). |
 | `ISLEFALL_DATA` | Rules, scripts and maps directory (default `data/`); see `docs/MODDING.md`. |
 | `ISLEFALL_MAP` | A map from `maps/` (`demo`, `range`); a name that is no file loads that campaign scenario from the archive (`capturethepriest`, `bridgethegap`, ...; see `docs/FORT.md`); `random` or `random:<seed>` makes a battlefield up. |
+| `ISLEFALL_CAMPAIGN` | Set to anything: go on with the campaign at the first mission not done yet (see The campaign). |
+| `ISLEFALL_MISSION` | Play that mission (`tutorial1`, `thewarbegins`, ...); `fortdump campaign` lists them. |
+| `ISLEFALL_DIFFICULTY` | `easy`, `normal` (the default) or `hard`, for the campaign's later chapters. |
 | `ISLEFALL_PLAYERS` | How many players a random map is made for. |
 | `ISLEFALL_MAP_EXPORT` | Writes whatever map was loaded as a map file of our own (`file.toml`). |
 | `ISLEFALL_MODE` | `viewer` browses the sprites instead of playing (see below). |
@@ -79,6 +83,26 @@ The three computer players bridge towards your altar and drop shooters on
 the way. The islands are close enough for the cannons to reach their
 neighbours, so the fight is on from the start, though your home island
 lies just outside every reach. Sacrifice the enemy High Priest to win.
+
+## The campaign
+
+The original's campaign is read from your installation: five chapters,
+from the six lessons of Early Missions to Complete Victory.
+
+```sh
+ISLEFALL_CAMPAIGN=1 NETSTORM_DIR=~/games/NetStorm cargo run --release
+```
+
+starts the first mission you have not finished; `ISLEFALL_MISSION=tutorial1`
+plays a particular one. A mission opens on its briefing, the world
+standing still behind it: the page's own buttons turn its pages and
+start play, and lessons get a `Next page` button, since the original
+turned those pages itself as you got on. `F1` brings the last page back,
+`F2` lists every chapter and mission (click one to play it). When the
+enemy High Priests are sacrificed, or yours is, the mission says so and
+offers the next one or another try. Finished missions are remembered in
+`~/.local/state/islefall/campaign-done.txt`. Starting another mission
+restarts the game on it.
 
 ## Playing
 

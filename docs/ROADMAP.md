@@ -32,8 +32,13 @@ Snapshots save and load; replays record every command.
 **Network.** Lockstep over a relay server with hash checks, a lobby, and
 rejoining a running game under the same name.
 
+**Campaign.** The chapters and missions are read from the archive; a
+mission loads its scenario with the money and Knowledge its header
+grants, opens on its briefing, turns its pages, judges the end by the
+High Priests and offers the next mission, remembering what is done.
+
 **Project.** Apache-2.0 code, CC-BY-4.0 content, REUSE-compliant, an
-emblem, and 105 tests across the crates.
+emblem, and over a hundred tests across the crates.
 
 ## Next
 
@@ -44,11 +49,14 @@ In the order that changes the game most.
    the figures marked "guess" in `RULES.md` (spell damage, heal range,
    explosion radius, upgrade cost, refresh times) can only be set this
    way. Every finding becomes a rules change, not a code change.
-2. **Campaign flow.** The scenarios load one at a time by name. A
-   campaign needs the mission order, the briefing texts from the archive
-   (`.english` files), the Knowledge each mission grants, a win and loss
-   condition per mission, and a way to go on to the next. The exported
-   scenarios stay out of the repository.
+2. **The campaign's scripting.** The flow is in; what the missions'
+   texts ask of the engine is not: lessons whose pages turn when the
+   player has done the step, the timed sections (`[@120]`), goals other
+   than the enemy priests (`Ai2PriestSaved`, `Ai3TempleDead`), allies
+   (`myAllyList`), the opponents' habits (`aiAbility`,
+   `aiTimeBetweenMoves`, `aiCollectors`), `techAllowed`, `denySalvage`
+   and `moreGeysers`. A mission also restarts the game; loading one in
+   place needs the world torn down and built again.
 3. **A start screen.** Map choice, name, server address and the campaign
    are all environment variables today. A menu in the game is the first
    thing a newcomer meets.

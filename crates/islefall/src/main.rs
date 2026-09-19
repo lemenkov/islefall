@@ -531,6 +531,272 @@ impl Status {
 #[derive(Component)]
 struct Hud;
 
+/// A campaign mission in play: its text from the archive, the chapters
+/// it belongs to, what is done, and what the panel shows now.
+struct Campaign {
+    /// The mission text's name (`tutorial1`) and the scenario it plays on.
+    stem: String,
+    fort: String,
+    mission: islefall_data::mission::Mission,
+    chapters: Vec<islefall_data::campaign::Chapter>,
+    done: std::collections::BTreeSet<String>,
+    /// The page on show (`a.`), the mission list, or nothing.
+    view: CampaignView,
+    /// The verdict, once shown, so it is shown once.
+    judged: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CampaignView {
+    Closed,
+    Page(String),
+    Result(bool),
+    Missions,
+}
+
+#[derive(Resource)]
+struct CampaignState(Option<Campaign>);
+
+impl Campaign {
+    /// Where progress is kept: one finished mission name per line.
+    fn progress_path() -> PathBuf {
+        let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/state"))).unwrap_or_else(|| PathBuf::from("."));
+        base.join("islefall").join("campaign-done.txt")
+    }
+
+    fn read_done() -> std::collections::BTreeSet<String> {
+        std::fs::read_to_string(Campaign::progress_path()).map(|t| t.lines().map(|l| l.trim().to_ascii_lowercase()).filter(|l| !l.is_empty()).collect()).unwrap_or_default()
+    }
+
+    fn mark_done(&mut self) {
+        self.done.insert(self.stem.clone());
+        let path = Campaign::progress_path();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let text: String = self.done.iter().map(|m| format!("{m}\n")).collect();
+        if let Err(e) = std::fs::write(&path, text) {
+            warn!("cannot keep the campaign's progress in {}: {e}", path.display());
+        }
+    }
+
+    /// `ISLEFALL_MISSION=<name>` plays that mission; `ISLEFALL_CAMPAIGN`
+    /// goes on with the first one not done yet. `ISLEFALL_DIFFICULTY` is
+    /// easy, normal or hard.
+    fn from_env(install: &Installation) -> Option<Campaign> {
+        let named = std::env::var("ISLEFALL_MISSION").ok().map(|m| m.to_ascii_lowercase());
+        if named.is_none() && std::env::var_os("ISLEFALL_CAMPAIGN").is_none() {
+            return None;
+        }
+        let difficulty = std::env::var("ISLEFALL_DIFFICULTY").ok().and_then(|d| islefall_data::campaign::Difficulty::parse(&d)).unwrap_or_default();
+        let chapters = islefall_data::campaign::chapters(&install.archive, difficulty);
+        let done = Campaign::read_done();
+        let stem = named.or_else(|| chapters.iter().flat_map(|c| &c.missions).map(|e| e.mission.clone()).find(|m| !done.contains(m))).unwrap_or_else(|| fail("the campaign is finished: every mission is done (ISLEFALL_MISSION=<name> replays one)"));
+        let mission = islefall_data::mission::Mission::load(&install.archive, &stem).unwrap_or_else(|| fail(format!("no mission {stem}.english in the archive; `fortdump campaign` lists them")));
+        let fort = mission.fort_name(&stem, &install.archive).unwrap_or_else(|| fail(format!("mission {stem} names no scenario the archive holds")));
+        let first = mission.pages().into_iter().next();
+        info!("mission {stem} on {fort}: {}", mission.get("title").unwrap_or(""));
+        Some(Campaign { stem, fort, mission, chapters, done, view: first.map(CampaignView::Page).unwrap_or(CampaignView::Closed), judged: false })
+    }
+
+    /// The mission after this one in the chapters' order.
+    fn next(&self) -> Option<String> {
+        let all: Vec<&String> = self.chapters.iter().flat_map(|c| &c.missions).map(|e| &e.mission).collect();
+        let at = all.iter().position(|m| **m == self.stem)?;
+        all.get(at + 1).map(|m| (*m).clone())
+    }
+}
+
+/// Start the game again on another mission: the world is built once at
+/// start-up, so a new mission is a new process in this one's place.
+fn restart_on(mission: &str) -> ! {
+    let exe = std::env::current_exe().unwrap_or_else(|e| fail(format!("cannot find the game's own program: {e}")));
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(std::env::args_os().skip(1)).env("ISLEFALL_MISSION", mission).env_remove("ISLEFALL_MAP").env_remove("ISLEFALL_SCREENSHOT");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let e = cmd.exec();
+        fail(format!("cannot start {mission}: {e}"));
+    }
+    #[cfg(not(unix))]
+    {
+        match cmd.spawn() {
+            Ok(_) => std::process::exit(0),
+            Err(e) => fail(format!("cannot start {mission}: {e}")),
+        }
+    }
+}
+
+#[derive(Component)]
+struct CampaignPanel;
+
+/// What a click on the campaign panel does.
+#[derive(Component, Clone, Debug)]
+enum CampaignButton {
+    Open(String),
+    Close,
+    Begin(String),
+    Missions,
+    Leave,
+}
+
+/// The mission's text: briefing and lesson pages with the buttons the
+/// text asks for, the verdict when the mission is decided, and the list
+/// of missions. The world stands still while a page is open; `F1` opens
+/// the last page again, `F2` the missions.
+#[allow(clippy::too_many_arguments)]
+fn campaign_panel(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<CampaignState>,
+    mut viewer: ResMut<Viewer>,
+    sim: Res<Sim>,
+    player: Res<Player>,
+    data: Res<GameData>,
+    panels: Query<Entity, With<CampaignPanel>>,
+    clicks: Query<(&Interaction, &CampaignButton), Changed<Interaction>>,
+    mut shown: Local<Option<CampaignView>>,
+    mut last_page: Local<Option<String>>,
+) {
+    let Some(c) = state.0.as_mut() else { return };
+    for (i, b) in &clicks {
+        if *i != Interaction::Pressed {
+            continue;
+        }
+        match b {
+            CampaignButton::Open(page) => c.view = CampaignView::Page(page.to_ascii_lowercase()),
+            CampaignButton::Close => c.view = CampaignView::Closed,
+            CampaignButton::Missions => c.view = CampaignView::Missions,
+            CampaignButton::Begin(m) => restart_on(m),
+            CampaignButton::Leave => std::process::exit(0),
+        }
+    }
+    if keys.just_pressed(KeyCode::F1) {
+        c.view = match (&c.view, last_page.clone().or_else(|| c.mission.pages().into_iter().next())) {
+            (CampaignView::Closed, Some(p)) => CampaignView::Page(p),
+            _ => CampaignView::Closed,
+        };
+    }
+    if keys.just_pressed(KeyCode::F2) {
+        c.view = if c.view == CampaignView::Missions { CampaignView::Closed } else { CampaignView::Missions };
+    }
+    // The verdict, once.
+    if !c.judged {
+        if let Some(w) = sim.world.as_ref() {
+            let won = w.winner == Some(player.id);
+            let lost = w.out.contains(&player.id) || w.winner.is_some_and(|o| o != player.id);
+            if won || lost {
+                c.judged = true;
+                if won {
+                    c.mark_done();
+                }
+                c.view = CampaignView::Result(won);
+            }
+        }
+    }
+    if let CampaignView::Page(p) = &c.view {
+        *last_page = Some(p.clone());
+    }
+    if shown.as_ref() == Some(&c.view) {
+        return;
+    }
+    *shown = Some(c.view.clone());
+    viewer.paused = c.view != CampaignView::Closed;
+    for e in &panels {
+        commands.entity(e).despawn();
+    }
+    let sb = &data.cfg.sidebar;
+    let title = c.mission.get("title").unwrap_or(&c.stem).to_string();
+    // (heading, body, buttons)
+    let (heading, body, mut buttons): (String, String, Vec<(String, CampaignButton)>) = match &c.view {
+        CampaignView::Closed => return,
+        CampaignView::Page(name) => {
+            let page = c.mission.page(name).unwrap_or_default();
+            let mut buttons: Vec<(String, CampaignButton)> = page
+                .buttons
+                .iter()
+                .filter_map(|b| match b.action.to_ascii_lowercase().as_str() {
+                    "tell" => Some((b.label.clone(), CampaignButton::Open(b.arg.clone()))),
+                    "donothing" => Some((b.label.clone(), CampaignButton::Close)),
+                    "missionbegin" => Some((b.label.clone(), CampaignButton::Begin(b.arg.to_ascii_lowercase()))),
+                    "leavebattle" => Some((b.label.clone(), CampaignButton::Leave)),
+                    _ => None,
+                })
+                .collect();
+            // The original turned the lesson's pages as the player got on;
+            // here the player turns them.
+            let pages = c.mission.pages();
+            let at = pages.iter().position(|p| p == name);
+            let forward = at.and_then(|k| pages.get(k + 1)).cloned();
+            let tells_forward = page.buttons.iter().any(|b| b.action.eq_ignore_ascii_case("tell") && forward.as_deref().is_some_and(|f| b.arg.eq_ignore_ascii_case(f)));
+            if let Some(f) = forward.filter(|_| !tells_forward) {
+                buttons.push(("Next page".into(), CampaignButton::Open(f)));
+            }
+            if !buttons.iter().any(|(_, b)| matches!(b, CampaignButton::Close)) {
+                buttons.push(("Play".into(), CampaignButton::Close));
+            }
+            (title, page.text, buttons)
+        }
+        CampaignView::Result(won) => {
+            let page = c.mission.result(*won).unwrap_or_default();
+            let text = if page.text.is_empty() { if *won { "The mission is won.".to_string() } else { "The mission is lost.".to_string() } } else { page.text };
+            let mut buttons = Vec::new();
+            if *won {
+                if let Some(n) = c.next() {
+                    buttons.push(("Next mission".into(), CampaignButton::Begin(n)));
+                }
+            } else {
+                buttons.push(("Try again".into(), CampaignButton::Begin(c.stem.clone())));
+            }
+            buttons.push(("Look around".into(), CampaignButton::Close));
+            (format!("{title}: {}", if *won { "won" } else { "lost" }), text, buttons)
+        }
+        CampaignView::Missions => {
+            let mut lines = Vec::new();
+            let mut buttons = Vec::new();
+            for ch in &c.chapters {
+                lines.push(ch.title.clone());
+                for e in &ch.missions {
+                    let mark = if c.done.contains(&e.mission) { "done" } else if e.mission == c.stem { "now" } else { "" };
+                    buttons.push((format!("{}  {}{}", ch.title, e.label, if mark.is_empty() { String::new() } else { format!("  ({mark})") }), CampaignButton::Begin(e.mission.clone())));
+                }
+            }
+            buttons.push(("Back".into(), CampaignButton::Close));
+            ("Missions".to_string(), format!("{} chapters; F2 closes this list.", lines.len()), buttons)
+        }
+    };
+    if c.view != CampaignView::Missions {
+        buttons.push(("Missions".into(), CampaignButton::Missions));
+    }
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: px(sb.width + 24.0),
+                top: px(70),
+                width: px(640),
+                flex_direction: FlexDirection::Column,
+                row_gap: px(8),
+                padding: UiRect::all(px(12)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.05, 0.05, 0.12, 0.94)),
+            CampaignPanel,
+        ))
+        .with_children(|panel| {
+            panel.spawn((Text::new(heading), TextFont { font_size: (sb.font_size + 6.0).into(), ..default() }, TextColor(Color::srgb(1.0, 0.9, 0.4))));
+            panel.spawn((Text::new(body), TextFont { font_size: (sb.font_size + 1.0).into(), ..default() }, TextColor(Color::srgb(0.95, 0.95, 0.9)), Node { width: percent(100), ..default() }));
+            panel.spawn((Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, flex_shrink: 0.0, column_gap: px(8), row_gap: px(4), ..default() },)).with_children(|row| {
+                for (label, action) in buttons {
+                    row.spawn((Button, Node { padding: UiRect::axes(px(8), px(4)), ..default() }, BackgroundColor(Color::srgba(1.0, 0.9, 0.4, 0.18)), action)).with_children(|b| {
+                        b.spawn((Text::new(label), TextFont { font_size: sb.font_size.into(), ..default() }, TextColor(Color::WHITE)));
+                    });
+                }
+            });
+        });
+}
+
 /// The wait before an online game: who has joined and who is ready.
 #[derive(Resource, Default)]
 struct Lobby {
@@ -869,8 +1135,12 @@ fn main() {
     let cfg = Config::load(data.join("rules.toml")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("rules.toml").display())));
     let scripts = Scripts::load(data.join("scripts/rules.rhai")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("scripts/rules.rhai").display())));
     let install = Installation::load(&dir).unwrap_or_else(|e| fail(format!("failed to load NetStorm data from {}: {e}", dir.display())));
-    let map_name = std::env::var("ISLEFALL_MAP").unwrap_or_else(|_| "demo".into());
-    let map = load_map(&data, &cfg, &scripts, &install).unwrap_or_else(|e| fail(e));
+    let campaign = Campaign::from_env(&install);
+    let map_name = match &campaign {
+        Some(c) => c.fort.clone(),
+        None => std::env::var("ISLEFALL_MAP").unwrap_or_else(|_| "demo".into()),
+    };
+    let map = load_map(&data, &cfg, &scripts, &install, &map_name, campaign.as_ref().map(|c| &c.mission)).unwrap_or_else(|e| fail(e));
     if let Ok(out) = std::env::var("ISLEFALL_MAP_EXPORT") {
         match std::fs::write(&out, map.to_toml()) {
             Ok(()) => info!("wrote the map as {out}"),
@@ -951,8 +1221,10 @@ fn main() {
         type_index: 0,
         animation: 0,
         timer: Timer::from_seconds(frame_seconds, TimerMode::Repeating),
-        paused: false,
+        // A mission opens on its briefing, the world waiting behind it.
+        paused: campaign.is_some(),
     })
+    .insert_resource(CampaignState(campaign))
     .add_systems(Startup, setup)
     .add_systems(Update, window_icon)
     .add_systems(Startup, move |mut commands: Commands, game: Res<GameData>| {
@@ -966,7 +1238,7 @@ fn main() {
     .add_systems(Update, (common_keys, animate, auto_screenshot))
     .add_systems(
         Update,
-        (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, knowledge_chooser, lobby_panel, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
+        (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, knowledge_chooser, lobby_panel, campaign_panel, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(
@@ -1546,8 +1818,7 @@ fn zoomed_projection(zoom: f32) -> Projection {
 
 /// The map named by `ISLEFALL_MAP`: a file in `maps/`, a made-up one, or
 /// a campaign scenario from the archive.
-fn load_map(data: &Path, cfg: &Config, scripts: &Scripts, install: &Installation) -> Result<MapDef, String> {
-    let name = std::env::var("ISLEFALL_MAP").unwrap_or_else(|_| "demo".into());
+fn load_map(data: &Path, cfg: &Config, scripts: &Scripts, install: &Installation, name: &str, mission: Option<&islefall_data::mission::Mission>) -> Result<MapDef, String> {
     let path = data.join("maps").join(format!("{name}.toml"));
     if path.exists() {
         return MapDef::load(&path).map_err(|e| format!("{}: {e}", path.display()));
@@ -1566,7 +1837,8 @@ fn load_map(data: &Path, cfg: &Config, scripts: &Scripts, install: &Installation
         return Err(format!("{}: no such map, and no {stem}.fort in the archive", path.display()));
     };
     let fortfile = islefall_data::fort::Fort::parse(&install.archive.read(index)).map_err(|e| format!("{stem}.fort: {e}"))?;
-    let mission = islefall_data::mission::Mission::for_fort(&install.archive, &stem);
+    // A campaign mission brings its own text; a bare scenario finds the one that loads it.
+    let mission = mission.cloned().or_else(|| islefall_data::mission::Mission::for_fort(&install.archive, &stem));
     let (map, report) = islefall_sim::campaign::fort_to_map(&fortfile, mission.as_ref(), cfg, &stem, &foot);
     for note in &report.notes {
         info!("{stem}.fort: {note}");

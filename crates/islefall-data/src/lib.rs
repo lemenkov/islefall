@@ -13,6 +13,7 @@
 //! capped by [`shp::MAX_DIM`] and [`shp::MAX_PIXELS`].
 
 pub mod bridge;
+pub mod campaign;
 pub mod col;
 pub mod fort;
 pub mod gif;
