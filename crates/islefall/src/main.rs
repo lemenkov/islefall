@@ -2949,7 +2949,8 @@ fn overlays(
         for k in 0..dots {
             let a = k as f32 / dots as f32 * std::f32::consts::TAU;
             let (x, y) = (feet.x + rw * a.cos(), feet.y + rh * a.sin());
-            commands.spawn((solid(&white, c, Vec2::new(2.0, 2.0)), Transform::from_translation(Vec3::new(x, y, Z_UNIT - 0.5)), Overlay));
+            // On the ground: over the terrain and the shadows, under every unit and structure.
+            commands.spawn((solid(&white, c, Vec2::new(2.0, 2.0)), Transform::from_translation(Vec3::new(x, y, Z_SHADOW + 0.5)), Overlay));
         }
     }
     // Barriers between barricade posts: a beam in the type's colour.
