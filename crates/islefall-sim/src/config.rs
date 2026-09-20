@@ -836,6 +836,11 @@ pub struct Grid {
 #[serde(deny_unknown_fields)]
 pub struct Walking {
     pub avoid_cost: u32,
+    /// Path cost of an island's rim cells: walkers keep to the inside of
+    /// an island and step onto its edge only to reach a bridge or a place
+    /// on the rim itself. 1 treats the rim like any ground.
+    #[serde(default = "default_rim_cost")]
+    pub rim_cost: u32,
     pub subcell: i32,
     /// Every structure's footprint blocks walking (and unit placement)
     /// unless its type carries a `walk_free` flag.
@@ -844,6 +849,10 @@ pub struct Walking {
     /// `wait_seconds`, then paths round it.
     pub units_block: bool,
     pub wait_seconds: f64,
+}
+
+fn default_rim_cost() -> u32 {
+    6
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

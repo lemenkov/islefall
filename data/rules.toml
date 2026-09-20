@@ -22,6 +22,9 @@ cell_h = 11
 [walking]
 # Path cost multiplier for cells units avoid (`yuckWalk`).
 avoid_cost = 5
+# Path cost of an island's rim cells: walkers keep to the inside of an
+# island, stepping onto its edge only for a bridge or a place on the rim.
+rim_cost = 6
 # Fixed-point steps per cell for unit positions.
 subcell = 256
 # Nothing walks over a building or stands on one: every structure's

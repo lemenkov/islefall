@@ -463,7 +463,8 @@ impl World {
         if !self.is_ground(cell) {
             return None;
         }
-        let mut cost = 1;
+        // The edge of an island is for getting on and off it.
+        let mut cost = if self.is_rim(cell) { self.cfg.walking.rim_cost.max(1) } else { 1 };
         for s in self.structures.iter().filter(|s| s.covers(cell)) {
             match s.walk {
                 Walk::Blocked => return None,
@@ -3125,6 +3126,23 @@ mod tests {
             w.step(&scripts);
         }
         assert!(w.structures[t].hp < 100, "shot once the post fell");
+    }
+
+    #[test]
+    fn walkers_keep_off_the_rim_unless_they_are_going_there() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 12, 6), 0);
+        let golem = TypeRules { is_unit: true, speed: 3.0, ..TypeRules::plain() };
+        // Along the bottom: from one bottom-rim corner region to the other.
+        let u = w.spawn_unit("sunwalker", &golem, Cell::new(1, 5)).unwrap();
+        assert!(w.order_move(u, Cell::new(10, 5)));
+        let sub = w.subcell();
+        let cells: Vec<Cell> = w.units[u].path.iter().map(|p| p.cell(sub)).collect();
+        let on_rim = cells.iter().filter(|c| w.is_rim(**c)).count();
+        assert!(on_rim <= 2, "only the last steps touch the edge: {cells:?}");
+        assert!(cells.iter().any(|c| c.y == 4), "the way runs a row inside");
+        // The rim is still ground: a walker sent there goes there.
+        assert_eq!(cells.last(), Some(&Cell::new(10, 5)));
     }
 
     #[test]

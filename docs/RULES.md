@@ -185,6 +185,10 @@ influencing the space") are covered in their own sections below.
 - `walker`, `flyer` and `balloon` mark mobile types; those without `priest`
   are Transports. Flyers and balloons cross the sky in straight lines
   (see Air below).
+- Walkers keep to the inside of an island: a rim cell costs
+  `walking.rim_cost` on a path, so the edge is stepped on only for a
+  bridge or a place on the rim itself (a unit's feet are drawn at the
+  bottom of its cell, which on the bottom rim is the cliff's lip).
 - Facing uses the eight walk animations `A` to `H`: north, north-east, east,
   south-east, south, south-west, west, north-west.
 - Units have `maxHitPoints` and `threat`; shooters prefer the highest

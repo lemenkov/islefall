@@ -151,16 +151,18 @@ owner = 0
 kind = "sunarcher"
 at = [16, 3]
 
-# A Sun Cannon beside it and a Stone Tower below the altar.
+# A Sun Cannon beside it and a Stone Tower left of the altar.
 [[structures]]
 owner = 0
 kind = "suncannon"
 at = [20, 3]
 
+# Clear of the rim: a building flush against it leaves walkers only the
+# island's very edge to pass by.
 [[structures]]
 owner = 0
 kind = "sunblocker"
-at = [9, 10]
+at = [6, 4]
 
 # A Wind Tower between the geyser and the Devil Maker.
 [[structures]]
@@ -264,7 +266,7 @@ owner = 3
 kind = "residence"
 at = [73, 57]
 
-# The priest strolls to the Stone Tower; the bridge east is in the
+# The priest strolls east below the Temple; the bridge east is in the
 # Crossbow's reach.
 [[units]]
 owner = 0
