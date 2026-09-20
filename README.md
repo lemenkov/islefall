@@ -95,8 +95,9 @@ ISLEFALL_CAMPAIGN=1 NETSTORM_DIR=~/games/NetStorm cargo run --release
 ```
 
 starts the first mission you have not finished; `ISLEFALL_MISSION=tutorial1`
-plays a particular one. A mission opens on its briefing, the world
-standing still behind it: the page's own buttons turn its pages and
+plays a particular one. A mission with an enemy in it opens on its
+briefing, the world standing still behind it until you start (a lesson's
+world never waits: you read and build at once): the page's own buttons turn its pages and
 start play, and lessons get a `Next page` button, since the original
 turned those pages itself as you got on. `F1` brings the last page back,
 `F2` lists every chapter and mission (click one to play it). When the

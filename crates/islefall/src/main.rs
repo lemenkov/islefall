@@ -544,6 +544,18 @@ struct Campaign {
     view: CampaignView,
     /// The verdict, once shown, so it is shown once.
     judged: bool,
+    /// Play has begun: the briefing was closed once. Pages opened after
+    /// that are read while the world goes on.
+    begun: bool,
+}
+
+impl Campaign {
+    /// Whether the world should wait for the page on show: only for the
+    /// briefing of a mission with an enemy in it, before play begins. A
+    /// lesson (`aiOff`) is read while you build, and its world never waits.
+    fn waits(&self) -> bool {
+        matches!(self.view, CampaignView::Page(_)) && !self.begun && self.mission.int("aioff") != Some(1)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -602,7 +614,7 @@ impl Campaign {
         let first = mission.pages().into_iter().next();
         // Said before the game's log is up, so said plainly.
         eprintln!("islefall: mission {stem} ({}) on {fort}; {} of {} missions done", mission.get("title").unwrap_or(""), done.len(), chapters.iter().map(|c| c.missions.len()).sum::<usize>());
-        Some(Campaign { stem, fort, mission, chapters, done, view: first.map(CampaignView::Page).unwrap_or(CampaignView::Closed), judged: false })
+        Some(Campaign { stem, fort, mission, chapters, done, view: first.map(CampaignView::Page).unwrap_or(CampaignView::Closed), judged: false, begun: false })
     }
 
     /// The mission after this one in the chapters' order.
@@ -712,7 +724,11 @@ fn campaign_panel(
         return;
     }
     *shown = Some(c.view.clone());
-    viewer.paused = c.view != CampaignView::Closed;
+    if c.view == CampaignView::Closed {
+        c.begun = true;
+    }
+    let waits = c.waits();
+    viewer.paused = waits;
     for e in &panels {
         commands.entity(e).despawn();
     }
@@ -746,7 +762,8 @@ fn campaign_panel(
             if !buttons.iter().any(|(_, b)| matches!(b, CampaignButton::Close)) {
                 buttons.push(("Play".into(), CampaignButton::Close));
             }
-            (title, page.text, buttons)
+            let text = if waits { format!("{}\n\n(The world waits until you start.)", page.text) } else { page.text };
+            (title, text, buttons)
         }
         CampaignView::Result(won) => {
             let page = c.mission.result(*won).unwrap_or_default();
@@ -1236,8 +1253,8 @@ fn main() {
         type_index: 0,
         animation: 0,
         timer: Timer::from_seconds(frame_seconds, TimerMode::Repeating),
-        // A mission opens on its briefing, the world waiting behind it.
-        paused: campaign.is_some(),
+        // A mission with an enemy opens on its briefing, the world waiting behind it.
+        paused: campaign.as_ref().is_some_and(|c| c.waits()),
     })
     .insert_resource(CampaignState(campaign))
     .init_resource::<ConstructionCache>()
@@ -2457,7 +2474,7 @@ fn title(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, mut windows: Q
 }
 
 /// Fill the corner text from the rules' templates.
-fn hud(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, status: Res<Status>, mut texts: Query<&mut Text, With<Hud>>) {
+fn hud(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, status: Res<Status>, viewer: Res<Viewer>, mut texts: Query<&mut Text, With<Hud>>) {
     let w = sim.world();
     let tool = match &player.tool {
         Tool::Empty => "nothing in hand".to_string(),
@@ -2479,6 +2496,10 @@ fn hud(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, status: Res<Stat
     let mut lines: Vec<String> = data.cfg.hud.lines.iter().map(|l| fill(l)).collect();
     if let Some(v) = verdict(w, &data, player.id) {
         lines.push(v);
+    }
+    // A stopped clock looks like a build that never ends: say so.
+    if viewer.paused {
+        lines.push("PAUSED: nothing moves or builds (Space resumes)".into());
     }
     let text = lines.join("\n");
     for mut t in &mut texts {
