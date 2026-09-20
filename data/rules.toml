@@ -172,6 +172,13 @@ bombiitwister = { kind = "summon", unit = "windflyer" }
 bombiiitwister = { kind = "summon", unit = "windflyer" }
 
 [bridges]
+# The manual: "Initially, bridges in the Production window appear cracked,
+# but if not immediately used, they will quickly harden." A piece laid
+# within this many seconds of coming on offer is laid cracked, and a
+# cracked bridge dies to one hit and takes its cracked neighbours with it:
+# bridging as fast as the window refills builds something fragile. The
+# figure is a guess.
+harden_seconds = 8.0
 # The manual: an unattached bridge "will eventually crack, then crumble and
 # fall under its own weight". It holds sound for `hold_seconds`, cracks,
 # holds cracked for `crumble_seconds`, and then falls section by section

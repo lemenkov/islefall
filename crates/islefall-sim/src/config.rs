@@ -914,6 +914,12 @@ pub struct PieceDef {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Bridges {
+    /// A piece new in the Production window is cracked and hardens there
+    /// in this long (the manual: "initially, bridges in the Production
+    /// window appear cracked, but if not immediately used, they will
+    /// quickly harden"); laid before then, it is laid cracked.
+    #[serde(default = "default_harden_seconds")]
+    pub harden_seconds: f64,
     /// An unattached bridge holds sound this long, then cracks (the
     /// manual: it "will eventually crack, then crumble and fall").
     #[serde(default = "default_hold_seconds")]
@@ -931,6 +937,9 @@ pub struct Bridges {
     pub pieces: Vec<PieceDef>,
 }
 
+fn default_harden_seconds() -> f64 {
+    8.0
+}
 fn default_hold_seconds() -> f64 {
     3.0
 }

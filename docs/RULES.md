@@ -125,6 +125,15 @@ From the manual and the tutorial texts:
 - A piece must attach to the edge of an island or to the open end of another
   bridge. Islefall reads "open end" as a bridge cell with exactly one
   connection.
+- The manual: "Initially, bridges in the Production window appear
+  cracked, but if not immediately used, they will quickly harden."
+  Islefall: a piece is cracked for `bridges.harden_seconds` after it comes
+  on offer (the panel shows it so) and a piece laid before then is laid
+  cracked. Cracked cells die to one hit and take their cracked neighbours
+  with them, so a bridge thrown out as fast as the window refills is
+  fragile; this, not decay, is what keeps the original's bridges in
+  check: an attached bridge never falls with time. Computer players are
+  bound by it too.
 - A bridge with no connection to an island cracks from its own weight and
   then crumbles (the manual: it "will eventually crack, then crumble and
   fall under its own weight"). Islefall: a stretch of bridge that loses

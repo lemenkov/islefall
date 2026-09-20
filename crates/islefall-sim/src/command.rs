@@ -93,9 +93,11 @@ impl World {
                     piece = piece.rotated();
                 }
                 let cells = piece.cells_at(*at);
-                self.place_piece_for(owner, &cells).map_err(|e| format!("cannot place {}: {e}", piece.name))?;
-                self.queue_for(owner).refill(*slot);
-                done(format!("{} piece placed at {at:?}", piece.name))
+                let (now, harden) = (self.tick, self.cfg.ticks(self.cfg.bridges.harden_seconds));
+                let fresh = self.cfg.bridges.harden_seconds > 0.0 && self.queue_for(owner).fresh(*slot, now, harden);
+                self.place_piece_as(owner, &cells, fresh).map_err(|e| format!("cannot place {}: {e}", piece.name))?;
+                self.queue_for(owner).refill(*slot, now);
+                done(if fresh { format!("{} piece placed at {at:?}, still cracked: it had not hardened", piece.name) } else { format!("{} piece placed at {at:?}", piece.name) })
             }
             Command::Drop { kind, at } => {
                 let rules = self.types.get(kind).cloned().ok_or_else(|| format!("unknown type {kind}"))?;
@@ -365,6 +367,31 @@ mod tests {
         w
     }
 
+    #[test]
+    fn a_piece_laid_before_it_hardens_is_laid_cracked() {
+        let scripts = test_scripts();
+        let mut w = arena();
+        let harden = w.cfg.ticks(w.cfg.bridges.harden_seconds);
+        assert!(w.queue.fresh(0, w.tick, harden), "new on offer: still cracked");
+        // Straight off the island's east rim, the moment the game starts.
+        let said = w.apply(0, &Command::PlacePiece { slot: 0, rotations: 0, at: Cell::new(10, 1) }, &scripts).unwrap();
+        assert!(said.message.contains("cracked"), "{}", said.message);
+        assert!(!w.bridges.is_empty() && w.bridges.values().all(|s| *s == crate::BridgeState::Cracked));
+        // Its replacement came on offer just now; the other slots harden with time.
+        assert!(w.queue.fresh(0, w.tick, harden));
+        for _ in 0..harden {
+            w.step(&scripts);
+        }
+        assert!(!w.queue.fresh(1, w.tick, harden) && !w.queue.fresh(0, w.tick, harden), "hardened in the window");
+        let before = w.bridges.len();
+        let origin = (11..20).find_map(|x| (0..6).map(move |y| Cell::new(x, y)).find(|&at| w.can_place_piece_for(0, &w.queue.slots[1].cells_at(at)).is_ok()));
+        let at = origin.expect("somewhere off the new bridge or the rim takes the piece");
+        let said = w.apply(0, &Command::PlacePiece { slot: 1, rotations: 0, at }, &scripts).unwrap();
+        assert!(!said.message.contains("cracked"), "{}", said.message);
+        let sound = w.bridges.values().filter(|s| **s == crate::BridgeState::Normal).count();
+        assert_eq!(sound, w.bridges.len() - before, "the hardened piece is sound, the first stays cracked");
+    }
+
     fn script() -> Replay {
         let mut r = Replay { map: "arena".into(), commands: Vec::new() };
         r.record(0, 0, Command::PlaceUnit { kind: "sunwalker".into(), at: Cell::new(4, 1) }, true);
@@ -372,7 +399,8 @@ mod tests {
         r.record(2, 0, Command::PlacePiece { slot: 0, rotations: 1, at: Cell::new(10, 2) }, true);
         r.record(3, 0, Command::Drop { kind: "treetwo".into(), at: Cell::new(6, 3) }, true);
         r.record(4, 1, Command::Move { unit: 0, to: Cell::new(1, 1) }, true);
-        r.record(5, 0, Command::CrackBridge { at: Cell::new(10, 2) }, true);
+        // The piece went down cracked, laid before it had hardened: harden it.
+        r.record(5, 0, Command::HardenBridge { at: Cell::new(10, 2) }, true);
         r
     }
 

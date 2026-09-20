@@ -68,33 +68,49 @@ impl Piece {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PieceQueue {
     pub slots: Vec<Piece>,
+    /// The tick each slot's piece came on offer: a piece is cracked at
+    /// first and hardens in the window (the manual).
+    #[serde(default)]
+    pub born: Vec<u64>,
     catalogue: Vec<Piece>,
     rng: Pcg32,
 }
 
 impl PieceQueue {
     pub fn new(catalogue: Vec<Piece>, slots: usize, seed: u64) -> PieceQueue {
-        let mut q = PieceQueue { slots: Vec::new(), catalogue, rng: Pcg32::seed_from_u64(seed) };
+        let mut q = PieceQueue { slots: Vec::new(), born: Vec::new(), catalogue, rng: Pcg32::seed_from_u64(seed) };
         if q.catalogue.is_empty() {
             return q;
         }
         for _ in 0..slots {
             let p = q.draw();
             q.slots.push(p);
+            q.born.push(0);
         }
         q
+    }
+
+    /// Whether the piece in `slot` is still cracked at tick `now`, having
+    /// been on offer for less than `harden` ticks.
+    pub fn fresh(&self, slot: usize, now: u64, harden: u32) -> bool {
+        self.born.get(slot).is_some_and(|&b| now.saturating_sub(b) < harden as u64)
     }
 
     pub fn from_defs(defs: &[PieceDef], slots: usize, seed: u64) -> PieceQueue {
         PieceQueue::new(defs.iter().map(Piece::from_def).collect(), slots, seed)
     }
 
-    /// Replace the piece in `slot` with a new random one; returns the old piece.
-    pub fn refill(&mut self, slot: usize) -> Option<Piece> {
+    /// Replace the piece in `slot` with a new random one, on offer from
+    /// tick `now`; returns the old piece.
+    pub fn refill(&mut self, slot: usize, now: u64) -> Option<Piece> {
         if slot >= self.slots.len() {
             return None;
         }
         let next = self.draw();
+        if self.born.len() < self.slots.len() {
+            self.born.resize(self.slots.len(), 0);
+        }
+        self.born[slot] = now;
         Some(std::mem::replace(&mut self.slots[slot], next))
     }
 
@@ -136,11 +152,11 @@ mod tests {
         let mut b = PieceQueue::new(catalogue(), 4, 42);
         assert_eq!(a.slots, b.slots);
         assert_eq!(a.slots.len(), 4);
-        let used = a.refill(2).unwrap();
+        let used = a.refill(2, 0).unwrap();
         assert_eq!(used, b.slots[2]);
-        b.refill(2);
+        b.refill(2, 0);
         assert_eq!(a.slots, b.slots, "same draws in the same order");
-        assert_eq!(a.refill(9), None);
+        assert_eq!(a.refill(9, 0), None);
     }
 
     #[test]

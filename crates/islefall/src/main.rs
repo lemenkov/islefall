@@ -1488,8 +1488,10 @@ fn sidebar_update(
         Tool::Bridge(slot, rotations) => Some((*slot, *rotations)),
         _ => None,
     };
+    let harden = data.cfg.ticks(data.cfg.bridges.harden_seconds);
+    let fresh: Vec<bool> = (0..w.queue.slots.len()).map(|i| data.cfg.bridges.harden_seconds > 0.0 && w.queue.fresh(i, w.tick, harden)).collect();
     let mut names: Vec<String> = w.queue.slots.iter().map(|p| p.name.clone()).collect();
-    names.push(format!("{in_hand:?}"));
+    names.push(format!("{in_hand:?} {fresh:?}"));
     if *last_queue != names {
         *last_queue = names;
         for e in &slots {
@@ -1531,7 +1533,9 @@ fn sidebar_update(
                                     }
                                 }
                                 let node = Node { position_type: PositionType::Absolute, left: px(ox as f32 * cell), top: px(oy as f32 * pitch), width: px(cell), height: px(cell), ..default() };
-                                match tiles.as_ref().and_then(|(def, image, layout)| islefall_data::bridge::frames(def, mask, islefall_data::bridge::Condition::Normal).first().map(|&f| (image.clone(), layout.clone(), f))) {
+                                // New on offer, a piece is still cracked.
+                                let condition = if fresh.get(i).copied().unwrap_or(false) { islefall_data::bridge::Condition::Cracked } else { islefall_data::bridge::Condition::Normal };
+                                match tiles.as_ref().and_then(|(def, image, layout)| islefall_data::bridge::frames(def, mask, condition).first().map(|&f| (image.clone(), layout.clone(), f))) {
                                     Some((image, layout, index)) => {
                                         grid.spawn((ImageNode { image, texture_atlas: Some(TextureAtlas { layout, index }), image_mode: NodeImageMode::Stretch, ..default() }, node));
                                     }

@@ -183,10 +183,12 @@ impl Ai {
             return AiMove::Nothing; // already touching the target
         }
         let cells = piece.cells_at(origin);
-        if world.place_piece_for(self.owner, &cells).is_err() {
+        let harden = world.cfg.ticks(world.cfg.bridges.harden_seconds);
+        let fresh = world.cfg.bridges.harden_seconds > 0.0 && self.queue.fresh(slot, world.tick, harden);
+        if world.place_piece_as(self.owner, &cells, fresh).is_err() {
             return AiMove::Nothing;
         }
-        self.queue.refill(slot);
+        self.queue.refill(slot, world.tick);
         AiMove::Piece { name: piece.name.clone(), at: origin }
     }
 

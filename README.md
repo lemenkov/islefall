@@ -123,7 +123,9 @@ selects or gives orders.
 | `Escape` | Puts the thing in hand back. |
 
 A bridge piece must touch the edge of your own island or the open end of
-your bridge. Buildings cost their type's price and stand as translucent
+your bridge. A piece new in the window is still cracked and hardens there
+in a few seconds: lay it at once and it goes down cracked, and a cracked
+bridge falls to a single hit together with its cracked neighbours. Buildings cost their type's price and stand as translucent
 shells until a stream of Storm Power from your Temple, Workshop or Outpost
 has built them, which needs connected ground. Picking a building tool puts
 that unit into production at your Workshop. Drops follow the rules in

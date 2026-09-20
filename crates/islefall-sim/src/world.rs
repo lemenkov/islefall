@@ -680,9 +680,15 @@ impl World {
     }
 
     pub fn place_piece_for(&mut self, owner: u8, cells: &[Cell]) -> Result<(), PieceError> {
+        self.place_piece_as(owner, cells, false)
+    }
+
+    /// Lay a piece, cracked if it had not hardened in the window yet.
+    pub fn place_piece_as(&mut self, owner: u8, cells: &[Cell], cracked: bool) -> Result<(), PieceError> {
         self.can_place_piece_for(owner, cells)?;
+        let state = if cracked { BridgeState::Cracked } else { BridgeState::Normal };
         for &c in cells {
-            self.bridges.insert(c, BridgeState::Normal);
+            self.bridges.insert(c, state);
             self.bridge_owners.insert(c, owner);
         }
         self.bridge_version += 1;
@@ -2756,7 +2762,7 @@ mod tests {
         if w.can_place_piece(&cells).is_ok() {
             w.place_piece(&cells).unwrap();
         }
-        w.queue.refill(0);
+        w.queue.refill(0, 0);
         assert_eq!(w.queue.slots.len(), PIECE_SLOTS);
     }
 
