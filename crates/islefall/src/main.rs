@@ -584,9 +584,14 @@ impl Campaign {
     /// goes on with the first one not done yet. `ISLEFALL_DIFFICULTY` is
     /// easy, normal or hard.
     fn from_env(install: &Installation) -> Option<Campaign> {
-        let named = std::env::var("ISLEFALL_MISSION").ok().map(|m| m.to_ascii_lowercase());
-        if named.is_none() && std::env::var_os("ISLEFALL_CAMPAIGN").is_none() {
+        let named = std::env::var("ISLEFALL_MISSION").ok().map(|m| m.trim().to_ascii_lowercase()).filter(|m| !m.is_empty());
+        // Set to nothing, 0, no, off or false, the campaign is not asked for.
+        let asked = std::env::var("ISLEFALL_CAMPAIGN").is_ok_and(|v| !matches!(v.trim().to_ascii_lowercase().as_str(), "" | "0" | "no" | "off" | "false"));
+        if named.is_none() && !asked {
             return None;
+        }
+        if let Ok(map) = std::env::var("ISLEFALL_MAP") {
+            eprintln!("islefall: the campaign chooses the map; ISLEFALL_MAP={map} is ignored");
         }
         let difficulty = std::env::var("ISLEFALL_DIFFICULTY").ok().and_then(|d| islefall_data::campaign::Difficulty::parse(&d)).unwrap_or_default();
         let chapters = islefall_data::campaign::chapters(&install.archive, difficulty);
@@ -595,7 +600,8 @@ impl Campaign {
         let mission = islefall_data::mission::Mission::load(&install.archive, &stem).unwrap_or_else(|| fail(format!("no mission {stem}.english in the archive; `fortdump campaign` lists them")));
         let fort = mission.fort_name(&stem, &install.archive).unwrap_or_else(|| fail(format!("mission {stem} names no scenario the archive holds")));
         let first = mission.pages().into_iter().next();
-        info!("mission {stem} on {fort}: {}", mission.get("title").unwrap_or(""));
+        // Said before the game's log is up, so said plainly.
+        eprintln!("islefall: mission {stem} ({}) on {fort}; {} of {} missions done", mission.get("title").unwrap_or(""), done.len(), chapters.iter().map(|c| c.missions.len()).sum::<usize>());
         Some(Campaign { stem, fort, mission, chapters, done, view: first.map(CampaignView::Page).unwrap_or(CampaignView::Closed), judged: false })
     }
 
@@ -697,6 +703,10 @@ fn campaign_panel(
     }
     if let CampaignView::Page(p) = &c.view {
         *last_page = Some(p.clone());
+        // A lesson has no enemy to beat: reaching the page that says so finishes it.
+        if !c.done.contains(&c.stem) && c.mission.page(p).is_some_and(|page| page.marks_done) {
+            c.mark_done();
+        }
     }
     if shown.as_ref() == Some(&c.view) {
         return;

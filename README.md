@@ -49,7 +49,7 @@ variables:
 | `NETSTORM_DIR` | The NetStorm installation (required). |
 | `ISLEFALL_DATA` | Rules, scripts and maps directory (default `data/`); see `docs/MODDING.md`. |
 | `ISLEFALL_MAP` | A map from `maps/` (`demo`, `range`); a name that is no file loads that campaign scenario from the archive (`capturethepriest`, `bridgethegap`, ...; see `docs/FORT.md`); `random` or `random:<seed>` makes a battlefield up. |
-| `ISLEFALL_CAMPAIGN` | Set to anything: go on with the campaign at the first mission not done yet (see The campaign). |
+| `ISLEFALL_CAMPAIGN` | `1`: go on with the campaign at the first mission not done yet (see The campaign); `0` or empty leaves it off. It overrides `ISLEFALL_MAP`. |
 | `ISLEFALL_MISSION` | Play that mission (`tutorial1`, `thewarbegins`, ...); `fortdump campaign` lists them. |
 | `ISLEFALL_DIFFICULTY` | `easy`, `normal` (the default) or `hard`, for the campaign's later chapters. |
 | `ISLEFALL_POWER` | Start with this much Storm Power, whatever the map or mission grants. |
@@ -101,7 +101,8 @@ start play, and lessons get a `Next page` button, since the original
 turned those pages itself as you got on. `F1` brings the last page back,
 `F2` lists every chapter and mission (click one to play it). When the
 enemy High Priests are sacrificed, or yours is, the mission says so and
-offers the next one or another try. Finished missions are remembered in
+offers the next one or another try; a lesson, which has no enemy, is
+finished when you reach its last page. Finished missions are remembered in
 `~/.local/state/islefall/campaign-done.txt`. Starting another mission
 restarts the game on it.
 

@@ -19,6 +19,9 @@ pub struct Page {
     /// The markup as plain text: headings and paragraphs on their own lines.
     pub text: String,
     pub buttons: Vec<Button>,
+    /// The page carries `<$Config,Done...=1>`: reaching it finishes the
+    /// mission (a lesson's last page, which has no enemy to defeat).
+    pub marks_done: bool,
 }
 
 /// `$Button=label,action,arg`: `Tell` opens the page `arg`, `DoNothing`
@@ -134,8 +137,12 @@ impl Mission {
     fn page_of(body: &str) -> Page {
         let mut markup = String::new();
         let mut buttons = Vec::new();
+        let mut marks_done = false;
         for line in body.lines() {
             let t = line.trim();
+            if t.to_ascii_lowercase().starts_with("<$config,done") {
+                marks_done = true;
+            }
             if let Some(rest) = t.strip_prefix("$Button=").or_else(|| t.strip_prefix("$button=")) {
                 let mut parts = rest.splitn(3, ',');
                 let label = parts.next().unwrap_or("").trim().to_string();
@@ -149,7 +156,7 @@ impl Mission {
                 markup.push('\n');
             }
         }
-        Page { text: plain_text(&markup), buttons }
+        Page { text: plain_text(&markup), buttons, marks_done }
     }
 
     /// The page named `name` (`A.`, `a1.`, with or without brackets).
@@ -251,5 +258,6 @@ mod tests {
         assert_eq!(m.result(true).unwrap().text, "Success!\n\nWell done.");
         assert_eq!(m.result(false).unwrap().text, "Alas.");
         assert!(m.page("Z.").is_none());
+        assert!(m.result(true).unwrap().marks_done && !a.marks_done, "the page with the Config line finishes the mission");
     }
 }
