@@ -68,8 +68,10 @@ pub struct FringeRules {
     /// Fringe label by island piece label (the `isle` type's).
     #[serde(default)]
     pub pieces: BTreeMap<String, String>,
-    /// Cells below a rim cell where a fringe piece's hotspot goes: its
-    /// picture then starts at the rim cell's top and hangs below it.
+    /// Cells below a rim cell where a fringe piece's hotspot goes. The
+    /// pieces' hotspots lie 43 pixels, four cell rows, below their tops, so
+    /// at 4 the picture starts right under the rim tile and its windows
+    /// and doors show beneath the lip.
     #[serde(default = "default_hang")]
     pub hang: i32,
     #[serde(default = "default_stalag_kind")]
@@ -77,6 +79,39 @@ pub struct FringeRules {
     /// Which stalag frame: the last has no player-colour apron.
     #[serde(default = "default_stalag_frame")]
     pub stalag_frame: usize,
+    /// The islet a unit makes for itself: one picture of this type with
+    /// an emblem in its owner's colour (and the stalag underneath with the
+    /// matching apron), frame `player_frames[owner]`; `stalag_frame` is
+    /// the plain one, for what belongs to nobody.
+    #[serde(default = "default_platform_kind")]
+    pub platform: String,
+    #[serde(default = "default_player_frames")]
+    pub player_frames: Vec<usize>,
+    /// Cliff dwellings: this share of an island's wall pieces are the
+    /// fringe frames with windows, grilles and doors, the `lit_flag` ones
+    /// on an island somebody owns and the `unlit_flag` ones on a neutral one.
+    #[serde(default = "default_dwelling_share")]
+    pub dwelling_share: f32,
+    #[serde(default = "default_lit_flag")]
+    pub lit_flag: String,
+    #[serde(default = "default_unlit_flag")]
+    pub unlit_flag: String,
+}
+
+fn default_platform_kind() -> String {
+    "island".into()
+}
+fn default_player_frames() -> Vec<usize> {
+    (0..8).collect()
+}
+fn default_dwelling_share() -> f32 {
+    0.3
+}
+fn default_lit_flag() -> String {
+    "lit".into()
+}
+fn default_unlit_flag() -> String {
+    "unlit".into()
 }
 
 fn default_core_depth() -> i32 {
@@ -93,7 +128,7 @@ fn default_fringe_kind() -> String {
     "fringe".into()
 }
 fn default_hang() -> i32 {
-    3
+    4
 }
 fn default_stalag_kind() -> String {
     "islandstalag".into()

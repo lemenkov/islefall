@@ -109,7 +109,8 @@ out centred on its footprint: a Generator's narrow picture with ratio
 Islands have undersides, as the original's did: `fringe` stalactites hang
 under the bottom rim cells of a big island (chosen by the rim's `isle`
 piece label through `[fringe].pieces`, their hotspot `hang` cells below
-the rim so the picture starts at the rim's top), and a single
+the rim: the pieces' hotspots lie four cell rows below their tops, so at 4
+the picture starts right under the rim tile), and a single
 `islandstalag` rock hangs under every three-by-three island. Both are
 drawn behind the ground.
 
@@ -504,6 +505,21 @@ is a player; a player whose last High Priest is sacrificed is out, and
 when one player remains of two or more, that player has won. The game
 keeps running afterwards. Nothing else ends a game: losing the Temple or
 altar does not.
+
+## Island walls and islets
+
+The fringe sheet holds, besides the plain rock, wall pieces with windows,
+grilles and red doors with lamps, each flagged `lit` or `unlit`: dwellings
+in the cliff. Islefall gives `fringe.dwelling_share` of an island's wall
+pieces a dwelling, always the same ones, lit on an island somebody owns
+and dark on a neutral one; what lit them in the original is not known.
+
+The islet a unit makes for itself is one picture in the original, the
+`island` type, with a large emblem in its owner's colour (eight of them,
+and a plain ninth), over the `islandstalag` underside with a matching
+apron. Islefall draws a three-by-three islet that way, frame
+`fringe.player_frames[owner]`, a geyser's with the plain one, and tiles
+any other platform ground from the island set as before.
 
 ## Island ground
 

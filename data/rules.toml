@@ -304,9 +304,21 @@ kind = "fringe"
 # more textures), the plain filled tiles staying near the rim.
 core_depth = 2
 pieces = { EI = "EA", IO = "IA", HN = "HA", AB = "AB", AE = "AE" }
-hang = 3
+hang = 4
 stalag = "islandstalag"
 stalag_frame = 8
+# The islet a unit makes for itself is one picture (`island`) with an
+# emblem in its owner's colour, over the stalag with the matching apron:
+# frame `player_frames[owner]` of both (blue, red, white, green, purple,
+# yellow, teal, orange); `stalag_frame` is the plain one, for nobody's.
+platform = "island"
+player_frames = [0, 1, 2, 3, 4, 5, 6, 7]
+# Cliff dwellings: this share of an island's wall pieces are the fringe
+# frames with windows, grilles and red doors, lit on an island somebody
+# owns and dark on a neutral one.
+dwelling_share = 0.3
+lit_flag = "lit"
+unlit_flag = "unlit"
 
 # The text in the corner of the screen. Placeholders: {power}, {knowledge},
 # {techs}, {altar} (the Altar's level), {rank}, {tool}, {status} (the last thing the game had to say) and

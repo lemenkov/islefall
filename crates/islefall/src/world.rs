@@ -180,6 +180,7 @@ pub fn spawn_island(
     island: &IslandMap,
     theme: Theme,
     platform: bool,
+    lit: bool,
     cfg: &Config,
 ) {
     let world_grid = cfg.grid.clone();
@@ -218,10 +219,18 @@ pub fn spawn_island(
         return;
     }
     let Some(fringe) = lib.get_or_load(install, palette, &fr.kind, images, layouts) else { return };
-    let mut by_label: HashMap<&str, Vec<usize>> = HashMap::new();
+    // Per label: the plain rock, and the dwellings as the island's state wants them.
+    let mut by_label: HashMap<&str, (Vec<usize>, Vec<usize>)> = HashMap::new();
+    let dwelling_flag = if lit { &fr.lit_flag } else { &fr.unlit_flag };
     for (cell, piece) in pieces {
         let Some(label) = fr.pieces.get(piece.label()) else { continue };
-        let frames = by_label.entry(label.as_str()).or_insert_with(|| (0..fringe.labels.len()).filter(|&i| fringe.labels[i].eq_ignore_ascii_case(label) && fringe.flags[i].is_empty()).collect());
+        let (plain, dwellings) = by_label.entry(label.as_str()).or_insert_with(|| {
+            let of = |want: &dyn Fn(&[String]) -> bool| (0..fringe.labels.len()).filter(|&i| fringe.labels[i].eq_ignore_ascii_case(label) && want(&fringe.flags[i])).collect::<Vec<usize>>();
+            (of(&|f: &[String]| f.is_empty()), of(&|f: &[String]| f.iter().any(|x| x.eq_ignore_ascii_case(dwelling_flag))))
+        });
+        // A steady share of the wall pieces, the same ones every time, are lived in.
+        let roll = (variation(cell.offset(7, 13), 1000) as f32) / 1000.0;
+        let frames = if !platform && !dwellings.is_empty() && roll < fr.dwelling_share { &*dwellings } else { &*plain };
         if frames.is_empty() {
             continue;
         }

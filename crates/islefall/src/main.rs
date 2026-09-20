@@ -1889,7 +1889,7 @@ fn setup_map(
             island.remove(map::cell(*c));
         }
         let theme = Theme::parse(&isl.theme).unwrap_or(Theme::Sun);
-        world::spawn_island(commands, install, lib, palette, images, layouts, &island, theme, false, &data.cfg);
+        world::spawn_island(commands, install, lib, palette, images, layouts, &island, theme, false, isl.owner.is_some(), &data.cfg);
         match isl.owner {
             Some(owner) => w.push_island(island, owner),
             None => w.push_neutral_island(island),
@@ -3399,7 +3399,42 @@ fn sync_platforms(
         }
     }
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
-    world::spawn_island(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, &w.platforms, Theme::Sun, true, &data.cfg);
+    // The islet a unit made for itself is one picture with its owner's
+    // emblem, over the stalag with the matching apron; whatever platform
+    // ground is left over (odd footprints) is tiled as before.
+    let fr = &data.cfg.fringe;
+    let g = data.grid();
+    let mut rest = w.platforms.clone();
+    for s in &w.structures {
+        if s.foot_x != 3 || s.foot_y != 3 || !s.cells().all(|c| w.platforms.contains(c)) {
+            continue;
+        }
+        let frame = if s.stock > 0 || s.kind.eq_ignore_ascii_case("emptygeyser") { fr.stalag_frame } else { fr.player_frames.get(s.owner as usize % fr.player_frames.len().max(1)).copied().unwrap_or(fr.stalag_frame) };
+        let at = world::cell_to_world(s.cell, g);
+        let mut drawn = false;
+        if let Some(top) = lib.get_or_load(&data.install, palette, &fr.platform, &mut images, &mut layouts) {
+            if frame < top.frames.len() {
+                let e = world::spawn_frame(&mut commands, top, frame, at, world::Z_TERRAIN + 0.5);
+                commands.entity(e).insert(TerrainTile { platform: true });
+                drawn = true;
+            }
+        }
+        if !drawn {
+            continue;
+        }
+        if let Some(under) = lib.get_or_load(&data.install, palette, &fr.stalag, &mut images, &mut layouts) {
+            if frame < under.frames.len() {
+                let e = world::spawn_frame(&mut commands, under, frame, at, world::Z_TERRAIN - 0.25);
+                commands.entity(e).insert(TerrainTile { platform: true });
+            }
+        }
+        for c in s.cells() {
+            rest.remove(c);
+        }
+    }
+    if rest.len() > 0 {
+        world::spawn_island(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, &rest, Theme::Sun, true, false, &data.cfg);
+    }
 }
 
 fn camera_keys(
