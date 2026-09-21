@@ -158,6 +158,7 @@ Generators show where units can be placed.
 | `=` / `-`, numpad `+` / `-`, mouse wheel | Zoom in and out; the wheel zooms towards the cursor. |
 | Minimap click | Looks there. |
 | `Space` / `P` | Pauses; saves a screenshot. |
+| `Ctrl+W` / `Ctrl+Q` | Leaves the game (so do `Alt+F4` and the window's close button). |
 | `F5` / `F9` | Saves the world as a snapshot; loads it back. |
 | `F4` / `F3` | The islands' ground and undersides are Islefall's generated art by default; `F4` switches both to the original's pixel art and back, `F3` the undersides alone (see `docs/ART.md`). |
 | `Ctrl+Z` | Takes your latest command back: the world returns to the moment before it and runs forward again without it. Against the computer, in lessons and in the campaign only, never over a network; press again to take back the one before, up to twenty. |

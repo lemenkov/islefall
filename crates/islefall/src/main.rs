@@ -1347,6 +1347,7 @@ fn main() {
     .init_resource::<ConstructionCache>()
     .add_systems(Startup, setup)
     .add_systems(Update, window_icon)
+    .add_systems(Update, quit_keys)
     .add_systems(Startup, move |mut commands: Commands, game: Res<GameData>| {
         commands.insert_resource(SoundBank::scan(&game.install.root.join(&game.cfg.sounds.dir), &game.cfg.sounds, &data));
     })
@@ -2906,6 +2907,16 @@ fn key_code(name: &str) -> Option<KeyCode> {
 }
 
 const DIGIT_KEYS: [KeyCode; 9] = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9];
+
+/// Ctrl+W and Ctrl+Q leave the game, as they close a window or quit a
+/// program elsewhere. (The desktop's own Alt+F4 and the window's close
+/// button work without us: the engine honours the window's close request.)
+fn quit_keys(keys: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    if ctrl && keys.any_just_pressed([KeyCode::KeyW, KeyCode::KeyQ]) {
+        exit.write(AppExit::Success);
+    }
+}
 
 /// Ctrl+Z: take the player's latest command back. The world returns to the
 /// moment before it and runs forward to now without it, so only that
