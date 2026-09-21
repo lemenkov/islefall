@@ -37,17 +37,18 @@ a run of an island's bottom edge, shallow at the run's ends, breaking into
 overlapping, blunt stalactites of many widths and lengths, with the little
 four-paned windows of cliff dwellings, lit or dark. Set `generated = true`
 in the `[fringe]` section of `rules.toml` to draw every island's underside
-this way; `[fringe.rock]` holds the ramp, the depths, the widths of lobes
+this way, or press `F3` in the game to switch between the two and compare
+them in place; `[fringe.rock]` holds the ramp, the depths, the widths of lobes
 and teeth, and how many windows there are. Unlike the original's wall
 pieces, a generated strip follows the island's real outline run by run,
 and a short run carries less rock than a long one.
 
 ## Candidates
 
-Ground tiles and rim lips (noise in a palette already); the faces of left
-and right cliffs, which the original has no pieces for; bridges; effects
+The faces of left and right cliffs, which the original has no pieces for; bridges; effects
 such as smoke, fire and the construction cloud. Units and buildings are
-drawn characters, not texture, and are not candidates.
+drawn characters, not texture, and are not candidates. Nor is the ground:
+the original's grass, ice and ash are good pixel art and stay.
 
 Other ways of making pictures were weighed: shaders (alive on screen, but
 hard to keep in the pixel style and outside the mod layer), rendering to a

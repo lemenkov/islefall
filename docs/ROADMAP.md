@@ -68,9 +68,9 @@ In the order that changes the game most.
    integration running the tests, `reuse lint`, formatting and clippy.
 6. **Art of our own.** `crates/islefall-art` generates an island's
    underside from a seed (`fringe.generated`, off by default; see
-   `ART.md`). If it passes beside the original, ground, rims, cliff
-   sides, bridges and effects follow, and the game needs less and less
-   of an installation.
+   `ART.md`; `F3` switches in the game). If it passes beside the
+   original, cliff sides, bridges and effects may follow; the ground
+   stays the original's pixel art.
 7. **The remaining art.** The island undersides' left and right edge
    pieces are unused; the Spell icon in the original's overlay style;
    the original's Storm Power stream animation from Workshop to shell.

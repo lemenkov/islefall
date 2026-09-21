@@ -850,6 +850,47 @@ fn campaign_panel(
         });
 }
 
+/// Which art draws the islands' undersides: the original's wall pieces or
+/// the rock generator. It starts as the rules say; `F3` switches it while
+/// playing, redrawing the islands.
+#[derive(Resource)]
+struct ArtMode {
+    generated: bool,
+}
+
+fn art_toggle(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut mode: ResMut<ArtMode>,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    mut status: ResMut<Status>,
+    mut lib: ResMut<ShapeLibrary>,
+    mut images: ResMut<Assets<Image>>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    tiles: Query<(Entity, &TerrainTile)>,
+) {
+    if !keys.just_pressed(KeyCode::F3) {
+        return;
+    }
+    let Some(w) = sim.world.as_ref() else { return };
+    mode.generated = !mode.generated;
+    for (e, t) in &tiles {
+        if !t.platform {
+            commands.entity(e).despawn();
+        }
+    }
+    let mut cfg = data.cfg.clone();
+    cfg.fringe.generated = mode.generated;
+    let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+    for (i, island) in w.islands.iter().enumerate() {
+        let theme = w.island_themes.get(i).copied().unwrap_or(Theme::Sun);
+        let owned = w.island_owners.get(i).is_some_and(|o| o.is_some());
+        world::spawn_island(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, island, theme, false, owned, &cfg);
+    }
+    status.say(if mode.generated { "undersides: generated rock (F3 switches back)".into() } else { "undersides: the original's wall pieces (F3 switches)".into() });
+}
+
 /// The wait before an online game: who has joined and who is ready.
 #[derive(Resource, Default)]
 struct Lobby {
@@ -1186,6 +1227,7 @@ fn main() {
     };
     let data = data_dir();
     let cfg = Config::load(data.join("rules.toml")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("rules.toml").display())));
+    let art_generated = cfg.fringe.generated;
     let scripts = Scripts::load(data.join("scripts/rules.rhai")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("scripts/rules.rhai").display())));
     let install = Installation::load(&dir).unwrap_or_else(|e| fail(format!("failed to load NetStorm data from {}: {e}", dir.display())));
     let campaign = Campaign::from_env(&install);
@@ -1287,6 +1329,7 @@ fn main() {
         paused: campaign.as_ref().is_some_and(|c| c.waits()),
     })
     .insert_resource(CampaignState(campaign))
+    .insert_resource(ArtMode { generated: art_generated })
     .init_resource::<ConstructionCache>()
     .add_systems(Startup, setup)
     .add_systems(Update, window_icon)
@@ -1301,7 +1344,7 @@ fn main() {
     .add_systems(Update, (common_keys, animate, auto_screenshot))
     .add_systems(
         Update,
-        (camera_keys, undo_key, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, knowledge_chooser, lobby_panel, campaign_panel, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
+        (camera_keys, undo_key, art_toggle, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, knowledge_chooser, lobby_panel, campaign_panel, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(

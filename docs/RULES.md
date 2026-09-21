@@ -538,10 +538,12 @@ any other platform ground from the island set as before.
 
 The island tile set holds, besides the numbered filled and rim pieces,
 36 more filled textures per theme numbered 0, which its comments call the
-core pieces of the island terrain scrambler. Islefall draws filled cells
-at least `fringe.core_depth` cells from the island's edge with them and
-keeps the numbered filled tiles nearer the rim, which is a reading of
-the name, not a known rule.
+core pieces of the island terrain scrambler. Islefall can draw filled
+cells at least `fringe.core_depth` cells from the island's edge with them
+(laid in grid order, `core_columns` wide, or shuffled at 0), keeping the
+numbered filled tiles nearer the rim. It is off by default: how the
+original laid them is not known, and on some themes they come out as
+coarse speckle beside the plain tiles.
 
 ## Knowledge
 

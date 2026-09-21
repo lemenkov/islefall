@@ -199,7 +199,14 @@ pub fn spawn_island(
         if frames.is_empty() {
             continue;
         }
-        let frame = frames[variation(cell, frames.len())];
+        let columns = cfg.fringe.core_columns;
+        let frame = if inland && !core.is_empty() && columns > 0 {
+            // The core pieces in order: the tile of this cell's place in the big picture.
+            let rows = (core.len() as i32 / columns).max(1);
+            frames[((cell.y.rem_euclid(rows) * columns + cell.x.rem_euclid(columns)) as usize).min(frames.len() - 1)]
+        } else {
+            frames[variation(cell, frames.len())]
+        };
         let e = spawn_frame(commands, shape, frame, cell_to_world(cell, &world_grid), Z_TERRAIN + if platform { 0.5 } else { 0.0 });
         commands.entity(e).insert(TerrainTile { platform });
     }

@@ -315,8 +315,15 @@ kind = "fringe"
 generated = false
 # The island set's "terrain scrambler": filled ground at least this many
 # cells from an island's edge is drawn with the theme's core pieces (36
-# more textures), the plain filled tiles staying near the rim.
-core_depth = 2
+# more textures), the plain filled tiles staying near the rim. 0, the
+# default, never uses them: on some themes they come out as coarse
+# speckle beside the plain tiles, and how the original laid them is not
+# known.
+core_depth = 0
+# The core pieces are one large picture of ground cut into a grid this
+# many tiles wide: a cell takes the tile of its own place in the grid, so
+# the picture repeats whole. 0 shuffles them, which looks blotchy.
+core_columns = 6
 pieces = { EI = "EA", IO = "IA", HN = "HA", AB = "AB", AE = "AE" }
 hang = 4
 stalag = "islandstalag"

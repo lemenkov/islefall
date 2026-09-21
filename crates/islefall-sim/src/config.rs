@@ -70,6 +70,12 @@ pub struct FringeRules {
     /// drawn with the terrain scrambler's core pieces; 0 never uses them.
     #[serde(default = "default_core_depth")]
     pub core_depth: i32,
+    /// The core pieces are one large picture of ground cut into a grid
+    /// this many tiles wide; a cell takes the tile of its own place in
+    /// it, so the picture repeats whole instead of being shuffled. 0
+    /// picks a tile at random per cell.
+    #[serde(default = "default_core_columns")]
+    pub core_columns: i32,
     #[serde(default = "default_fringe_kind")]
     pub kind: String,
     /// Fringe label by island piece label (the `isle` type's).
@@ -154,8 +160,11 @@ impl Default for RockRules {
     }
 }
 
+fn default_core_columns() -> i32 {
+    6
+}
 fn default_core_depth() -> i32 {
-    2
+    0
 }
 
 impl Default for FringeRules {
