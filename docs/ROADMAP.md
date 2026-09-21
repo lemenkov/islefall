@@ -67,10 +67,11 @@ In the order that changes the game most.
    window icon without one), a release build workflow, and continuous
    integration running the tests, `reuse lint`, formatting and clippy.
 6. **Art of our own.** `crates/islefall-art` generates an island's
-   underside from a seed (`fringe.generated`, off by default; see
-   `ART.md`; `F3` switches in the game). If it passes beside the
-   original, cliff sides, bridges and effects may follow; the ground
-   stays the original's pixel art.
+   underside and its ground from a seed (`fringe.generated` and
+   `generated_ground`, both off by default; `F3` and `F4` switch them in
+   the game; see `ART.md`). Step by step: each piece stays an option
+   until it passes beside the original. Cliff sides, rims, bridges and
+   effects may follow.
 7. **The remaining art.** The island undersides' left and right edge
    pieces are unused; the Spell icon in the original's overlay style;
    the original's Storm Power stream animation from Workshop to shell.

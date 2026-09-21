@@ -6,6 +6,7 @@
 //! ordered dithering, light from the top left, no smoothing). Nothing here
 //! knows about the engine: a picture is a buffer of RGBA bytes.
 
+pub mod ground;
 pub mod rock;
 
 /// A picture: `width * height` RGBA pixels, row by row from the top.

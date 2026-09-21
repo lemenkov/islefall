@@ -188,10 +188,18 @@ pub fn spawn_island(
     let mut by_piece = HashMap::new();
     let core = if platform { Vec::new() } else { isle::core_frames(isle_def, theme) };
     let Some(shape) = lib.get_or_load(install, palette, "isle", images, layouts) else { return };
+    // Generated ground takes the place of the filled tiles, in the colours
+    // of this theme's own filled tiles, read from the atlas.
+    let ground_ramp = if cfg.fringe.generated_ground && !platform { tile_ramp(images, layouts, shape, &isle::frames(isle_def, theme, isle::Piece::Filled)) } else { Vec::new() };
+    let mut ground_cells: Vec<Cell> = Vec::new();
     let mut pieces = Vec::new();
     for cell in island.cells() {
         let Some(piece) = island.piece_at(cell) else { continue };
         pieces.push((cell, piece));
+        if !ground_ramp.is_empty() && piece == isle::Piece::Filled {
+            ground_cells.push(cell);
+            continue;
+        }
         // Well inside the island the ground is the scrambler's core pieces.
         let depth = cfg.fringe.core_depth;
         let inland = depth > 0 && piece == isle::Piece::Filled && (-depth..=depth).all(|dy| (-depth..=depth).all(|dx| island.contains(cell.offset(dx, dy))));
@@ -209,6 +217,9 @@ pub fn spawn_island(
         };
         let e = spawn_frame(commands, shape, frame, cell_to_world(cell, &world_grid), Z_TERRAIN + if platform { 0.5 } else { 0.0 });
         commands.entity(e).insert(TerrainTile { platform });
+    }
+    if !ground_cells.is_empty() {
+        generated_ground(commands, images, palette, &ground_cells, ground_ramp, theme, &cfg.fringe, &world_grid);
     }
     // The underside, behind the ground: one rock under a three-by-three
     // island, stalactites under a bigger island's bottom rim.
@@ -249,6 +260,86 @@ pub fn spawn_island(
         let e = spawn_frame(commands, fringe, frame, cell_to_world(cell.offset(0, fr.hang), &world_grid), z);
         commands.entity(e).insert(TerrainTile { platform });
     }
+}
+
+/// The colours a set of atlas frames is painted in, darkest first: every
+/// colour that covers a fair share of their pixels. Generated ground uses
+/// the ramp of the tiles it replaces, so it matches the rims beside it.
+fn tile_ramp(images: &Assets<Image>, layouts: &Assets<TextureAtlasLayout>, shape: &LoadedShape, frames: &[usize]) -> Vec<[u8; 3]> {
+    let (Some(img), Some(layout)) = (images.get(&shape.image), layouts.get(&shape.layout)) else { return Vec::new() };
+    let Some(data) = img.data.as_ref() else { return Vec::new() };
+    let stride = img.width() as usize * 4;
+    let mut counts: HashMap<[u8; 3], u32> = HashMap::new();
+    let mut total = 0u32;
+    for &f in frames {
+        let Some(rect) = layout.textures.get(f) else { continue };
+        for y in rect.min.y..rect.max.y {
+            for x in rect.min.x..rect.max.x {
+                let i = y as usize * stride + x as usize * 4;
+                if let Some(px) = data.get(i..i + 4).filter(|p| p[3] > 0) {
+                    *counts.entry([px[0], px[1], px[2]]).or_insert(0) += 1;
+                    total += 1;
+                }
+            }
+        }
+    }
+    // Darkest first, and each colour as often as the tiles use it: the
+    // generator spreads brightness evenly over the ramp, so the ground
+    // keeps the tiles' own mix (the green flecks in wind-blown ground,
+    // say) and the drifts only tilt it.
+    let mut used: Vec<([u8; 3], u32)> = counts.into_iter().filter(|(_, n)| *n * 200 >= total.max(1)).collect();
+    used.sort_by_key(|(c, _)| c[0] as u32 * 30 + c[1] as u32 * 59 + c[2] as u32 * 11);
+    let kept: u32 = used.iter().map(|(_, n)| *n).sum();
+    let mut ramp = Vec::new();
+    for (c, n) in used {
+        let share = ((n as f64 / kept.max(1) as f64) * 128.0).round().max(1.0) as usize;
+        ramp.extend(std::iter::repeat_n(c, share));
+    }
+    ramp
+}
+
+/// One picture of ground over an island's filled cells.
+#[allow(clippy::too_many_arguments)]
+fn generated_ground(commands: &mut Commands, images: &mut Assets<Image>, palette: &Palette, cells: &[Cell], ramp: Vec<[u8; 3]>, theme: Theme, fr: &islefall_sim::config::FringeRules, g: &Grid) {
+    let name = match theme {
+        Theme::Sun => "sun",
+        Theme::Thunder => "thunder",
+        Theme::Wind => "wind",
+        Theme::Rain => "rain",
+    };
+    let rules = fr.ground.get(name).or_else(|| fr.ground.get("default")).cloned().unwrap_or_default();
+    let (min_x, min_y) = (cells.iter().map(|c| c.x).min().unwrap_or(0), cells.iter().map(|c| c.y).min().unwrap_or(0));
+    let (max_x, max_y) = (cells.iter().map(|c| c.x).max().unwrap_or(0), cells.iter().map(|c| c.y).max().unwrap_or(0));
+    let set: std::collections::HashSet<(i32, i32)> = cells.iter().map(|c| (c.x, c.y)).collect();
+    let (cw, ch) = (g.cell_w as u32, g.cell_h as u32);
+    let ground = islefall_art::ground::Ground {
+        ramp,
+        drift: rules.drift,
+        patch: rules.patch,
+        drift_strength: rules.drift_strength,
+        patch_strength: rules.patch_strength,
+        grain: rules.grain,
+        squash: ch as f64 / cw as f64,
+        clump_spacing: rules.clump_spacing,
+        clump_density: rules.clump_density,
+        clump_strength: rules.clump_strength,
+        accents: rules.accents.iter().map(|a| islefall_art::ground::Accent { ramp: a.ramp.iter().map(|c| snap(palette, *c)).collect(), scale: a.scale, coverage: a.coverage }).collect(),
+        specks: rules.specks.iter().map(|s| islefall_art::ground::Speck { colour: snap(palette, s.colour), per_1000px: s.per_1000px }).collect(),
+        crack_spacing: rules.crack_spacing,
+        crack_colour: snap(palette, rules.crack_colour),
+    };
+    let seed = (min_x as u32).wrapping_mul(0x9E37_79B1) ^ (min_y as u32).wrapping_mul(0x85EB_CA6B) ^ 0x6d2b;
+    let pic = ground.surface((max_x - min_x + 1) as u32 * cw, (max_y - min_y + 1) as u32 * ch, seed, |x, y| set.contains(&(min_x + (x / cw) as i32, min_y + (y / ch) as i32)));
+    let mut image = Image::new(
+        bevy::render::render_resource::Extent3d { width: pic.width, height: pic.height, depth_or_array_layers: 1 },
+        bevy::render::render_resource::TextureDimension::D2,
+        pic.rgba,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD,
+    );
+    image.sampler = bevy::image::ImageSampler::nearest();
+    let at = Vec3::new((min_x * g.cell_w) as f32, -((min_y * g.cell_h) as f32), Z_TERRAIN);
+    commands.spawn((Sprite::from_image(images.add(image)), bevy::sprite::Anchor::TOP_LEFT, Transform::from_translation(at), TerrainTile { platform: false }));
 }
 
 /// The palette's nearest colour, so generated art sits beside the sprites.

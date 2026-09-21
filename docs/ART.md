@@ -43,12 +43,23 @@ and teeth, and how many windows there are. Unlike the original's wall
 pieces, a generated strip follows the island's real outline run by run,
 and a short run carries less rock than a long one.
 
+**The ground of an island** (`ground::Ground`): one picture for the whole
+island instead of tiles, so it can have what tiles cannot: drifts of
+lighter and darker ground, regions of another material (dry grass and
+moss, bare earth and scrub, snow and deep ice, pale and burnt ash), tufts
+and clumps, scattered flowers, stones, glints and embers, and cracks
+across ice and ash. Its colours and their proportions are taken from the
+theme's own filled tiles in your installation at load, so it matches the
+original rim tiles it meets; only the extra materials' colours come from
+the rules. `generated_ground = true` in `[fringe]` switches it on, `F4`
+switches it in the game, and `[fringe.ground.<theme>]` shapes each of the
+four themes. The rim tiles stay the original's.
+
 ## Candidates
 
 The faces of left and right cliffs, which the original has no pieces for; bridges; effects
 such as smoke, fire and the construction cloud. Units and buildings are
-drawn characters, not texture, and are not candidates. Nor is the ground:
-the original's grass, ice and ash are good pixel art and stay.
+drawn characters, not texture, and are not candidates.
 
 Other ways of making pictures were weighed: shaders (alive on screen, but
 hard to keep in the pixel style and outside the mod layer), rendering to a

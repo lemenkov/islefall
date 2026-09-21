@@ -156,7 +156,7 @@ Generators show where units can be placed.
 | Minimap click | Looks there. |
 | `Space` / `P` | Pauses; saves a screenshot. |
 | `F5` / `F9` | Saves the world as a snapshot; loads it back. |
-| `F3` | Switches the islands' undersides between the original's wall pieces and Islefall's generated rock (see `docs/ART.md`). |
+| `F3` / `F4` | Switch the islands' undersides, and their ground, between the original's art and Islefall's generated art (see `docs/ART.md`). |
 | `Ctrl+Z` | Takes your latest command back: the world returns to the moment before it and runs forward again without it. Against the computer, in lessons and in the campaign only, never over a network; press again to take back the one before, up to twenty. |
 
 The panel on the left shows the Storm Power, the piece queue, the build

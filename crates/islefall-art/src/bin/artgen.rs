@@ -8,6 +8,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use islefall_art::Picture;
+use islefall_art::ground::Ground;
 use islefall_art::rock::Rock;
 
 /// Make Islefall's generated art and write it as PNG
@@ -32,6 +33,16 @@ enum Command {
         unlit: bool,
         out: PathBuf,
     },
+    /// A rectangle of island surface.
+    Ground {
+        #[arg(long, default_value_t = 384)]
+        width: u32,
+        #[arg(long, default_value_t = 132)]
+        height: u32,
+        #[arg(long, default_value_t = 7)]
+        seed: u32,
+        out: PathBuf,
+    },
 }
 
 fn write_png(pic: &Picture, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
@@ -49,6 +60,7 @@ fn main() -> ExitCode {
             let rock = Rock { lit: !unlit, ..Rock::default() };
             write_png(&rock.underside(width.max(1), seed), &out)
         }
+        Command::Ground { width, height, seed, out } => write_png(&Ground::default().surface(width.max(1), height.max(1), seed, |_, _| true), &out),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

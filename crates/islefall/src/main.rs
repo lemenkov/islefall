@@ -856,6 +856,8 @@ fn campaign_panel(
 #[derive(Resource)]
 struct ArtMode {
     generated: bool,
+    /// The same for the ground; `F4` switches it.
+    ground: bool,
 }
 
 fn art_toggle(
@@ -870,11 +872,17 @@ fn art_toggle(
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     tiles: Query<(Entity, &TerrainTile)>,
 ) {
-    if !keys.just_pressed(KeyCode::F3) {
+    let (rock, ground) = (keys.just_pressed(KeyCode::F3), keys.just_pressed(KeyCode::F4));
+    if !rock && !ground {
         return;
     }
     let Some(w) = sim.world.as_ref() else { return };
-    mode.generated = !mode.generated;
+    if rock {
+        mode.generated = !mode.generated;
+    }
+    if ground {
+        mode.ground = !mode.ground;
+    }
     for (e, t) in &tiles {
         if !t.platform {
             commands.entity(e).despawn();
@@ -882,13 +890,15 @@ fn art_toggle(
     }
     let mut cfg = data.cfg.clone();
     cfg.fringe.generated = mode.generated;
+    cfg.fringe.generated_ground = mode.ground;
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
     for (i, island) in w.islands.iter().enumerate() {
         let theme = w.island_themes.get(i).copied().unwrap_or(Theme::Sun);
         let owned = w.island_owners.get(i).is_some_and(|o| o.is_some());
         world::spawn_island(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, island, theme, false, owned, &cfg);
     }
-    status.say(if mode.generated { "undersides: generated rock (F3 switches back)".into() } else { "undersides: the original's wall pieces (F3 switches)".into() });
+    let which = |on: bool| if on { "generated" } else { "the original's" };
+    status.say(format!("undersides: {} (F3), ground: {} (F4)", which(mode.generated), which(mode.ground)));
 }
 
 /// The wait before an online game: who has joined and who is ready.
@@ -1227,7 +1237,7 @@ fn main() {
     };
     let data = data_dir();
     let cfg = Config::load(data.join("rules.toml")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("rules.toml").display())));
-    let art_generated = cfg.fringe.generated;
+    let (art_generated, art_ground) = (cfg.fringe.generated, cfg.fringe.generated_ground);
     let scripts = Scripts::load(data.join("scripts/rules.rhai")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("scripts/rules.rhai").display())));
     let install = Installation::load(&dir).unwrap_or_else(|e| fail(format!("failed to load NetStorm data from {}: {e}", dir.display())));
     let campaign = Campaign::from_env(&install);
@@ -1329,7 +1339,7 @@ fn main() {
         paused: campaign.as_ref().is_some_and(|c| c.waits()),
     })
     .insert_resource(CampaignState(campaign))
-    .insert_resource(ArtMode { generated: art_generated })
+    .insert_resource(ArtMode { generated: art_generated, ground: art_ground })
     .init_resource::<ConstructionCache>()
     .add_systems(Startup, setup)
     .add_systems(Update, window_icon)

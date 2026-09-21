@@ -66,6 +66,14 @@ pub struct FringeRules {
     pub generated: bool,
     #[serde(default)]
     pub rock: RockRules,
+    /// Draw the filled ground of an island from the ground generator, one
+    /// picture per island in the colours of that theme's own tiles; the
+    /// rim tiles stay the original's. `ground` holds the shaping per
+    /// theme (`sun`, `thunder`, `wind`, `rain`), `default` for the rest.
+    #[serde(default)]
+    pub generated_ground: bool,
+    #[serde(default)]
+    pub ground: BTreeMap<String, GroundRules>,
     /// Filled cells at least this many cells from the island's edge are
     /// drawn with the terrain scrambler's core pieces; 0 never uses them.
     #[serde(default = "default_core_depth")]
@@ -125,6 +133,66 @@ fn default_lit_flag() -> String {
 }
 fn default_unlit_flag() -> String {
     "unlit".into()
+}
+
+/// The ground generator's shaping; lengths are source pixels. See
+/// `islefall_art::ground::Ground`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct GroundRules {
+    pub drift: f64,
+    pub patch: f64,
+    pub drift_strength: f64,
+    pub patch_strength: f64,
+    pub grain: f64,
+    /// Tufts and clumps: one to a square of `clump_spacing` pixels with
+    /// probability `clump_density`, moving the brightness by up to
+    /// `clump_strength`.
+    pub clump_spacing: f64,
+    pub clump_density: f64,
+    pub clump_strength: f64,
+    /// Regions of other materials (dry grass, moss, bare earth, snow):
+    /// a colour ramp, the size of the regions and their share of the area.
+    pub accents: Vec<GroundAccent>,
+    /// Single pixels scattered about: flowers, stones, glints, embers.
+    pub specks: Vec<GroundSpeck>,
+    /// Cracks between cells about this many pixels across; 0 for none.
+    pub crack_spacing: f64,
+    pub crack_colour: [u8; 3],
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroundAccent {
+    pub ramp: Vec<[u8; 3]>,
+    pub scale: f64,
+    pub coverage: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroundSpeck {
+    pub colour: [u8; 3],
+    pub per_1000px: f64,
+}
+
+impl Default for GroundRules {
+    fn default() -> Self {
+        GroundRules {
+            drift: 70.0,
+            patch: 17.0,
+            drift_strength: 0.2,
+            patch_strength: 0.1,
+            grain: 0.75,
+            clump_spacing: 9.0,
+            clump_density: 0.4,
+            clump_strength: 0.3,
+            accents: Vec::new(),
+            specks: Vec::new(),
+            crack_spacing: 0.0,
+            crack_colour: [20, 20, 20],
+        }
+    }
 }
 
 /// The rock generator's settings; lengths are source pixels. See

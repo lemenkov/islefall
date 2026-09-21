@@ -22,3 +22,6 @@ target
 
 # Campaign scenarios exported from the original game's data stay private.
 data/maps/campaign/
+
+# The screenshot the P key saves into the working directory.
+/islefall.png
