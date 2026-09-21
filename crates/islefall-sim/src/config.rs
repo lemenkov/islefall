@@ -59,6 +59,13 @@ pub struct Config {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FringeRules {
+    /// Draw the undersides from the rock generator (`islefall-art`)
+    /// instead of the original's wall pieces: one strip per run of an
+    /// island's bottom edge, following its real outline.
+    #[serde(default)]
+    pub generated: bool,
+    #[serde(default)]
+    pub rock: RockRules,
     /// Filled cells at least this many cells from the island's edge are
     /// drawn with the terrain scrambler's core pieces; 0 never uses them.
     #[serde(default = "default_core_depth")]
@@ -112,6 +119,39 @@ fn default_lit_flag() -> String {
 }
 fn default_unlit_flag() -> String {
     "unlit".into()
+}
+
+/// The rock generator's settings; lengths are source pixels. See
+/// `islefall_art::rock::Rock`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct RockRules {
+    /// Colours from the darkest to the lightest, snapped to the game's palette.
+    pub ramp: Vec<[u8; 3]>,
+    pub depth_min: u32,
+    pub depth_max: u32,
+    pub end_depth: u32,
+    pub taper: u32,
+    pub lobe: f64,
+    pub tooth: f64,
+    pub windows_per_100px: f64,
+    pub pane: [u8; 3],
+}
+
+impl Default for RockRules {
+    fn default() -> Self {
+        RockRules {
+            ramp: vec![[20, 10, 4], [44, 22, 8], [70, 36, 12], [98, 52, 18], [126, 70, 24], [152, 90, 34], [178, 112, 46], [200, 136, 64]],
+            depth_min: 22,
+            depth_max: 42,
+            end_depth: 7,
+            taper: 14,
+            lobe: 46.0,
+            tooth: 9.0,
+            windows_per_100px: 1.2,
+            pane: [255, 222, 96],
+        }
+    }
 }
 
 fn default_core_depth() -> i32 {

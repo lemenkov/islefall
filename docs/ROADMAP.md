@@ -66,7 +66,12 @@ In the order that changes the game most.
 5. **Packaging.** A desktop file with the emblem (Wayland shows no
    window icon without one), a release build workflow, and continuous
    integration running the tests, `reuse lint`, formatting and clippy.
-6. **The remaining art.** The island undersides' left and right edge
+6. **Art of our own.** `crates/islefall-art` generates an island's
+   underside from a seed (`fringe.generated`, off by default; see
+   `ART.md`). If it passes beside the original, ground, rims, cliff
+   sides, bridges and effects follow, and the game needs less and less
+   of an installation.
+7. **The remaining art.** The island undersides' left and right edge
    pieces are unused; the Spell icon in the original's overlay style;
    the original's Storm Power stream animation from Workshop to shell.
 

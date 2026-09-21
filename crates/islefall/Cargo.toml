@@ -14,6 +14,7 @@ rust-version.workspace = true
 islefall-data = { workspace = true, features = ["png"] }
 islefall-sim = { workspace = true }
 islefall-net = { path = "../islefall-net" }
+islefall-art = { path = "../islefall-art" }
 noise = "0.9"
 thiserror = "2.0.20"
 rand = "0.10.2"

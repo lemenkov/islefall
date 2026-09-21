@@ -3313,6 +3313,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "etagere",
+ "islefall-art",
  "islefall-data",
  "islefall-net",
  "islefall-sim",
@@ -3323,6 +3324,15 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "winit",
+]
+
+[[package]]
+name = "islefall-art"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "noise",
+ "png 0.18.1",
 ]
 
 [[package]]

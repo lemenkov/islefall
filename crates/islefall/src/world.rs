@@ -218,6 +218,10 @@ pub fn spawn_island(
         }
         return;
     }
+    if fr.generated && !platform {
+        generated_undersides(commands, images, palette, &pieces, fr, lit, &world_grid, z);
+        return;
+    }
     let Some(fringe) = lib.get_or_load(install, palette, &fr.kind, images, layouts) else { return };
     // Per label: the plain rock, and the dwellings as the island's state wants them.
     let mut by_label: HashMap<&str, (Vec<usize>, Vec<usize>)> = HashMap::new();
@@ -237,6 +241,65 @@ pub fn spawn_island(
         let frame = frames[variation(cell, frames.len())];
         let e = spawn_frame(commands, fringe, frame, cell_to_world(cell.offset(0, fr.hang), &world_grid), z);
         commands.entity(e).insert(TerrainTile { platform });
+    }
+}
+
+/// The palette's nearest colour, so generated art sits beside the sprites.
+fn snap(palette: &Palette, rgb: [u8; 3]) -> [u8; 3] {
+    let far = |c: &[u8; 3]| (0..3).map(|k| (c[k] as i32 - rgb[k] as i32).pow(2)).sum::<i32>();
+    palette.colors.iter().min_by_key(|c| far(c)).copied().unwrap_or(rgb)
+}
+
+/// Undersides from the rock generator: one strip of rock under every run
+/// of bottom-facing rim cells, its top at the rim row's lower edge.
+#[allow(clippy::too_many_arguments)]
+fn generated_undersides(
+    commands: &mut Commands,
+    images: &mut Assets<Image>,
+    palette: &Palette,
+    pieces: &[(Cell, isle::Piece)],
+    fr: &islefall_sim::config::FringeRules,
+    lit: bool,
+    g: &Grid,
+    z: f32,
+) {
+    let mut bottom: Vec<Cell> = pieces.iter().filter(|(_, p)| fr.pieces.contains_key(p.label())).map(|(c, _)| *c).collect();
+    bottom.sort_by_key(|c| (c.y, c.x));
+    let mut k = 0;
+    while k < bottom.len() {
+        let mut end = k;
+        while end + 1 < bottom.len() && bottom[end + 1].y == bottom[k].y && bottom[end + 1].x == bottom[end].x + 1 {
+            end += 1;
+        }
+        let (first, cells) = (bottom[k], (end - k + 1) as u32);
+        k = end + 1;
+        let r = &fr.rock;
+        // A short run carries less rock than a long one.
+        let depth_max = r.depth_max.min(14 + cells * 3).max(r.end_depth + 1);
+        let rock = islefall_art::rock::Rock {
+            ramp: r.ramp.iter().map(|c| snap(palette, *c)).collect(),
+            depth_min: r.depth_min.min(depth_max),
+            depth_max,
+            end_depth: r.end_depth,
+            taper: r.taper,
+            lobe: r.lobe,
+            tooth: r.tooth,
+            windows_per_100px: r.windows_per_100px,
+            lit,
+            pane: snap(palette, r.pane),
+        };
+        let seed = (first.x as u32).wrapping_mul(0x9E37_79B1) ^ (first.y as u32).wrapping_mul(0x85EB_CA6B);
+        let pic = rock.underside(cells * g.cell_w as u32, seed);
+        let mut image = Image::new(
+            bevy::render::render_resource::Extent3d { width: pic.width, height: pic.height, depth_or_array_layers: 1 },
+            bevy::render::render_resource::TextureDimension::D2,
+            pic.rgba,
+            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+            bevy::asset::RenderAssetUsages::RENDER_WORLD,
+        );
+        image.sampler = bevy::image::ImageSampler::nearest();
+        let at = Vec3::new((first.x * g.cell_w) as f32, -(((first.y + 1) * g.cell_h) as f32), z);
+        commands.spawn((Sprite::from_image(images.add(image)), bevy::sprite::Anchor::TOP_LEFT, Transform::from_translation(at), TerrainTile { platform: false }));
     }
 }
 

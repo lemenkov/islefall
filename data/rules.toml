@@ -309,6 +309,10 @@ dir = "sprites"
 # three-by-three island (frame 8 is the one without a player's apron).
 [fringe]
 kind = "fringe"
+# An experiment: draw the undersides from Islefall's own rock generator
+# instead of the original's wall pieces, one strip per run of an island's
+# bottom edge. `[fringe.rock]` sets it up (see docs/ART.md).
+generated = false
 # The island set's "terrain scrambler": filled ground at least this many
 # cells from an island's edge is drawn with the theme's core pieces (36
 # more textures), the plain filled tiles staying near the rim.
@@ -334,6 +338,21 @@ unlit_flag = "unlit"
 # {techs}, {altar} (the Altar's level), {rank}, {tool}, {status} (the last thing the game had to say) and
 # {opponents} (players still in). The last two lines show when the game
 # is decided.
+# The rock generator: colours from the darkest to the lightest (snapped to
+# the game's palette), how far the rock hangs at least, at most and at the
+# ends of a run, over how many pixels it grows to its depth, the width of
+# its lobes and teeth, windows per hundred pixels and a lit pane's colour.
+[fringe.rock]
+ramp = [[20, 10, 4], [44, 22, 8], [70, 36, 12], [98, 52, 18], [126, 70, 24], [152, 90, 34], [178, 112, 46], [200, 136, 64]]
+depth_min = 22
+depth_max = 42
+end_depth = 7
+taper = 14
+lobe = 46.0
+tooth = 9.0
+windows_per_100px = 1.2
+pane = [255, 222, 96]
+
 [hud]
 font_size = 14.0
 lines = [

@@ -230,6 +230,7 @@ real files.
 | `crates/islefall-sim` | The deterministic simulation: grid, islands, units, rules, commands, replays and map generation. No engine dependency. |
 | `crates/islefall` | The game binary, built on Bevy; doubles as a sprite viewer. |
 | `crates/islefall-net`, `crates/islefall-server` | The wire protocol and the relay server. |
+| `crates/islefall-art` | Generated art: pictures made from a seed (so far an island's rocky underside), and `artgen` to write them as PNG. No engine dependency. |
 | `data/` | The game's own rules, scripts and maps; nothing from NetStorm. |
 | `assets/` | The emblem. |
 | `docs/FORMATS.md` | Reverse-engineered descriptions of the NetStorm file formats. |
@@ -237,6 +238,7 @@ real files.
 | `docs/RULES.md` | How the type flags are read as game rules, with confidence notes. |
 | `docs/MODDING.md` | The data directory: `rules.toml`, the Rhai hooks and map files. |
 | `docs/NETWORK.md` | Lockstep play over the relay. |
+| `docs/ART.md` | Generated art: the rules of the style, what is made so far, and how to switch it on. |
 | `docs/ROADMAP.md` | What works, what comes next, and the open questions about the original. |
 | `tools/shp_decode.py` | Python reference decoder used while working out the sprite format. |
 
