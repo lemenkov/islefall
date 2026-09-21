@@ -851,8 +851,9 @@ fn campaign_panel(
 }
 
 /// Which art draws the islands' undersides: the original's wall pieces or
-/// the rock generator. It starts as the rules say; `F3` switches it while
-/// playing, redrawing the islands.
+/// the rock generator. It starts as the rules say; `F4` switches all the
+/// generated art while playing and `F3` the undersides alone, redrawing
+/// the islands.
 #[derive(Resource)]
 struct ArtMode {
     generated: bool,
@@ -880,8 +881,11 @@ fn art_toggle(
     if rock {
         mode.generated = !mode.generated;
     }
+    // F4 is the one switch for all generated art: the ground and the
+    // undersides go over together, whichever way the ground goes.
     if ground {
         mode.ground = !mode.ground;
+        mode.generated = mode.ground;
     }
     for (e, t) in &tiles {
         if !t.platform {
@@ -898,7 +902,7 @@ fn art_toggle(
         world::spawn_island(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, island, theme, false, owned, &cfg);
     }
     let which = |on: bool| if on { "generated" } else { "the original's" };
-    status.say(format!("undersides: {} (F3), ground: {} (F4)", which(mode.generated), which(mode.ground)));
+    status.say(format!("ground: {}, undersides: {} (F4 switches both, F3 the undersides alone)", which(mode.ground), which(mode.generated)));
 }
 
 /// The wait before an online game: who has joined and who is ready.

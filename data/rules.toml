@@ -309,15 +309,17 @@ dir = "sprites"
 # three-by-three island (frame 8 is the one without a player's apron).
 [fringe]
 kind = "fringe"
-# An experiment: draw the undersides from Islefall's own rock generator
-# instead of the original's wall pieces, one strip per run of an island's
-# bottom edge. `[fringe.rock]` sets it up (see docs/ART.md).
-generated = false
+# The undersides come from Islefall's own rock generator rather than the
+# original's wall pieces: one strip per run of an island's bottom edge.
+# `[fringe.rock]` sets it up (see docs/ART.md). `false` brings the
+# original's pieces back, and F3 switches in the game.
+generated = true
 # The same for the ground: one generated picture per island instead of
 # the filled tiles, in the colours of that theme's own tiles (taken from
 # your installation at load), the rim tiles staying the original's.
-# `[fringe.ground.<theme>]` shapes it. F4 switches it in the game.
-generated_ground = false
+# `[fringe.ground.<theme>]` shapes it. `false` brings the original's tiles
+# back, and F4 switches all generated art in the game.
+generated_ground = true
 # The island set's "terrain scrambler": filled ground at least this many
 # cells from an island's edge is drawn with the theme's core pieces (36
 # more textures), the plain filled tiles staying near the rim. 0, the

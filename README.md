@@ -8,7 +8,9 @@ from scratch in Rust on top of [Bevy](https://bevy.org).
 
 Islefall ships **no game data**. It reads sprites, palettes and unit
 definitions from a NetStorm installation you already own, in the way OpenRA
-and OpenTTD use their original games' assets. See `NOTICE`.
+and OpenTTD use their original games' assets. See `NOTICE`. Some of the
+picture is Islefall's own: the islands' ground and undersides are
+generated (see Generated art).
 
 Status: early development. The demo map is playable against three
 computer players, the original's campaign scenarios load, and players
@@ -156,7 +158,7 @@ Generators show where units can be placed.
 | Minimap click | Looks there. |
 | `Space` / `P` | Pauses; saves a screenshot. |
 | `F5` / `F9` | Saves the world as a snapshot; loads it back. |
-| `F3` / `F4` | Switch the islands' undersides, and their ground, between the original's art and Islefall's generated art (see `docs/ART.md`). |
+| `F4` / `F3` | The islands' ground and undersides are Islefall's generated art by default; `F4` switches both to the original's pixel art and back, `F3` the undersides alone (see `docs/ART.md`). |
 | `Ctrl+Z` | Takes your latest command back: the world returns to the moment before it and runs forward again without it. Against the computer, in lessons and in the campaign only, never over a network; press again to take back the one before, up to twenty. |
 
 The panel on the left shows the Storm Power, the piece queue, the build
@@ -165,6 +167,47 @@ reserve, Knowledge, the tool in hand and the last thing the game had to
 say. Structures shoot enemies in range; damaged things show a health bar,
 destroyed ones explode and crack nearby bridges, and unsupported bridges
 crumble, taking whatever stands on them.
+
+## Generated art
+
+Not every picture comes from the original any more. The islands' ground
+and their rocky undersides are made by Islefall itself from a seed, in the
+manner of the pixel art around them: source-pixel resolution, a short
+colour ramp, light from the top left, nothing smoothed.
+
+- **The ground** is one picture per island rather than tiles, so it has
+  what tiles cannot: drifts of lighter and darker ground, regions of
+  another material, tufts, scattered details and cracks. Each of the four
+  themes has its own character: grass with moss, dry drifts and flowers;
+  ash with pale and burnt patches, cracks and embers; wind-blown ground
+  with bare earth, scrub and stones; ice with snow, deep blue ice, fine
+  cracks and glints. Its colours and their proportions are taken from
+  that theme's own tiles in your installation, so it meets the original
+  rim tiles without a seam.
+- **The undersides** are a mass of rock hanging from each run of an
+  island's bottom edge, breaking into blunt stalactites, with the lit
+  windows of cliff dwellings. Unlike the original's wall pieces they
+  follow the island's real outline, and a short edge carries less rock
+  than a long one.
+
+The original's pixel art is a key away: `F4` switches the ground and the
+undersides to it and back while you play, and `F3` switches the
+undersides alone. To start with the original's art, set `generated` and
+`generated_ground` to `false` in the `[fringe]` section of
+`data/rules.toml`; `[fringe.rock]` and `[fringe.ground.<theme>]` there hold
+every setting of the two generators. Rims, bridges, buildings and units
+are still the original's.
+
+The generators live in `crates/islefall-art`, which knows nothing of the
+engine, and `artgen` writes their pictures as PNG:
+
+```sh
+cargo run -p islefall-art --bin artgen -- ground --width 384 --height 132 --seed 7 ground.png
+cargo run -p islefall-art --bin artgen -- underside --width 384 --seed 7 rock.png
+```
+
+`docs/ART.md` has the rules of the style, the ways of making pictures
+that were weighed, and what may follow.
 
 ## Viewer mode
 
@@ -231,7 +274,7 @@ real files.
 | `crates/islefall-sim` | The deterministic simulation: grid, islands, units, rules, commands, replays and map generation. No engine dependency. |
 | `crates/islefall` | The game binary, built on Bevy; doubles as a sprite viewer. |
 | `crates/islefall-net`, `crates/islefall-server` | The wire protocol and the relay server. |
-| `crates/islefall-art` | Generated art: pictures made from a seed (so far an island's rocky underside), and `artgen` to write them as PNG. No engine dependency. |
+| `crates/islefall-art` | Generated art: pictures made from a seed (an island's ground and its rocky underside), and `artgen` to write them as PNG. No engine dependency. |
 | `data/` | The game's own rules, scripts and maps; nothing from NetStorm. |
 | `assets/` | The emblem. |
 | `docs/FORMATS.md` | Reverse-engineered descriptions of the NetStorm file formats. |

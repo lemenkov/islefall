@@ -61,8 +61,9 @@ pub struct Config {
 pub struct FringeRules {
     /// Draw the undersides from the rock generator (`islefall-art`)
     /// instead of the original's wall pieces: one strip per run of an
-    /// island's bottom edge, following its real outline.
-    #[serde(default)]
+    /// island's bottom edge, following its real outline. On unless the
+    /// rules say otherwise.
+    #[serde(default = "yes")]
     pub generated: bool,
     #[serde(default)]
     pub rock: RockRules,
@@ -70,7 +71,8 @@ pub struct FringeRules {
     /// picture per island in the colours of that theme's own tiles; the
     /// rim tiles stay the original's. `ground` holds the shaping per
     /// theme (`sun`, `thunder`, `wind`, `rain`), `default` for the rest.
-    #[serde(default)]
+    /// On unless the rules say otherwise.
+    #[serde(default = "yes")]
     pub generated_ground: bool,
     #[serde(default)]
     pub ground: BTreeMap<String, GroundRules>,

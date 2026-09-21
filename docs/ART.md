@@ -7,8 +7,11 @@ drawing. What it makes belongs to the project (CC-BY-4.0, like the maps),
 so each piece that passes takes the game a step closer to standing on its
 own.
 
-This is an experiment. The original's pictures stay the default until a
-generated one survives a side-by-side comparison.
+A generated picture becomes the default only once it has survived a
+side-by-side comparison with the original's, and the original's stays a
+key away: `F4` switches all generated art off and on in the game, `F3`
+the undersides alone. The undersides and the ground have passed and are
+the default; the rules can turn either back.
 
 ## The rules of the style
 
@@ -35,10 +38,10 @@ cargo run -p islefall-art --bin artgen -- underside --width 384 --seed 7 rock.pn
 **The underside of an island** (`rock::Rock`): a mass of rock hanging from
 a run of an island's bottom edge, shallow at the run's ends, breaking into
 overlapping, blunt stalactites of many widths and lengths, with the little
-four-paned windows of cliff dwellings, lit or dark. Set `generated = true`
-in the `[fringe]` section of `rules.toml` to draw every island's underside
-this way, or press `F3` in the game to switch between the two and compare
-them in place; `[fringe.rock]` holds the ramp, the depths, the widths of lobes
+four-paned windows of cliff dwellings, lit or dark. `generated` in the
+`[fringe]` section of `rules.toml` draws every island's underside this
+way (`false` for the original's wall pieces); press `F3` in the game to switch the undersides alone
+(`F4` switches all generated art together); `[fringe.rock]` holds the ramp, the depths, the widths of lobes
 and teeth, and how many windows there are. Unlike the original's wall
 pieces, a generated strip follows the island's real outline run by run,
 and a short run carries less rock than a long one.
@@ -51,8 +54,8 @@ and clumps, scattered flowers, stones, glints and embers, and cracks
 across ice and ash. Its colours and their proportions are taken from the
 theme's own filled tiles in your installation at load, so it matches the
 original rim tiles it meets; only the extra materials' colours come from
-the rules. `generated_ground = true` in `[fringe]` switches it on, `F4`
-switches it in the game, and `[fringe.ground.<theme>]` shapes each of the
+the rules. `generated_ground` in `[fringe]` switches it on or off, `F4`
+switches it in the game together with the undersides, and `[fringe.ground.<theme>]` shapes each of the
 four themes. The rim tiles stay the original's.
 
 ## Candidates
