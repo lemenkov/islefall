@@ -154,7 +154,8 @@ Generators show where units can be placed.
 | `X` / `Y` | Casts the unit's Spell; sets a High Priest praying for his own. |
 | `Delete` / `C` / `H` | Destroys, cracks or hardens the bridge cell under the cursor. |
 | `V` / `G` | Salvages your structure under the cursor; upgrades the Workshop under it. |
-| Arrow keys, `-` / `=` | Pan and zoom the camera. |
+| Arrow keys | Pan the camera. |
+| `=` / `-`, numpad `+` / `-`, mouse wheel | Zoom in and out; the wheel zooms towards the cursor. |
 | Minimap click | Looks there. |
 | `Space` / `P` | Pauses; saves a screenshot. |
 | `F5` / `F9` | Saves the world as a snapshot; loads it back. |

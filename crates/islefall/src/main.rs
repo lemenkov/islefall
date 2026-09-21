@@ -3630,6 +3630,8 @@ fn camera_keys(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     data: Res<GameData>,
+    wheel: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+    windows: Query<&Window, With<PrimaryWindow>>,
     mut cameras: Query<(&mut Transform, &mut Projection), With<WorldCamera>>,
 ) {
     let Ok((mut tf, mut proj)) = cameras.single_mut() else { return };
@@ -3652,11 +3654,34 @@ fn camera_keys(
         tf.translation.y += step.y;
     }
     if let Projection::Orthographic(o) = &mut *proj {
-        if keys.just_pressed(KeyCode::Equal) {
-            o.scale = (o.scale / 1.25).max(1.0 / 16.0);
+        // Steps in (+) or out (-): the keys on the main row and the
+        // numpad, and the mouse wheel, a notch a step.
+        let mut steps = 0i32;
+        if keys.any_just_pressed([KeyCode::Equal, KeyCode::NumpadAdd]) {
+            steps += 1;
         }
-        if keys.just_pressed(KeyCode::Minus) {
-            o.scale = (o.scale * 1.25).min(2.0);
+        if keys.any_just_pressed([KeyCode::Minus, KeyCode::NumpadSubtract]) {
+            steps -= 1;
+        }
+        let window = windows.single().ok();
+        let cursor = window.and_then(|w| w.cursor_position());
+        // The wheel belongs to the map only while the cursor is over it.
+        let over_map = cursor.is_some_and(|c| c.x > data.cfg.sidebar.width);
+        if wheel.delta.y != 0.0 && over_map {
+            steps += wheel.delta.y.signum() as i32;
+        }
+        if steps != 0 {
+            let old = o.scale;
+            let new = (old / 1.25f32.powi(steps)).clamp(1.0 / 16.0, 2.0);
+            // The wheel zooms towards the cursor: what lies under it stays
+            // under it. The keys zoom about the middle of the view.
+            if let (true, Some(c), Some(w)) = (wheel.delta.y != 0.0 && over_map, cursor, window) {
+                let from_centre = Vec2::new(c.x - w.width() / 2.0, -(c.y - w.height() / 2.0));
+                let shift = from_centre * (old - new);
+                tf.translation.x += shift.x;
+                tf.translation.y += shift.y;
+            }
+            o.scale = new;
         }
     }
 }
