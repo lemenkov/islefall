@@ -1787,6 +1787,7 @@ impl World {
                 self.platform_owners.remove(c);
             }
             self.terrain_version += 1;
+            self.emit(EventKind::IslandFell, "", islet[0], gone.owner);
             self.strand(&|c| islet.contains(&c));
         }
         if gone.is_outpost {

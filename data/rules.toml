@@ -353,6 +353,13 @@ core_depth = 0
 core_columns = 6
 pieces = { EI = "EA", IO = "IA", HN = "HA", AB = "AB", AE = "AE" }
 hang = 4
+# When a unit's islet goes (the unit destroyed or salvaged, or the bridge
+# under it gone), its picture falls out of the sky rather than vanishing:
+# for `fall_seconds`, speeding up by `fall_gravity_px` source pixels per
+# second squared, fading over the last `fall_fade_share` of the fall.
+fall_seconds = 1.4
+fall_gravity_px = 260.0
+fall_fade_share = 0.5
 stalag = "islandstalag"
 stalag_frame = 8
 # The islet a unit makes for itself is one picture (`island`) with an

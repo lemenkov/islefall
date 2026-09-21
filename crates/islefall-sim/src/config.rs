@@ -102,6 +102,15 @@ pub struct FringeRules {
     /// and doors show beneath the lip.
     #[serde(default = "default_hang")]
     pub hang: i32,
+    /// An islet that is gone falls out of the picture: for so many
+    /// seconds, speeding up by so many source pixels per second squared,
+    /// fading over the last share of the fall.
+    #[serde(default = "default_fall_seconds")]
+    pub fall_seconds: f32,
+    #[serde(default = "default_fall_gravity")]
+    pub fall_gravity_px: f32,
+    #[serde(default = "default_fall_fade")]
+    pub fall_fade_share: f32,
     #[serde(default = "default_stalag_kind")]
     pub stalag: String,
     /// Which stalag frame: the last has no player-colour apron.
@@ -253,6 +262,15 @@ fn default_fringe_kind() -> String {
 }
 fn default_hang() -> i32 {
     4
+}
+fn default_fall_seconds() -> f32 {
+    1.4
+}
+fn default_fall_gravity() -> f32 {
+    260.0
+}
+fn default_fall_fade() -> f32 {
+    0.5
 }
 fn default_stalag_kind() -> String {
     "islandstalag".into()

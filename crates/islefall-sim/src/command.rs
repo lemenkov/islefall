@@ -344,11 +344,20 @@ impl Replay {
     /// commands came out differently from the record (a refusal recorded
     /// as such is not a drift).
     pub fn play_tick(&self, world: &mut World, scripts: &Scripts) -> usize {
+        self.play_tick_saying(world, scripts).len()
+    }
+
+    /// The same, saying what came out differently and why: one line per
+    /// command that was taken when the recording says refused, or refused
+    /// (with the reason) when it says taken.
+    pub fn play_tick_saying(&self, world: &mut World, scripts: &Scripts) -> Vec<String> {
         let tick = world.tick;
-        let mut drifted = 0;
+        let mut drifted = Vec::new();
         for e in self.due(tick) {
-            if world.apply(e.owner, &e.command, scripts).is_ok() != e.accepted {
-                drifted += 1;
+            match (world.apply(e.owner, &e.command, scripts), e.accepted) {
+                (Ok(_), true) | (Err(_), false) => {}
+                (Ok(_), false) => drifted.push(format!("player {}'s {:?} was refused in the recording and is taken now", e.owner, e.command)),
+                (Err(why), true) => drifted.push(format!("player {}'s {:?} was taken in the recording and is refused now: {why}", e.owner, e.command)),
             }
         }
         drifted

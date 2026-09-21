@@ -1372,6 +1372,7 @@ fn main() {
     .add_systems(Startup, setup)
     .add_systems(Startup, fire::make_fire_art)
     .add_systems(Update, fire::run_flickers.run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, falling.after(sync_platforms).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, window_icon)
     .add_systems(Update, quit_keys)
     .add_systems(Startup, move |mut commands: Commands, game: Res<GameData>| {
@@ -2269,9 +2270,8 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>, mut 
         return;
     }
     if let Some(replay) = rec.replay.as_ref() {
-        let refused = replay.play_tick(world, &data.scripts);
-        if refused > 0 {
-            warn!("tick {}: {refused} replayed command(s) came out differently: the game has drifted from the recording", world.tick);
+        for line in replay.play_tick_saying(world, &data.scripts) {
+            warn!("tick {}: the game has drifted from the recording: {line}", world.tick);
         }
     }
     let every = if data.cfg.controls.hash_every_seconds > 0.0 { data.cfg.ticks(data.cfg.controls.hash_every_seconds) as u64 } else { 0 };
@@ -3608,6 +3608,39 @@ fn tint_shells(
 }
 
 /// Rebuild platform terrain whenever buildings create new ground.
+/// A picture of the islet of the structure whose hotspot cell this is.
+#[derive(Component)]
+struct Islet(Cell);
+
+/// What is left of an islet, falling out of the sky.
+#[derive(Component)]
+struct Falling {
+    age: f32,
+    speed: f32,
+}
+
+/// Let the remains of islets fall: faster and faster, behind everything
+/// that still stands, fading towards the end.
+fn falling(mut commands: Commands, data: Res<GameData>, time: Res<Time>, mut remains: Query<(Entity, &mut Falling, &mut Transform, &mut Sprite)>) {
+    let fr = &data.cfg.fringe;
+    let dt = time.delta_secs();
+    for (e, mut f, mut tf, mut sprite) in &mut remains {
+        f.age += dt;
+        if f.age >= fr.fall_seconds {
+            commands.entity(e).despawn();
+            continue;
+        }
+        f.speed += fr.fall_gravity_px * dt;
+        tf.translation.y -= f.speed * dt;
+        tf.translation.z = tf.translation.z.min(world::Z_TERRAIN - 0.5);
+        let fade_from = fr.fall_seconds * (1.0 - fr.fall_fade_share.clamp(0.0, 1.0));
+        if f.age > fade_from {
+            let left = 1.0 - (f.age - fade_from) / (fr.fall_seconds - fade_from).max(0.01);
+            sprite.color = Color::srgba(1.0, 1.0, 1.0, left.clamp(0.0, 1.0));
+        }
+    }
+}
+
 fn sync_platforms(
     mut commands: Commands,
     sim: Res<Sim>,
@@ -3615,7 +3648,7 @@ fn sync_platforms(
     mut lib: ResMut<ShapeLibrary>,
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-    existing: Query<(Entity, &TerrainTile)>,
+    existing: Query<(Entity, &TerrainTile, Option<&Islet>)>,
     mut seen: Local<Option<u64>>,
 ) {
     let w = sim.world();
@@ -3623,9 +3656,16 @@ fn sync_platforms(
         return;
     }
     *seen = Some(w.terrain_version);
-    for (e, t) in &existing {
-        if t.platform {
-            commands.entity(e).despawn();
+    for (e, t, islet) in &existing {
+        if !t.platform {
+            continue;
+        }
+        match islet {
+            // The islet is gone: its picture falls out of the sky.
+            Some(i) if !w.platforms.contains(i.0) => {
+                commands.entity(e).remove::<TerrainTile>().remove::<Islet>().insert(Falling { age: 0.0, speed: 0.0 });
+            }
+            _ => commands.entity(e).despawn(),
         }
     }
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
@@ -3645,7 +3685,7 @@ fn sync_platforms(
         if let Some(top) = lib.get_or_load(&data.install, palette, &fr.platform, &mut images, &mut layouts) {
             if frame < top.frames.len() {
                 let e = world::spawn_frame(&mut commands, top, frame, at, world::Z_TERRAIN + 0.5);
-                commands.entity(e).insert(TerrainTile { platform: true });
+                commands.entity(e).insert((TerrainTile { platform: true }, Islet(s.cell)));
                 drawn = true;
             }
         }
@@ -3655,7 +3695,7 @@ fn sync_platforms(
         if let Some(under) = lib.get_or_load(&data.install, palette, &fr.stalag, &mut images, &mut layouts) {
             if frame < under.frames.len() {
                 let e = world::spawn_frame(&mut commands, under, frame, at, world::Z_TERRAIN - 0.25);
-                commands.entity(e).insert(TerrainTile { platform: true });
+                commands.entity(e).insert((TerrainTile { platform: true }, Islet(s.cell)));
             }
         }
         for c in s.cells() {
