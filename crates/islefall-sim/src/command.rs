@@ -76,6 +76,14 @@ impl World {
         }
     }
 
+    /// A bridge cell laid by `owner`, or by the map for nobody.
+    fn own_bridge(&self, owner: u8, at: Cell) -> Result<(), String> {
+        match self.bridge_owners.get(&at) {
+            Some(&o) if o != owner => Err(format!("the bridge at {at:?} is not yours")),
+            _ => Ok(()),
+        }
+    }
+
     /// Carry out a player's command. Failure leaves the world as it was
     /// and says why; the same command fails the same way on every machine.
     pub fn apply(&mut self, owner: u8, cmd: &Command, scripts: &Scripts) -> Result<Applied, String> {
@@ -165,12 +173,15 @@ impl World {
                 done(format!("the Altar rises to level {level}"))
             }
             Command::CrackBridge { at } => {
+                self.own_bridge(owner, *at)?;
                 if self.crack_bridge(*at) { done(format!("cracked {at:?}")) } else { Err(format!("nothing to crack at {at:?}")) }
             }
             Command::HardenBridge { at } => {
+                self.own_bridge(owner, *at)?;
                 if self.harden_bridge(*at) { done(format!("hardened {at:?}")) } else { Err(format!("nothing to harden at {at:?}")) }
             }
             Command::DestroyBridge { at } => {
+                self.own_bridge(owner, *at)?;
                 let before = self.bridges.len();
                 if self.destroy_bridge(*at) { done(format!("destroyed {at:?}; {} bridge cells fell", before.saturating_sub(1 + self.bridges.len()))) } else { Err(format!("no bridge at {at:?}")) }
             }

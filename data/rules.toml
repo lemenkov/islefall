@@ -117,12 +117,17 @@ respawn_seconds = 20.0
 # Cells within which an aerial attacker strikes (guess); each strike is one
 # shot of its `hpPerSec` x `delayBetweenShots`.
 strike_range = 1
-# Seconds an attacker flies before it must refuel or fall (manual: Whirligig
-# once a minute, Dust Devil ten seconds, Man o'War one minute).
+# An attacker flies for its type's own `lifeSpan` seconds before it must
+# refuel or fall: Whirligig 75, Dust Devil 30, Man o'War 60. (The manual
+# says ten seconds for the Dust Devil, but at its speed of 3 that is 30
+# cells of its base's range of 45: it fell before it arrived.)
+# `life_seconds` here overrides a type's; `default_life_seconds` serves a
+# type that names none.
+default_life_seconds = 60.0
 [air.attackers]
-sunflyer = { life_seconds = 60.0, refuels = true, hunts_transports = false, cracks_bridges = false, kill_extends_life = false }
-windflyer = { life_seconds = 10.0, refuels = false, hunts_transports = true, cracks_bridges = true, kill_extends_life = false }
-rainflyer = { life_seconds = 60.0, refuels = false, hunts_transports = true, cracks_bridges = false, kill_extends_life = true }
+sunflyer = { refuels = true, hunts_transports = false, cracks_bridges = false, kill_extends_life = false }
+windflyer = { refuels = false, hunts_transports = true, cracks_bridges = true, kill_extends_life = false }
+rainflyer = { refuels = false, hunts_transports = true, cracks_bridges = false, kill_extends_life = true }
 
 # Spells: a Transport reads an Obelisk to learn the Spell it holds, keeps it
 # for life, and casts it around itself for the Spell's `cost`, halting for

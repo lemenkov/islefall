@@ -152,7 +152,7 @@ Generators show where units can be placed.
 | Key | Does |
 |-----|------|
 | `X` / `Y` | Casts the unit's Spell; sets a High Priest praying for his own. |
-| `Delete` / `C` / `H` | Destroys, cracks or hardens the bridge cell under the cursor. |
+| `Delete` / `C` / `H` | Destroys, cracks or hardens your own bridge cell under the cursor; whatever hung off a destroyed cell alone cracks and falls. `Delete` is the way to clear bridges you no longer want. |
 | `V` / `G` | Salvages your structure under the cursor; upgrades the Workshop under it. |
 | Arrow keys | Pan the camera. |
 | `=` / `-`, numpad `+` / `-`, mouse wheel | Zoom in and out; the wheel zooms towards the cursor. |

@@ -118,6 +118,9 @@ pub struct TypeRules {
     pub is_outpost: bool,
     /// Seconds a stream takes to build the type once placed in play.
     pub build_seconds: f64,
+    /// An aerial attacker's `lifeSpan`: seconds of flight before it must
+    /// refuel or fall; 0 when the type names none.
+    pub life_span: f64,
     /// Seconds after placing one before the type is on offer again.
     pub refresh_seconds: f64,
     /// Holds a Spell for Transports to read.
@@ -236,6 +239,7 @@ impl TypeRules {
             is_workshop: has(&f.workshop),
             is_outpost: cfg.production.outpost_types.iter().any(|t| t.eq_ignore_ascii_case(&def.name)),
             build_seconds,
+            life_span: def.get_f64("lifeSpan").unwrap_or(0.0).max(0.0),
             refresh_seconds,
             is_obelisk: has(&f.obelisk),
             is_spell: has(&f.spell),
@@ -289,6 +293,7 @@ impl TypeRules {
             is_workshop: false,
             is_outpost: false,
             build_seconds: 0.0,
+            life_span: 0.0,
             refresh_seconds: 0.0,
             is_obelisk: false,
             is_spell: false,

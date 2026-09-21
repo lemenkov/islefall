@@ -826,7 +826,7 @@ impl World {
             self.platform_owners.remove(c);
         }
         self.terrain_version += 1;
-        self.remove_unsupported_things(&reached);
+        self.strand(&|c| !reached.contains(&c));
         falling.len()
     }
 
@@ -836,16 +836,18 @@ impl World {
         self.bridge_owners.retain(|c, _| bridges.contains_key(c));
     }
 
-    fn remove_unsupported_things(&mut self, reached: &BTreeSet<Cell>) {
+    /// What stood on ground that is `gone` goes with it: structures fall,
+    /// walkers are lost, a priest floats.
+    fn strand(&mut self, gone: &dyn Fn(Cell) -> bool) {
         let before = self.structures.len();
-        self.structures.retain(|s| s.cells().all(|c| reached.contains(&c)));
+        self.structures.retain(|s| !s.cells().any(gone));
         if self.structures.len() != before {
             self.structure_version += 1;
         }
         let mut lost = Vec::new();
         let mut released = Vec::new();
         for u in &mut self.units {
-            if u.alive && !u.is_air && !u.is_priest && u.carried_by.is_none() && !reached.contains(&u.cell()) {
+            if u.alive && !u.is_air && !u.is_priest && u.carried_by.is_none() && gone(u.cell()) {
                 u.alive = false;
                 u.path.clear();
                 u.task = Task::Idle;
@@ -861,7 +863,7 @@ impl World {
         // The manual: a priest whose bridge is blown does not fall but floats.
         let mut floating = Vec::new();
         for u in &mut self.units {
-            if u.alive && u.is_priest && !u.floating && u.carried_by.is_none() && !reached.contains(&u.cell()) {
+            if u.alive && u.is_priest && !u.floating && u.carried_by.is_none() && gone(u.cell()) {
                 u.floating = true;
                 u.path.clear();
                 u.task = Task::Idle;
@@ -917,7 +919,7 @@ impl World {
         self.prune_bridge_owners();
         self.bridge_version += 1;
         let reached = self.supported();
-        self.remove_unsupported_things(&reached);
+        self.strand(&|c| !reached.contains(&c));
         self.settle();
     }
 
@@ -1226,7 +1228,9 @@ impl World {
     /// Ticks an aerial attacker of `kind` flies before refuelling or falling;
     /// unlimited for kinds the rules do not list.
     fn attacker_life(&self, kind: &str) -> u32 {
-        self.cfg.air.attackers.get(kind).map(|a| self.cfg.ticks(a.life_seconds)).unwrap_or(u32::MAX)
+        let Some(a) = self.cfg.air.attackers.get(kind) else { return u32::MAX };
+        let own = self.types.get(kind).map(|r| r.life_span).filter(|&s| s > 0.0);
+        self.cfg.ticks(a.life_seconds.or(own).unwrap_or(self.cfg.air.default_life_seconds))
     }
 
     /// Battle units (types that need Energy) must come from a Workshop that
@@ -1774,6 +1778,17 @@ impl World {
     fn remove_structure(&mut self, index: usize) {
         let gone = self.structures.remove(index);
         self.structure_version += 1;
+        // A unit's islet goes with the unit; what hung off it alone will
+        // find itself unsupported when the ground next settles.
+        let islet: Vec<Cell> = gone.cells().filter(|&c| self.platforms.contains(c)).collect();
+        if !islet.is_empty() {
+            for c in &islet {
+                self.platforms.remove(*c);
+                self.platform_owners.remove(c);
+            }
+            self.terrain_version += 1;
+            self.strand(&|c| islet.contains(&c));
+        }
         if gone.is_outpost {
             // A neutral island stays claimed only while an Outpost of its owner stands there.
             if let Some(i) = self.island_at(gone.centre()).filter(|&i| self.island_neutral.get(i).copied().unwrap_or(false)) {
@@ -2995,7 +3010,7 @@ mod tests {
         w.energy_enforced = false;
         let flyer = TypeRules { is_unit: true, is_flyer: true, is_air: true, max_hit_points: 50, speed: 8.0, range: 30, hp_per_sec: 15, damage_per_shot: 15, delay_between_shots: 1.0, air_attack: Some(AirAttack { air_range: 0, air_damage: 0, ground: true }), ..TypeRules::plain() };
         w.register_type("windflyer", flyer);
-        w.cfg.air.attackers.get_mut("windflyer").expect("the rules know the Dust Devil").life_seconds = 3.0;
+        w.cfg.air.attackers.get_mut("windflyer").expect("the rules know the Dust Devil").life_seconds = Some(3.0);
         let hydra = TypeRules { is_spell: true, spell_range: 30, cast_seconds: 0.1, cost: 0, spawns: 2, ..TypeRules::plain() };
         w.register_type("bombtwister", hydra);
         w.powers[0] = 1000;
@@ -3259,6 +3274,41 @@ mod tests {
         assert!(!w.is_bridge(Cell::new(13, 1)), "cracked bridge in the blast was destroyed");
         assert_eq!(w.bridge_state(Cell::new(12, 1)), Some(BridgeState::Normal), "outside the blast");
         assert!(w.platforms.is_empty(), "its platform fell once the bridge was gone");
+    }
+
+    #[test]
+    fn a_units_islet_goes_with_it_and_so_does_what_hung_off_it_alone() {
+        let mut w = world();
+        for x in 8..14 {
+            w.place_bridge(Cell::new(x, 1));
+        }
+        let battery = TypeRules { foot_x: 3, foot_y: 3, creates_island: true, max_hit_points: 100, cost: 300, ..TypeRules::plain() };
+        w.powers[0] = 300;
+        let b = w.drop_structure("sunbattery", &battery, Cell::new(16, 2)).unwrap_or_else(|e| panic!("{e}"));
+        // A spur off the islet's far side, held up by nothing else.
+        for x in 17..20 {
+            w.place_bridge(Cell::new(x, 1));
+        }
+        w.settle();
+        assert!(w.doomed.is_empty(), "the islet carries the spur");
+        let scripts = test_scripts();
+        assert!(w.salvage(b, &scripts).is_some());
+        assert!(w.platforms.is_empty(), "no islet stays behind");
+        assert!(w.is_bridge(Cell::new(13, 1)) && !w.doomed.contains_key(&Cell::new(13, 1)), "the bridge to it stands");
+        assert!(w.doomed.contains_key(&Cell::new(18, 1)), "the spur is doomed");
+    }
+
+    #[test]
+    fn an_attacker_flies_for_its_types_own_life_span_unless_the_rules_say() {
+        let mut w = world();
+        w.register_type("windflyer", TypeRules { life_span: 30.0, ..TypeRules::plain() });
+        w.cfg.air.attackers.get_mut("windflyer").unwrap().life_seconds = None;
+        assert_eq!(w.attacker_life("windflyer"), w.cfg.ticks(30.0));
+        w.cfg.air.attackers.get_mut("windflyer").unwrap().life_seconds = Some(12.0);
+        assert_eq!(w.attacker_life("windflyer"), w.cfg.ticks(12.0));
+        w.register_type("sunflyer", TypeRules::plain());
+        assert_eq!(w.attacker_life("sunflyer"), w.cfg.ticks(w.cfg.air.default_life_seconds));
+        assert_eq!(w.attacker_life("sunwalker"), u32::MAX, "not an attacker");
     }
 
     #[test]

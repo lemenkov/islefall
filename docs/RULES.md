@@ -178,7 +178,9 @@ directly on top of the bridges themselves."
 So a `createsisland` type (every 3x3 emplacement) is dropped either wholly on
 island ground or wholly in the sky with a footprint cell orthogonally
 adjacent to an open bridge end; in the sky it creates its own island under
-itself. Everything else needs island ground under every cell. In both cases
+itself, and that islet goes with it when it is destroyed or salvaged:
+walkers on it are lost, and bridges that hung off it alone crack and fall
+like any unattached stretch. Everything else needs island ground under every cell. In both cases
 no cell may be covered by another structure or a unit, and unless the type
 has `mayDropOnRim`, no cell may be a natural island's edge.
 
@@ -363,7 +365,11 @@ air damage both ways. Bases (`air.base_classes`) launch the attacker
 `air.respawn_seconds`. An attacker hunts the nearest enemy within its
 `range` of the base (the `air_target_priority` hook decides preference
 and refusals), strikes within `air.strike_range` cells for one shot of its
-`hpPerSec`, and lives `life_seconds` from `[air.attackers]`; whether it
+`hpPerSec`, and flies for its type's own `lifeSpan` seconds (Whirligig
+75, Dust Devil 30, Man o'War 60; `life_seconds` in `[air.attackers]`
+overrides, `air.default_life_seconds` serves a type that names none).
+The manual's ten seconds for the Dust Devil are not the data's: at its
+speed of 3 they cover 30 cells of its base's range of 45. Whether it
 refuels, hunts Transports, cracks bridges or feeds on kills is set there
 too. Balloons are Battle units: they cost, need Energy and production,
 and are placed anywhere.
@@ -513,7 +519,7 @@ Flood (`bombimano`, `bombiimano`, `bombiiimano`) Man o'Wars and
 Whirlwind, Twister and Vortex (`bombtwister`, `bombiitwister`,
 `bombiiitwister`) Dust Devils, as many as the Spell's `spawns` property
 says (`unit` and `count` in `[spells.effects]` override); with no base to
-refuel at they fall when their `life_seconds` are up. Which creature
+refuel at they fall when their flight time is up. Which creature
 each Summons conjures is Islefall's reading of the names (`bombImano` to
 `bombIIIMano`), not stated by the data. Not modelled: the Spell icon in
 the original's overlay style.

@@ -882,13 +882,23 @@ pub struct Air {
     pub launches: BTreeMap<String, String>,
     pub respawn_seconds: f64,
     pub strike_range: i32,
+    /// Seconds of flight for an attacker whose type names no `lifeSpan`.
+    #[serde(default = "default_life_seconds")]
+    pub default_life_seconds: f64,
     pub attackers: BTreeMap<String, Attacker>,
+}
+
+fn default_life_seconds() -> f64 {
+    60.0
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Attacker {
-    pub life_seconds: f64,
+    /// Seconds of flight, overriding the type's own `lifeSpan`; without
+    /// either, `air.default_life_seconds`.
+    #[serde(default)]
+    pub life_seconds: Option<f64>,
     pub refuels: bool,
     pub hunts_transports: bool,
     pub cracks_bridges: bool,
@@ -1296,7 +1306,7 @@ impl Config {
         if self.air.respawn_seconds <= 0.0 || self.air.strike_range < 0 {
             return bad("air timings must be positive");
         }
-        if self.air.attackers.values().any(|a| a.life_seconds <= 0.0) {
+        if self.air.attackers.values().any(|a| a.life_seconds.is_some_and(|s| s <= 0.0)) || self.air.default_life_seconds <= 0.0 {
             return bad("air.attackers life_seconds must be positive");
         }
         if self.controls.unit_keys.len() != self.controls.unit_tools.len() || self.controls.unit_tools.is_empty() {
