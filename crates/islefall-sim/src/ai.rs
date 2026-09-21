@@ -339,3 +339,19 @@ pub fn encode_ais(ais: &[Ai]) -> Vec<u8> {
 pub fn decode_ais(bytes: &[u8]) -> Result<Vec<Ai>, String> {
     postcard::from_bytes(bytes).map_err(|e| format!("opponents: {e}"))
 }
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    use crate::config::test_config;
+
+    #[test]
+    fn the_opponents_state_survives_a_snapshot() {
+        let cfg = test_config();
+        let mut ai = Ai::new(2, Cell::new(9, 7), &cfg);
+        ai.queue.refill(1, 40);
+        let ais = vec![ai, Ai::new(3, Cell::new(1, 1), &cfg)];
+        assert_eq!(decode_ais(&encode_ais(&ais)).unwrap(), ais);
+        assert_eq!(decode_ais(&encode_ais(&[])).unwrap(), Vec::new());
+    }
+}

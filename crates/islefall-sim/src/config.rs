@@ -1023,10 +1023,18 @@ pub struct Controls {
     pub animation_fps: f32,
     pub screenshot_seconds: f32,
     pub palette: String,
+    /// Ctrl+Z, offline only: how many of the player's commands can be
+    /// taken back, one per press; 0 turns it off.
+    #[serde(default = "default_undo_depth")]
+    pub undo_depth: usize,
     /// Log the world's hash this often (0 for never), to compare runs.
     pub hash_every_seconds: f64,
     /// Where F5 saves a snapshot and F9 loads it from.
     pub save_file: String,
+}
+
+fn default_undo_depth() -> usize {
+    20
 }
 
 #[derive(Debug, Error)]

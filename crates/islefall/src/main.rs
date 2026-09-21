@@ -385,6 +385,9 @@ struct Sim {
     world: Option<World>,
     /// Computer opponents, acting after each tick.
     ais: Vec<Ai>,
+    /// Raised whenever the world is swapped for another (a loaded
+    /// snapshot, an undo): pictures tied to unit numbers start afresh.
+    generation: u64,
 }
 
 impl Sim {
@@ -406,6 +409,21 @@ struct Recording {
     net: Option<Net>,
     /// The local player, for recording and applying.
     owner: u8,
+    /// The moments before the player's latest commands, newest last, for
+    /// Ctrl+Z; never kept online or while a replay plays.
+    undo: Vec<UndoPoint>,
+    undo_depth: usize,
+    /// The opponents' state after the last tick: it lives outside the
+    /// world, and an undo point needs it too.
+    ai_state: Vec<u8>,
+}
+
+/// The world as it stood just before one of the player's commands.
+struct UndoPoint {
+    tick: u64,
+    world: Vec<u8>,
+    ais: Vec<u8>,
+    what: String,
 }
 
 impl Recording {
@@ -418,7 +436,15 @@ impl Recording {
             return None;
         }
         let tick = w.tick;
+        let before = (self.replay.is_none() && self.undo_depth > 0).then(|| w.snapshot());
+        let what = format!("{cmd:?}");
         let result = w.apply(self.owner, &cmd, scripts);
+        if let (Some(world), true) = (before, result.is_ok()) {
+            self.undo.push(UndoPoint { tick, world, ais: self.ai_state.clone(), what });
+            if self.undo.len() > self.undo_depth {
+                self.undo.remove(0);
+            }
+        }
         if let Some((path, replay)) = self.record.as_mut() {
             replay.record(tick, self.owner, cmd, result.is_ok());
             if let Err(e) = replay.save(&*path) {
@@ -1212,6 +1238,10 @@ fn main() {
         info!("joined {addr} as {name}; waiting in the lobby");
         recording.net = Some(net);
     }
+    // Taking commands back is for games against the computer only.
+    if recording.net.is_none() {
+        recording.undo_depth = cfg.controls.undo_depth;
+    }
     if let Some(path) = std::env::var_os("ISLEFALL_RECORD") {
         recording.record = Some((PathBuf::from(path), Replay { map: map_name.clone(), commands: Vec::new() }));
     }
@@ -1271,7 +1301,7 @@ fn main() {
     .add_systems(Update, (common_keys, animate, auto_screenshot))
     .add_systems(
         Update,
-        (camera_keys, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, knowledge_chooser, lobby_panel, campaign_panel, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
+        (camera_keys, undo_key, tool_keys, mouse_actions, bridge_keys, save_keys, ghost, title, hud, knowledge_chooser, lobby_panel, campaign_panel, overlays, sync_units, sync_bridges, sync_structures, sync_platforms, sync_energy_rings)
             .run_if(resource_equals(Mode::Island)),
     )
     .add_systems(
@@ -2145,7 +2175,7 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>, mut 
     if viewer.paused {
         return;
     }
-    let Sim { world: Some(world), ais } = &mut *sim else { return };
+    let Sim { world: Some(world), ais, .. } = &mut *sim else { return };
     if rec.net.is_some() {
         online_step(world, ais, &data, &mut rec, &mut player, &mut status, &mut lobby);
         return;
@@ -2161,6 +2191,9 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>, mut 
         info!("tick {} hash {:016x}", world.tick, world.hash());
     }
     world.step(&data.scripts);
+    if rec.undo_depth > 0 && !ais.is_empty() {
+        rec.ai_state = islefall_sim::ai::encode_ais(ais);
+    }
     for ai in ais.iter_mut() {
         let kit = islefall_sim::ai::AiKit { shooter: (ai.shooter.clone(), data.rules(&ai.shooter)), generator: (ai.generator.clone(), data.rules(&ai.generator)) };
         match ai.tick(world, &kit, &data.scripts) {
@@ -2628,9 +2661,20 @@ fn sync_units(
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut layers: Query<(Entity, &mut Transform, &mut Sprite, &mut Anchor, &mut ShapeSprite, &mut UnitLayer)>,
     mut known: Local<usize>,
+    mut generation: Local<u64>,
 ) {
     let w = sim.world();
     let g = data.grid();
+    // Another world has taken this one's place: unit numbers mean other
+    // units now, so every unit picture is made again.
+    if *generation != sim.generation {
+        *generation = sim.generation;
+        for (e, ..) in &layers {
+            commands.entity(e).despawn();
+        }
+        *known = 0;
+        return;
+    }
     while *known < w.units.len() {
         let i = *known;
         *known += 1;
@@ -2806,7 +2850,60 @@ fn key_code(name: &str) -> Option<KeyCode> {
 
 const DIGIT_KEYS: [KeyCode; 9] = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9];
 
+/// Ctrl+Z: take the player's latest command back. The world returns to the
+/// moment before it and runs forward to now without it, so only that
+/// command is lost and the clock does not turn back. Offline only.
+fn undo_key(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<GameData>, mut rec: ResMut<Recording>, mut status: ResMut<Status>) {
+    let ctrl = keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight);
+    if !ctrl || !keys.just_pressed(KeyCode::KeyZ) {
+        return;
+    }
+    if rec.net.is_some() {
+        status.say("no taking back in a network game".into());
+        return;
+    }
+    let Some(now) = sim.world.as_ref().map(|w| w.tick) else { return };
+    let Some(point) = rec.undo.pop() else {
+        status.say("nothing to take back".into());
+        return;
+    };
+    let back = now.saturating_sub(point.tick);
+    let (mut world, mut ais) = match (World::restore(&point.world), if point.ais.is_empty() { Ok(Vec::new()) } else { islefall_sim::ai::decode_ais(&point.ais) }) {
+        (Ok(w), Ok(a)) => (w, a),
+        (Err(e), _) | (_, Err(e)) => {
+            status.say(format!("cannot take it back: {e}"));
+            return;
+        }
+    };
+    // Forward again to the present, the opponents acting as they did.
+    for _ in 0..back {
+        world.step(&data.scripts);
+        for ai in ais.iter_mut() {
+            let kit = islefall_sim::ai::AiKit { shooter: (ai.shooter.clone(), data.rules(&ai.shooter)), generator: (ai.generator.clone(), data.rules(&ai.generator)) };
+            ai.tick(&mut world, &kit, &data.scripts);
+        }
+    }
+    // What happened on the way has been heard once already.
+    world.take_events();
+    rec.ai_state = islefall_sim::ai::encode_ais(&ais);
+    if let Some((path, replay)) = rec.record.as_mut() {
+        let owner = replay.commands.iter().rposition(|e| e.tick == point.tick && e.accepted);
+        if let Some(k) = owner {
+            replay.commands.remove(k);
+            let _ = replay.save(&*path);
+        }
+    }
+    sim.world = Some(world);
+    sim.ais = ais;
+    sim.generation += 1;
+    status.say(format!("taken back: {}", point.what));
+}
+
 fn tool_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<GameData>, mut player: ResMut<Player>, mut status: ResMut<Status>, mut rec: ResMut<Recording>) {
+    // Ctrl with a letter is a command of its own (Ctrl+Z), not a tool.
+    if keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) {
+        return;
+    }
     if keys.just_pressed(KeyCode::KeyX) || keys.just_pressed(KeyCode::KeyY) {
         let sel = player.selected;
         let cmd = if keys.just_pressed(KeyCode::KeyX) { Command::Cast { unit: sel } } else { Command::Pray { unit: sel } };
@@ -3880,6 +3977,7 @@ fn save_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<Sim>, data: Res<Ga
             Ok(w) => {
                 status.say(format!("loaded tick {} from {}", w.tick, path.display()));
                 sim.world = Some(w);
+                sim.generation += 1;
             }
             Err(e) => status.say(format!("cannot load {}: {e}", path.display())),
         }

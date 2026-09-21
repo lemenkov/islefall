@@ -480,6 +480,12 @@ build_tools = ["suncannon", "sunarcher", "sunbattery", "sunfactory", "treetwo", 
 # Units on letter keys: the Golem and the Balloon.
 unit_keys = ["U", "I"]
 unit_tools = ["sunwalker", "sunballoon"]
+# Ctrl+Z takes your latest command back, in games against the computer,
+# lessons and the campaign only, never over a network: the world returns
+# to the moment before the command and runs forward again without it.
+# This many commands are remembered, one taken back per press; 0 turns it
+# off. (The run forward takes longer the older the command is.)
+undo_depth = 20
 # Camera pan speed in source pixels per second, and the starting zoom.
 pan_speed = 120.0
 zoom = 4.0

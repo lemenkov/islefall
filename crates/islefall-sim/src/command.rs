@@ -392,6 +392,40 @@ mod tests {
         assert_eq!(sound, w.bridges.len() - before, "the hardened piece is sound, the first stays cracked");
     }
 
+    #[test]
+    fn taking_a_command_back_leaves_the_world_as_if_it_was_never_given() {
+        let scripts = test_scripts();
+        // Run a while, perhaps give a command, run on, perhaps take it back:
+        // restore the moment before it and run the same ticks again.
+        let run = |give: bool, take_back: bool| {
+            let mut w = arena();
+            for _ in 0..50 {
+                w.step(&scripts);
+            }
+            let before = w.snapshot();
+            if give {
+                w.apply(0, &Command::PlaceUnit { kind: "sunwalker".into(), at: Cell::new(4, 1) }, &scripts).unwrap();
+                w.apply(0, &Command::Move { unit: 0, to: Cell::new(8, 4) }, &scripts).unwrap();
+            }
+            for _ in 0..90 {
+                w.step(&scripts);
+            }
+            if take_back {
+                let mut again = World::restore(&before).unwrap();
+                for _ in 0..90 {
+                    again.step(&scripts);
+                }
+                again.take_events();
+                w = again;
+            }
+            w.take_events();
+            w.hash()
+        };
+        let never = run(false, false);
+        assert_eq!(run(true, true), never, "given and taken back: the same world as never given");
+        assert_ne!(run(true, false), never, "given and kept: a different world");
+    }
+
     fn script() -> Replay {
         let mut r = Replay { map: "arena".into(), commands: Vec::new() };
         r.record(0, 0, Command::PlaceUnit { kind: "sunwalker".into(), at: Cell::new(4, 1) }, true);
