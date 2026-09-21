@@ -1125,7 +1125,7 @@ impl World {
         if build_ticks > 0 {
             s.building = build_ticks;
             s.build_ticks = build_ticks;
-            s.hp = 1.max(s.max_hp.min(1));
+            s.hp = Self::shell_health(s.max_hp, self.cfg.construction.start_health_percent, 0.0);
         }
         let mut s = s;
         s.id = self.next_structure_id;
@@ -1948,6 +1948,13 @@ impl World {
         reached
     }
 
+    /// The health of an undamaged shell at a given build progress: a share
+    /// of the full health at first, all of it when the stream is done.
+    fn shell_health(max_hp: i32, start_percent: i32, progress: f32) -> i32 {
+        let start = start_percent.clamp(0, 100) as f32 / 100.0;
+        ((max_hp as f32 * (start + (1.0 - start) * progress)).round() as i32).clamp(1, max_hp.max(1))
+    }
+
     /// Streams build every placed shell they can reach; a shell the stream
     /// cannot reach waits. Health grows with the build.
     fn run_construction(&mut self) {
@@ -1960,12 +1967,14 @@ impl World {
                 if s.owner != owner || s.complete() || !s.cells().any(|c| reach.contains(&c)) {
                     continue;
                 }
+                let start = self.cfg.construction.start_health_percent;
                 let s = &mut self.structures[i];
+                // The stream adds health as it builds; what enemy fire took stays taken.
+                let before = Self::shell_health(s.max_hp, start, s.progress());
                 s.building -= 1;
-                let progress = s.progress();
-                s.hp = ((s.max_hp as f32 * progress).round() as i32).max(1).min(s.max_hp.max(1));
+                let after = Self::shell_health(s.max_hp, start, s.progress());
+                s.hp = (s.hp + after - before).min(s.max_hp.max(1));
                 if s.complete() {
-                    s.hp = s.max_hp;
                     done.push((s.kind.clone(), s.centre(), s.owner));
                 }
             }
@@ -3407,7 +3416,7 @@ mod tests {
         let cannon = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 600, cost: 400, build_seconds: 2.0, range: 6, hp_per_sec: 10, damage_per_shot: 50, ..TypeRules::plain() };
         let near = w.drop_structure("suncannon", &cannon, Cell::new(4, 1)).unwrap();
         let far = w.drop_structure("suncannon", &cannon, Cell::new(22, 1)).unwrap();
-        assert!(!w.structures[near].complete() && w.structures[near].hp == 1, "a shell at first");
+        assert!(!w.structures[near].complete() && w.structures[near].hp == 150, "a shell at first, with a quarter of its health");
         assert_eq!(w.take_events().iter().filter(|e| e.what == EventKind::Placed).count(), 2);
         let ticks = w.cfg.ticks(2.0);
         for _ in 0..ticks {
@@ -3423,6 +3432,35 @@ mod tests {
             w.step(&scripts);
         }
         assert!(w.structures[far].complete(), "bridged, the stream arrives");
+    }
+
+    #[test]
+    fn a_structure_rebuilt_under_fire_is_not_felled_by_the_first_shot() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 12, 8), 0);
+        w.powers[0] = 10_000;
+        let scripts = test_scripts();
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        let cannon = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 0, range: 12, hp_per_sec: 10, damage_per_shot: 50, delay_between_shots: 1.0, ..TypeRules::plain() };
+        w.push_island(IslandMap::rect(Cell::new(14, 0), 4, 4), 1);
+        w.drop_structure_for(1, "windcannon", &cannon, Cell::new(15, 1)).unwrap_or_else(|e| panic!("{e}"));
+        w.energy_enforced = true;
+        let shop = TypeRules { foot_x: 3, foot_y: 3, max_hit_points: 800, cost: 400, build_seconds: 4.0, is_workshop: true, ..TypeRules::plain() };
+        let first = w.drop_structure("sunworkshop", &shop, Cell::new(8, 5)).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(w.structures[first].hp, 200, "a quarter of its health at first");
+        w.destroy_structure(first);
+        assert_eq!(w.structures.len(), 2, "the workshop fell");
+        let again = w.drop_structure("sunworkshop", &shop, Cell::new(8, 5)).unwrap_or_else(|e| panic!("{e}"));
+        let mut hit = false;
+        for _ in 0..w.cfg.ticks(4.0) {
+            w.step(&scripts);
+            assert_eq!(w.structures.len(), 3, "the new workshop stands at tick {}", w.tick);
+            hit |= w.take_events().iter().any(|e| e.what == EventKind::Hit);
+        }
+        assert!(hit, "the cannon did fire at it");
+        let s = &w.structures[again];
+        assert!(s.complete() && s.hp < s.max_hp && s.hp >= 800 - 5 * 50, "built, and the damage stayed: {}", s.hp);
     }
 
     #[test]

@@ -87,7 +87,7 @@ pub fn fort_to_map(fortfile: &Fort, mission: Option<&Mission>, cfg: &Config, nam
         match item.code {
             fort::CODE_GROUND => {}
             c if fort::CODE_BRIDGES.contains(&c) => bridges.entry(fc.bridge_owner).or_default().push([item.x, item.y]),
-            fort::CODE_GEYSER => map.structures.push(PlacementDef { owner: 0, kind: fc.geyser.clone(), at: [item.x, item.y], spell: None, frame: None }),
+            fort::CODE_GEYSER => map.structures.push(PlacementDef { owner: 0, kind: fc.geyser.clone(), at: [item.x, item.y], spell: None, frame: None, health: None }),
             _ => {
                 let island = island_of.get(&at).copied();
                 place_item(item, at, owner_of(item), fc, &mut map, &mut report, island);
@@ -164,7 +164,7 @@ pub fn fort_to_map(fortfile: &Fort, mission: Option<&Mission>, cfg: &Config, nam
         let island = blob(&mut rng, cw, ch, cfg.generate.fill, &keep);
         map.islands.push(IslandDef { owner: Some(our as u8), theme: theme.clone(), origin: [origin.x, origin.y], size: [cw, ch], remove: Vec::new(), cells: island.cells().map(|c| [c.x + origin.x, c.y + origin.y]).collect() });
         for (kind, at) in placements {
-            map.structures.push(PlacementDef { owner: our as u8, kind, at: [at.x + origin.x, at.y + origin.y], spell: None, frame: None });
+            map.structures.push(PlacementDef { owner: our as u8, kind, at: [at.x + origin.x, at.y + origin.y], spell: None, frame: None, health: None });
         }
         for (kind, at) in units {
             map.units.push(UnitDef { owner: our as u8, kind, at: [at.x + origin.x, at.y + origin.y], move_to: None, harvest: None });
@@ -210,7 +210,7 @@ fn place_item(item: &Item, at: Cell, owner: u8, fc: &crate::config::FortRules, m
     if let (Some(i), Some(_)) = (island, item.owner()) {
         map.islands[i].owner = Some(owner);
     }
-    map.structures.push(PlacementDef { owner, kind, at: [at.x, at.y], spell: None, frame: None });
+    map.structures.push(PlacementDef { owner, kind, at: [at.x, at.y], spell: None, frame: None, health: None });
 }
 
 #[cfg(test)]

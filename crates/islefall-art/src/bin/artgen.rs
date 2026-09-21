@@ -8,6 +8,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use islefall_art::Picture;
+use islefall_art::fire::{Blast, Flame, Smoke, strip};
 use islefall_art::ground::Ground;
 use islefall_art::rock::Rock;
 
@@ -43,6 +44,32 @@ enum Command {
         seed: u32,
         out: PathBuf,
     },
+    /// The frames of a looping flame, side by side.
+    Flame {
+        #[arg(long, default_value_t = 12)]
+        width: u32,
+        #[arg(long, default_value_t = 20)]
+        height: u32,
+        #[arg(long, default_value_t = 7)]
+        seed: u32,
+        out: PathBuf,
+    },
+    /// The frames of a puff of smoke, side by side.
+    Smoke {
+        #[arg(long, default_value_t = 14)]
+        size: u32,
+        #[arg(long, default_value_t = 7)]
+        seed: u32,
+        out: PathBuf,
+    },
+    /// The frames of an explosion, side by side.
+    Blast {
+        #[arg(long, default_value_t = 64)]
+        size: u32,
+        #[arg(long, default_value_t = 7)]
+        seed: u32,
+        out: PathBuf,
+    },
 }
 
 fn write_png(pic: &Picture, path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
@@ -60,6 +87,9 @@ fn main() -> ExitCode {
             let rock = Rock { lit: !unlit, ..Rock::default() };
             write_png(&rock.underside(width.max(1), seed), &out)
         }
+        Command::Flame { width, height, seed, out } => write_png(&strip(&Flame { width, height, ..Flame::default() }.frames(seed), 0), &out),
+        Command::Smoke { size, seed, out } => write_png(&strip(&Smoke { size, ..Smoke::default() }.frames(seed), 0), &out),
+        Command::Blast { size, seed, out } => write_png(&strip(&Blast { size, ..Blast::default() }.frames(seed), 0), &out),
         Command::Ground { width, height, seed, out } => write_png(&Ground::default().surface(width.max(1), height.max(1), seed, |_, _| true), &out),
     };
     match result {

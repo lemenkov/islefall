@@ -160,7 +160,8 @@ Generators show where units can be placed.
 | `Space` / `P` | Pauses; saves a screenshot. |
 | `Ctrl+W` / `Ctrl+Q` | Leaves the game (so do `Alt+F4` and the window's close button). |
 | `F5` / `F9` | Saves the world as a snapshot; loads it back. |
-| `F4` / `F3` | The islands' ground and undersides are Islefall's generated art by default; `F4` switches both to the original's pixel art and back, `F3` the undersides alone (see `docs/ART.md`). |
+| `F4` / `F3` | The islands' ground and undersides and the flames on damaged structures are Islefall's generated art by default; `F4` switches all of it off and back, `F3` the undersides alone (see `docs/ART.md`). |
+| `F6` | Switches between the original's explosion and a generated one (an experiment, off by default). |
 | `Ctrl+Z` | Takes your latest command back: the world returns to the moment before it and runs forward again without it. Against the computer, in lessons and in the campaign only, never over a network; press again to take back the one before, up to twenty. |
 
 The panel on the left shows the Storm Power, the piece queue, the build
@@ -199,6 +200,13 @@ undersides alone. To start with the original's art, set `generated` and
 `data/rules.toml`; `[fringe.rock]` and `[fringe.ground.<theme>]` there hold
 every setting of the two generators. Rims, bridges, buildings and units
 are still the original's.
+
+- **Flames and smoke** on a damaged structure are generated too: looping
+  flames of three sizes stand on the structure's own picture, wander, and
+  give off puffs of smoke that thin out. `F4` switches them with the
+  rest (`generated_fire` in `[effects]`).
+- **Explosions** can be generated as well, as an experiment: `F6` swaps
+  the original's fireball for one of ours (`generated_blast`).
 
 The generators live in `crates/islefall-art`, which knows nothing of the
 engine, and `artgen` writes their pictures as PNG:

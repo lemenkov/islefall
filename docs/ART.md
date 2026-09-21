@@ -58,10 +58,29 @@ the rules. `generated_ground` in `[fringe]` switches it on or off, `F4`
 switches it in the game together with the undersides, and `[fringe.ground.<theme>]` shapes each of the
 four themes. The rim tiles stay the original's.
 
+**Fire** (`fire::Flame`, `fire::Smoke`, `fire::Blast`): a flame that
+loops (a climbing noise pattern eating into a teardrop, two copies
+cross-faded so the last frame runs into the first), a puff of smoke that
+swells and thins by ordered dithering rather than by going half-clear,
+and an explosion that bursts out, breaks up into smoke and throws sparks.
+The game makes three sizes of flame in a few variants at start-up and
+stands them on opaque pixels of a damaged structure's own picture, so
+the fire is on the building and not on the grass beside it; this is the
+default (`generated_fire` in `[effects]`, `F4` with the rest), since what
+it replaces was never the original's art but specks of our own. The
+explosion replaces the original's fireball and is therefore an
+experiment, off until it has been compared (`generated_blast`, `F6`).
+`[effects.fire]` holds every setting.
+
+```sh
+cargo run -p islefall-art --bin artgen -- flame flame.png
+cargo run -p islefall-art --bin artgen -- blast --size 96 blast.png
+```
+
 ## Candidates
 
-The faces of left and right cliffs, which the original has no pieces for; bridges; effects
-such as smoke, fire and the construction cloud. Units and buildings are
+The faces of left and right cliffs, which the original has no pieces for; bridges; missile
+impacts and the construction cloud. Units and buildings are
 drawn characters, not texture, and are not candidates.
 
 Other ways of making pictures were weighed: shaders (alive on screen, but

@@ -38,6 +38,7 @@
 //!
 //! Keys in both modes: `Space` pauses, `P` saves a screenshot.
 
+mod fire;
 mod sprites;
 mod world;
 
@@ -859,6 +860,10 @@ struct ArtMode {
     generated: bool,
     /// The same for the ground; `F4` switches it.
     ground: bool,
+    /// Drawn flames and smoke on burning structures; `F4` switches them too.
+    fire: bool,
+    /// Generated explosions in place of the original's; `F6` switches them.
+    blast: bool,
 }
 
 fn art_toggle(
@@ -873,6 +878,10 @@ fn art_toggle(
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     tiles: Query<(Entity, &TerrainTile)>,
 ) {
+    if keys.just_pressed(KeyCode::F6) {
+        mode.blast = !mode.blast;
+        status.say(format!("explosions: {} (F6 switches)", if mode.blast { "generated" } else { "the original's" }));
+    }
     let (rock, ground) = (keys.just_pressed(KeyCode::F3), keys.just_pressed(KeyCode::F4));
     if !rock && !ground {
         return;
@@ -886,6 +895,8 @@ fn art_toggle(
     if ground {
         mode.ground = !mode.ground;
         mode.generated = mode.ground;
+        mode.fire = mode.ground;
+        mode.blast = mode.ground && data.cfg.effects.generated_blast;
     }
     for (e, t) in &tiles {
         if !t.platform {
@@ -902,7 +913,7 @@ fn art_toggle(
         world::spawn_island(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, island, theme, false, owned, &cfg);
     }
     let which = |on: bool| if on { "generated" } else { "the original's" };
-    status.say(format!("ground: {}, undersides: {} (F4 switches both, F3 the undersides alone)", which(mode.ground), which(mode.generated)));
+    status.say(format!("ground: {}, undersides: {}, flames: {} (F4 switches all, F3 the undersides alone, F6 the explosions)", which(mode.ground), which(mode.generated), if mode.fire { "drawn" } else { "specks" }));
 }
 
 /// The wait before an online game: who has joined and who is ready.
@@ -1050,6 +1061,8 @@ fn structure_effects(
     data: Res<GameData>,
     time: Res<Time>,
     happenings: Res<Happenings>,
+    mode: Res<ArtMode>,
+    fire_art: Option<Res<fire::FireArt>>,
     mut lib: ResMut<ShapeLibrary>,
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
@@ -1057,8 +1070,12 @@ fn structure_effects(
 ) {
     let g = data.grid();
     let fx = &data.cfg.effects;
-    if let Some(boom) = &fx.destroyed {
-        for e in happenings.0.iter().filter(|e| e.what == islefall_sim::EventKind::Destroyed) {
+    for e in happenings.0.iter().filter(|e| e.what == islefall_sim::EventKind::Destroyed) {
+        if let Some(art) = fire_art.as_ref().filter(|_| mode.blast) {
+            let rules = data.rules(&e.kind);
+            // The event's cell is the footprint's middle; the picture stands taller than that.
+            art.blast(&mut commands, &data, rules.foot_x.max(rules.foot_y), cell_to_world(e.at, g) + Vec2::new(0.0, g.cell_h as f32 * 0.5), Z_UNIT + 3.0);
+        } else if let Some(boom) = &fx.destroyed {
             spawn_effect(&mut commands, &data, &mut lib, &mut images, &mut layouts, boom, cell_to_world(e.at, g), Z_UNIT + 3.0);
         }
     }
@@ -1242,6 +1259,7 @@ fn main() {
     let data = data_dir();
     let cfg = Config::load(data.join("rules.toml")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("rules.toml").display())));
     let (art_generated, art_ground) = (cfg.fringe.generated, cfg.fringe.generated_ground);
+    let (art_fire, art_blast) = (cfg.effects.generated_fire, cfg.effects.generated_blast);
     let scripts = Scripts::load(data.join("scripts/rules.rhai")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("scripts/rules.rhai").display())));
     let install = Installation::load(&dir).unwrap_or_else(|e| fail(format!("failed to load NetStorm data from {}: {e}", dir.display())));
     let campaign = Campaign::from_env(&install);
@@ -1343,9 +1361,11 @@ fn main() {
         paused: campaign.as_ref().is_some_and(|c| c.waits()),
     })
     .insert_resource(CampaignState(campaign))
-    .insert_resource(ArtMode { generated: art_generated, ground: art_ground })
+    .insert_resource(ArtMode { generated: art_generated, ground: art_ground, fire: art_fire, blast: art_blast })
     .init_resource::<ConstructionCache>()
     .add_systems(Startup, setup)
+    .add_systems(Startup, fire::make_fire_art)
+    .add_systems(Update, fire::run_flickers.run_if(resource_equals(Mode::Island)))
     .add_systems(Update, window_icon)
     .add_systems(Update, quit_keys)
     .add_systems(Startup, move |mut commands: Commands, game: Res<GameData>| {
@@ -2056,6 +2076,10 @@ fn setup_map(
         match placed {
             Ok(i) => {
                 w.structures[i].variant = st.frame;
+                if let Some(share) = st.health {
+                    let s = &mut w.structures[i];
+                    s.hp = (s.max_hp as i64 * share.min(100) as i64 / 100).max(1) as i32;
+                }
                 if w.structures[i].is_obelisk {
                     w.structures[i].spell = st.spell.clone();
                     w.assign_obelisk_spell(i);
@@ -3832,14 +3856,42 @@ struct Ember {
 
 /// Damaged structures burn: flames start at random points of the
 /// footprint at a rate set by the damage, rise, fade, and leave smoke.
-fn burning(mut commands: Commands, sim: Res<Sim>, data: Res<GameData>, time: Res<Time>, mut embers: Query<(Entity, &mut Ember, &mut Transform, &mut Sprite)>, mut rng: Local<Option<Pcg32>>, white: Res<Solid>) {
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn burning(
+    mut commands: Commands,
+    sim: Res<Sim>,
+    data: Res<GameData>,
+    time: Res<Time>,
+    mode: Res<ArtMode>,
+    art: Option<Res<fire::FireArt>>,
+    images: Res<Assets<Image>>,
+    layouts: Res<Assets<TextureAtlasLayout>>,
+    pictures: Query<(&StructureSprite, &Sprite, &Anchor, &Transform), (Without<fire::Flicker>, Without<Ember>)>,
+    drawn: Query<(Entity, &fire::FlameOf)>,
+    mut embers: Query<(Entity, &mut Ember, &mut Transform, &mut Sprite), Without<StructureSprite>>,
+    mut rng: Local<Option<Pcg32>>,
+    white: Res<Solid>,
+) {
     let w = sim.world();
     let fx = &data.cfg.effects;
     let g = data.grid();
     let dt = time.delta_secs();
     let rng = rng.get_or_insert_with(|| Pcg32::seed_from_u64(0x2545_F491_4F6C_DD1D));
     let mut next = || rng.random::<f32>();
-    for s in &w.structures {
+    // Drawn flames standing on the structure's picture, or the rising specks.
+    let specks = match art.as_ref().filter(|_| mode.fire) {
+        Some(art) => {
+            fire::flames(&mut commands, &sim, &data, art, &images, &layouts, &pictures, &drawn, &mut next);
+            false
+        }
+        None => {
+            for (e, _) in &drawn {
+                commands.entity(e).despawn();
+            }
+            true
+        }
+    };
+    for s in w.structures.iter().filter(|_| specks) {
         if s.max_hp == 0 || !s.complete() {
             continue;
         }

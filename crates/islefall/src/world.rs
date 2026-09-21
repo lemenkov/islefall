@@ -343,7 +343,7 @@ fn generated_ground(commands: &mut Commands, images: &mut Assets<Image>, palette
 }
 
 /// The palette's nearest colour, so generated art sits beside the sprites.
-fn snap(palette: &Palette, rgb: [u8; 3]) -> [u8; 3] {
+pub fn snap(palette: &Palette, rgb: [u8; 3]) -> [u8; 3] {
     let far = |c: &[u8; 3]| (0..3).map(|k| (c[k] as i32 - rgb[k] as i32).pow(2)).sum::<i32>();
     palette.colors.iter().min_by_key(|c| far(c)).copied().unwrap_or(rgb)
 }

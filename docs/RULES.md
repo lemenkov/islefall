@@ -63,9 +63,14 @@ ground of the island it stands on (`ground_label` and `ground_order`).
 A missile's landing shows the original's small blast and a destroyed
 structure its great fireball, both from the `anim` container, and a
 structure under construction sparkles with `flare` frames now and then
-(`[effects]`). A damaged structure burns: below half health flames rise from random
-points of its footprint and leave smoke, harder below a quarter, all
-generated as the original's particle system did (`[effects]`). An
+(`[effects]`). A damaged structure burns: below half health flames stand
+on its picture, wander and leave smoke, more and larger below a quarter.
+The flames and the smoke are Islefall's generated art
+(`effects.generated_fire`, shaped by `[effects.fire]`; `false` or `F4`
+gives rising specks over the footprint instead), and
+`effects.generated_blast` or `F6` swaps the great fireball for a
+generated explosion. A map may open on a battlefield: `health` on a
+structure is its starting health in per cent. An
 Energy source's stars are the original's twinkling `range` frames in the
 source's theme colour (`energy.star_type` and `star_labels`). A geyser's 49 idle frames are
 three runs of the spout, full, half and low; `[animation].stages` says
@@ -387,10 +392,13 @@ building rewards a quarter of its Storm Power value (adjustable by the
 Battlemaster); attackers that cost nothing return nothing.
 
 Islefall: a structure placed in play (not by the map, and never a geyser)
-starts as a shell with one hit point. Each tick, every player's streams
+starts as a shell with `construction.start_health_percent` of its health
+(a quarter, a guess; with a single hit point, whatever had felled a
+structure felled its replacement with the next shot). Each tick, every player's streams
 reach the ground connected by land or bridge to one of their complete
 Temples, Workshops or Outposts; a shell any of whose cells is reached
-gains a tick of build, its health rising with the progress, and stands
+gains a tick of build and that tick's share of the remaining health, so
+that damage taken while building stays taken, and stands
 once `construction_seconds` (from cost, `constructionRate` and
 `construction.power_per_rate`, a guess) have passed. A shell shoots
 nothing, produces no Energy, launches nothing, builds nothing and takes

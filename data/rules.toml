@@ -229,6 +229,10 @@ power_per_rate = 5.0
 # (the buildings; the original shows a Workshop rising, so not "a moment"):
 # a 600-cost Workshop stands in 12 seconds.
 default_rate = 10.0
+# The share of its full health a shell has when placed (guess); the stream
+# adds the rest. With one hit point, whatever felled a structure felled
+# its replacement with the next shot.
+start_health_percent = 25
 
 [combat]
 # Cells around an exploding structure that take damage and bridge shock (guess).
@@ -577,6 +581,42 @@ flame_rise_px = 18.0
 smoke_per_flame = 0.5
 smoke_seconds = 1.6
 smoke_rise_px = 14.0
+# Flames and smoke drawn by `islefall-art`, standing on the structure's own
+# picture (`false` for the rising specks above; `F4` switches in the game),
+# and a generated explosion in place of `destroyed` (an experiment, off;
+# `F6` switches in the game).
+generated_fire = true
+generated_blast = false
+
+# The fire generator: colours from the coolest, smoke from the darkest,
+# both snapped to the palette; flame sizes as width and height, a burning
+# structure using all but the largest; flames per footprint cell while
+# burning and blazing and the most on one structure; how long a flame
+# stays put; the part of the picture flames may stand on (left, top,
+# right, bottom as shares); explosion sizes for one cell, for up to
+# `blast_medium_cells` along the longer side, and for larger.
+[effects.fire]
+ramp = [[92, 20, 12], [168, 40, 12], [228, 92, 16], [248, 156, 28], [252, 208, 60], [255, 240, 150]]
+smoke_ramp = [[44, 42, 44], [76, 74, 76], [112, 110, 112], [152, 150, 152]]
+flame_sizes = [[8, 12], [10, 16], [12, 20]]
+variants = 3
+flame_frames = 8
+flame_fps = 12.0
+flicker = 0.9
+lick = 0.35
+sites_per_cell = 0.15
+blaze_sites_per_cell = 0.3
+max_sites = [4, 8]
+site_seconds = [1.2, 3.0]
+stand_on = [0.15, 0.3, 0.85, 0.85]
+smoke_size = 16
+smoke_frames = 10
+smoke_every = 0.7
+blast_sizes = [40, 64, 96]
+blast_medium_cells = 3
+blast_frames = 16
+blast_fps = 18.0
+sparks = 14
 
 # The panel down the left: the original's `fortgump` art (a stone tile,
 # the tall ruler with its dial, the Storm Power box), the crystal beside

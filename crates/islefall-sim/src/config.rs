@@ -465,6 +465,84 @@ pub struct Effects {
     pub smoke_per_flame: f32,
     pub smoke_seconds: f32,
     pub smoke_rise_px: f32,
+    /// Drawn flames and smoke from `islefall-art` on a burning structure,
+    /// standing on its picture; the rising specks above when `false`.
+    #[serde(default = "yes")]
+    pub generated_fire: bool,
+    /// A generated explosion where a structure dies, in place of `destroyed`.
+    #[serde(default)]
+    pub generated_blast: bool,
+    #[serde(default)]
+    pub fire: FireRules,
+}
+
+/// The fire generator's settings; lengths are source pixels. See
+/// `islefall_art::fire`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct FireRules {
+    /// Colours of fire from the coolest to the hottest, and of smoke from
+    /// the darkest, snapped to the game's palette.
+    pub ramp: Vec<[u8; 3]>,
+    pub smoke_ramp: Vec<[u8; 3]>,
+    /// Width and height of each size of flame, smallest first; a blazing
+    /// structure uses them all, a burning one all but the largest.
+    pub flame_sizes: Vec<[u32; 2]>,
+    /// Different flames made of each size.
+    pub variants: u32,
+    pub flame_frames: u32,
+    pub flame_fps: f32,
+    pub flicker: f64,
+    pub lick: f64,
+    /// Flames standing on a burning and on a blazing structure, per footprint cell.
+    pub sites_per_cell: f32,
+    pub blaze_sites_per_cell: f32,
+    /// The most flames on one structure, however large.
+    pub max_sites: [usize; 2],
+    /// The shortest and the longest a flame stays where it is.
+    pub site_seconds: [f32; 2],
+    /// The part of a structure's picture flames may stand on, as shares
+    /// of its width and height: left, top, right, bottom.
+    pub stand_on: [f32; 4],
+    pub smoke_size: u32,
+    pub smoke_frames: u32,
+    /// Seconds between the puffs of one flame.
+    pub smoke_every: f32,
+    /// Explosion sizes, smallest first: for one cell, for up to
+    /// `blast_medium_cells` along the longer side, and for larger.
+    pub blast_sizes: [u32; 3],
+    pub blast_medium_cells: i32,
+    pub blast_frames: u32,
+    pub blast_fps: f32,
+    pub sparks: u32,
+}
+
+impl Default for FireRules {
+    fn default() -> Self {
+        FireRules {
+            ramp: vec![[92, 20, 12], [168, 40, 12], [228, 92, 16], [248, 156, 28], [252, 208, 60], [255, 240, 150]],
+            smoke_ramp: vec![[44, 42, 44], [76, 74, 76], [112, 110, 112], [152, 150, 152]],
+            flame_sizes: vec![[8, 12], [10, 16], [12, 20]],
+            variants: 3,
+            flame_frames: 8,
+            flame_fps: 12.0,
+            flicker: 0.9,
+            lick: 0.35,
+            sites_per_cell: 0.15,
+            blaze_sites_per_cell: 0.3,
+            max_sites: [4, 8],
+            site_seconds: [1.2, 3.0],
+            stand_on: [0.15, 0.3, 0.85, 0.85],
+            smoke_size: 16,
+            smoke_frames: 10,
+            smoke_every: 0.7,
+            blast_sizes: [40, 64, 96],
+            blast_medium_cells: 3,
+            blast_frames: 16,
+            blast_fps: 18.0,
+            sparks: 14,
+        }
+    }
 }
 
 /// What flies from a shooter to its target.
@@ -931,10 +1009,18 @@ pub struct Construction {
     /// none (the buildings: a Workshop is seen rising in the original).
     #[serde(default = "default_construction_rate")]
     pub default_rate: f64,
+    /// The share of its full health a shell has when it is placed; the
+    /// stream adds the rest as it builds.
+    #[serde(default = "default_start_health_percent")]
+    pub start_health_percent: i32,
 }
 
 fn default_construction_rate() -> f64 {
     10.0
+}
+
+fn default_start_health_percent() -> i32 {
+    25
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

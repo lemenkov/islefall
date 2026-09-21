@@ -68,6 +68,10 @@ pub struct PlacementDef {
     /// Which of a type's variant frames to show (a tree's shape), else one is chosen per cell.
     #[serde(default)]
     pub frame: Option<u32>,
+    /// Health at the start as a percentage of the type's full health, for
+    /// a map that opens on a battlefield; full when omitted.
+    #[serde(default)]
+    pub health: Option<u8>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
