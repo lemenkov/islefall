@@ -1823,6 +1823,16 @@ impl World {
                     };
                 }
             }
+            // A carrier on its way to an Altar that is gone keeps the
+            // priest and waits for orders; other Altars keep their number.
+            if let Task::Sacrifice { altar } = u.task {
+                if altar == index {
+                    u.task = Task::Idle;
+                    u.path.clear();
+                } else if altar > index {
+                    u.task = Task::Sacrifice { altar: altar - 1 };
+                }
+            }
         }
     }
 
@@ -2025,8 +2035,23 @@ impl World {
     }
 
     pub fn damage_unit(&mut self, index: usize, amount: i32) {
+        let shield = self.cfg.priest.stun_shield;
         let Some(u) = self.units.get_mut(index) else { return };
         if !u.alive {
+            return;
+        }
+        if u.is_priest && shield && amount > 0 {
+            // The manual: a stunned priest's shield keeps him from being
+            // destroyed; nor does the blow that stuns him kill him.
+            if u.hp * 2 <= u.max_hp {
+                return;
+            }
+            u.hp = (u.hp - amount).max(1);
+            if u.hp * 2 <= u.max_hp {
+                u.stunned = true;
+                u.path.clear();
+                u.task = Task::Idle;
+            }
             return;
         }
         u.hp -= amount;
@@ -2242,7 +2267,7 @@ impl World {
                 }
                 Task::Sacrifice { altar } => {
                     let owner = u.owner;
-                    let (Some(a), Some(p)) = (self.structures.get(altar), u.carrying) else {
+                    let (Some(a), Some(p)) = (self.structures.get(altar).filter(|a| a.is_altar && a.owner == u.owner && a.complete()), u.carrying) else {
                         self.units[i].task = Task::Idle;
                         continue;
                     };
@@ -3620,8 +3645,9 @@ mod tests {
         for _ in 0..w.cfg.ticks(1.0) + 1 {
             w.step(&scripts);
         }
-        assert_eq!(w.units[enemy].hp, 100 - 250, "Devastation struck the priest");
-        assert!(!w.units[enemy].alive || w.units[enemy].stunned);
+        // The manual's mission text: the Spell stuns the priest, ready for capture.
+        assert_eq!(w.units[enemy].hp, 1, "Devastation struck the priest, whom the stunning blow cannot kill");
+        assert!(w.units[enemy].alive && w.units[enemy].stunned);
         assert_eq!(w.units[g].hp, 50, "spells do not affect the caster");
         // The priest prays for his own Spell.
         let mine = w.spawn_unit("priest", &priest, Cell::new(2, 4)).unwrap();
@@ -3780,6 +3806,61 @@ mod tests {
         assert!(!w.units[p].alive, "sacrificed");
         assert_eq!(w.knowledge, 1);
         assert!(w.structures[a].is_adjacent(w.units[g].cell()), "the carrier stands beside the altar, never on it");
+    }
+
+    #[test]
+    fn a_stunned_priests_shield_keeps_him_alive() {
+        let mut w = world();
+        let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, threat: 25, speed: 1.8, ..TypeRules::plain() };
+        let p = w.spawn_unit_for(1, "priest", &priest, Cell::new(3, 1)).unwrap();
+        w.damage_unit(p, 30);
+        assert!(w.units[p].hp == 70 && !w.units[p].stunned);
+        w.damage_unit(p, 500);
+        assert!(w.units[p].alive && w.units[p].stunned, "the blow that stuns does not kill");
+        let hp = w.units[p].hp;
+        for _ in 0..20 {
+            w.damage_unit(p, 40);
+        }
+        assert!(w.units[p].alive && w.units[p].hp == hp, "the shield takes the rest");
+        w.cfg.priest.stun_shield = false;
+        w.damage_unit(p, 500);
+        assert!(!w.units[p].alive, "without the rule fire finishes him");
+    }
+
+    #[test]
+    fn an_altar_can_be_destroyed_and_the_carrier_keeps_the_priest() {
+        let mut w = world();
+        w.push_island(IslandMap::rect(Cell::new(0, 4), 12, 8), 0);
+        w.powers[0] = 2000;
+        let tower = TypeRules { max_hit_points: 100, cost: 10, ..TypeRules::plain() };
+        let t = w.drop_structure("sunblocker", &tower, Cell::new(10, 5)).unwrap();
+        let body = TypeRules { max_hit_points: 1500, ..TypeRules::plain() };
+        let altar = TypeRules { foot_x: 3, foot_y: 3, is_altar: true, may_drop_on_rim: true, cost: 500, ..TypeRules::plain() }.with_body(&body);
+        let a = w.drop_structure("dais", &altar, Cell::new(8, 10)).unwrap();
+        assert_eq!(w.structures[a].max_hp, 1500, "the dais has the hit points of the altar that stands on it");
+        let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, speed: 1.8, ..TypeRules::plain() };
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
+        let p = w.spawn_unit_for(1, "priest", &priest, Cell::new(3, 7)).unwrap();
+        let g = w.spawn_unit("sunwalker", &golem, Cell::new(2, 7)).unwrap();
+        w.damage_unit(p, 60);
+        let scripts = test_scripts();
+        assert!(w.order_capture(g, p));
+        for _ in 0..30 {
+            w.step(&scripts);
+        }
+        assert_eq!(w.units[g].carrying, Some(p));
+        assert!(w.order_sacrifice(g, a));
+        // A structure with a lower number goes: the order still means the Altar.
+        w.destroy_structure(t);
+        assert!(matches!(w.units[g].task, Task::Sacrifice { altar } if w.structures[altar].is_altar));
+        let altar_now = w.structures.iter().position(|s| s.is_altar).unwrap();
+        w.damage_structure(altar_now, 1500);
+        assert!(!w.structures.iter().any(|s| s.is_altar), "the Altar fell");
+        for _ in 0..60 {
+            w.step(&scripts);
+        }
+        assert!(w.units[p].alive && w.units[g].carrying == Some(p), "no Altar, no sacrifice");
+        assert!(matches!(w.units[g].task, Task::Idle));
     }
 
     #[test]

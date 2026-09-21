@@ -150,6 +150,15 @@ pub struct TypeRules {
 }
 
 impl TypeRules {
+    /// The rules of a floor type with the body the original stands on it:
+    /// the body's hit points, where the floor has none of its own.
+    pub fn with_body(mut self, body: &TypeRules) -> TypeRules {
+        if self.max_hit_points == 0 {
+            self.max_hit_points = body.max_hit_points;
+        }
+        self
+    }
+
     /// Read a type's rules: flag meanings come from the rules file, formulas
     /// from the script hooks.
     pub fn from_type(def: &TypeDef, cfg: &Config, scripts: &Scripts) -> Result<TypeRules, ScriptError> {

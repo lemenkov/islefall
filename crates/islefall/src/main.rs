@@ -366,12 +366,18 @@ impl SoundBank {
 
 impl GameData {
     fn rules(&self, stem: &str) -> TypeRules {
-        match self.install.type_def(stem) {
+        let own = match self.install.type_def(stem) {
             Some(def) => TypeRules::from_type(def, &self.cfg, &self.scripts).unwrap_or_else(|e| {
                 warn!("{stem}: {e}; using plain rules");
                 TypeRules::plain()
             }),
             None => TypeRules::plain(),
+        };
+        // A floor type takes the hit points of the body the original stands on it.
+        let body = self.cfg.bodies.iter().find(|(floor, _)| floor.eq_ignore_ascii_case(stem)).and_then(|(_, body)| self.install.type_def(body));
+        match body.and_then(|def| TypeRules::from_type(def, &self.cfg, &self.scripts).ok()) {
+            Some(body) => own.with_body(&body),
+            None => own,
         }
     }
 
@@ -2011,8 +2017,8 @@ fn setup_map(
     let palette = install.palette(&data.palette).expect("palette checked at start-up");
     let mut w = World::new(data.cfg.clone());
     for (stem, def) in &data.install.types {
-        if let Ok(rules) = TypeRules::from_type(def, &data.cfg, &data.scripts) {
-            w.register_type(stem, rules);
+        if TypeRules::from_type(def, &data.cfg, &data.scripts).is_ok() {
+            w.register_type(stem, data.rules(stem));
         }
     }
     w.powers = vec![i32::MAX / 2; data.cfg.sim.max_players];

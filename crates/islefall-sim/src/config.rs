@@ -15,6 +15,11 @@ use thiserror::Error;
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Placed types that are only the floor of something: the original
+    /// stands a second type on them, which has the hit points (the `dais`
+    /// you place carries the `altar` that can be destroyed). Floor to body.
+    #[serde(default)]
+    pub bodies: BTreeMap<String, String>,
     pub sim: Sim,
     pub grid: Grid,
     pub walking: Walking,
@@ -1197,6 +1202,10 @@ pub struct Combat {
 pub struct Priest {
     pub temple_heal_range: i32,
     pub heal_per_second: u32,
+    /// The manual: a stunned priest throws a shield round himself that
+    /// keeps him from being destroyed. `false` lets fire finish him.
+    #[serde(default = "yes")]
+    pub stun_shield: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

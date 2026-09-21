@@ -8,6 +8,13 @@
 # it gives figures and are marked "guess" where it does not. Formulas and
 # decisions live in scripts/rules.rhai.
 
+# Placed types that are only the floor of something the original stands on
+# them: the `dais` you place has no hit points of its own, the `altar` on
+# it has 1500 and can be destroyed (the manual: destroying an Altar frees
+# a priest about to be sacrificed). Floor type to body type.
+[bodies]
+dais = "altar"
+
 [sim]
 # Simulation ticks per second. Rendering samples; the simulation never sees wall-clock time.
 tick_hz = 30
@@ -262,6 +269,10 @@ rainballoon = 0.1
 temple_heal_range = 8
 # Hit points a priest regenerates per second near his Temple (guess).
 heal_per_second = 2
+# The manual: once stunned, a priest throws a protective shield round
+# himself that keeps him from being destroyed (and from moving). The blow
+# that stuns him cannot kill him either. `false` lets fire finish him.
+stun_shield = true
 
 [energy]
 # Radius of an Energy source's circle, in source pixels (guess; the manual only says fixed).

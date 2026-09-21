@@ -217,7 +217,19 @@ him; a stunned priest can be captured by any Transport; a Transport carries
 him to the centre of your Altar, secures him and walks away; the sacrifice
 grants Knowledge; a priest near his own Temple regenerates.
 
+The Altar you place is the `dais` type, a floor without hit points; the
+original stands the `altar` type on it, which has 1500. `[bodies]` in the
+rules says so, and the placed Altar can be shot down like anything else.
+The sacrifice itself is instant on arrival, so there is no "mid-sacrifice"
+to interrupt: a carrier whose Altar falls first keeps the priest and
+waits for orders.
+
 Islefall: a priest at or below half health is stunned and takes no orders.
+The manual has him throw a protective shield round himself that keeps him
+from being destroyed: with `priest.stun_shield` a stunned priest takes no
+further damage from anything, and the blow that stuns him leaves him at
+least one hit point. Shooters go on choosing him all the same, as the
+manual says they choose the closest target even when it is invulnerable.
 A Transport ordered to capture walks next to him and picks him up; the
 priest then follows the carrier and is not shot at. Ordered to sacrifice,
 the carrier walks to the altar's centre cell, the priest dies and the
