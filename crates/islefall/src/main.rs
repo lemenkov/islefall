@@ -39,6 +39,7 @@
 //! Keys in both modes: `Space` pauses, `P` saves a screenshot.
 
 mod fire;
+mod shatter;
 mod sprites;
 mod world;
 
@@ -1372,7 +1373,7 @@ fn main() {
     .add_systems(Startup, setup)
     .add_systems(Startup, fire::make_fire_art)
     .add_systems(Update, fire::run_flickers.run_if(resource_equals(Mode::Island)))
-    .add_systems(Update, falling.after(sync_platforms).run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, shatter::fall.after(sync_platforms).after(sync_bridges).run_if(resource_equals(Mode::Island)))
     .add_systems(Update, window_icon)
     .add_systems(Update, quit_keys)
     .add_systems(Startup, move |mut commands: Commands, game: Res<GameData>| {
@@ -3413,7 +3414,9 @@ fn sync_bridges(
     mut lib: ResMut<ShapeLibrary>,
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-    existing: Query<Entity, With<BridgeTile>>,
+    existing: Query<(Entity, &BridgeTile, &Sprite, &Anchor, &Transform)>,
+    art: Option<Res<fire::FireArt>>,
+    mut rng: Local<Option<Pcg32>>,
     mut seen: Local<Option<u64>>,
 ) {
     let w = sim.world();
@@ -3421,7 +3424,13 @@ fn sync_bridges(
         return;
     }
     *seen = Some(w.bridge_version);
-    for e in &existing {
+    let rng = rng.get_or_insert_with(|| Pcg32::seed_from_u64(0x7A3D_1F0B_9C4E_5D21));
+    for (e, tile, sprite, anchor, tf) in &existing {
+        // A cell that fell breaks up on its way down.
+        if let Some(cell) = tile.0.filter(|c| !w.bridges.contains_key(c)) {
+            let _ = cell;
+            shatter::shatter(&mut commands, &data, &mut images, &layouts, art.as_deref(), sprite, anchor, tf, 0.35, rng);
+        }
         commands.entity(e).despawn();
     }
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
@@ -3612,35 +3621,6 @@ fn tint_shells(
 #[derive(Component)]
 struct Islet(Cell);
 
-/// What is left of an islet, falling out of the sky.
-#[derive(Component)]
-struct Falling {
-    age: f32,
-    speed: f32,
-}
-
-/// Let the remains of islets fall: faster and faster, behind everything
-/// that still stands, fading towards the end.
-fn falling(mut commands: Commands, data: Res<GameData>, time: Res<Time>, mut remains: Query<(Entity, &mut Falling, &mut Transform, &mut Sprite)>) {
-    let fr = &data.cfg.fringe;
-    let dt = time.delta_secs();
-    for (e, mut f, mut tf, mut sprite) in &mut remains {
-        f.age += dt;
-        if f.age >= fr.fall_seconds {
-            commands.entity(e).despawn();
-            continue;
-        }
-        f.speed += fr.fall_gravity_px * dt;
-        tf.translation.y -= f.speed * dt;
-        tf.translation.z = tf.translation.z.min(world::Z_TERRAIN - 0.5);
-        let fade_from = fr.fall_seconds * (1.0 - fr.fall_fade_share.clamp(0.0, 1.0));
-        if f.age > fade_from {
-            let left = 1.0 - (f.age - fade_from) / (fr.fall_seconds - fade_from).max(0.01);
-            sprite.color = Color::srgba(1.0, 1.0, 1.0, left.clamp(0.0, 1.0));
-        }
-    }
-}
-
 fn sync_platforms(
     mut commands: Commands,
     sim: Res<Sim>,
@@ -3648,7 +3628,9 @@ fn sync_platforms(
     mut lib: ResMut<ShapeLibrary>,
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
-    existing: Query<(Entity, &TerrainTile, Option<&Islet>)>,
+    existing: Query<(Entity, &TerrainTile, Option<&Islet>, &Sprite, &Anchor, &Transform)>,
+    art: Option<Res<fire::FireArt>>,
+    mut rng: Local<Option<Pcg32>>,
     mut seen: Local<Option<u64>>,
 ) {
     let w = sim.world();
@@ -3656,17 +3638,17 @@ fn sync_platforms(
         return;
     }
     *seen = Some(w.terrain_version);
-    for (e, t, islet) in &existing {
+    let rng = rng.get_or_insert_with(|| Pcg32::seed_from_u64(0x3C6E_F372_FE94_F82B));
+    for (e, t, islet, sprite, anchor, tf) in &existing {
         if !t.platform {
             continue;
         }
-        match islet {
-            // The islet is gone: its picture falls out of the sky.
-            Some(i) if !w.platforms.contains(i.0) => {
-                commands.entity(e).remove::<TerrainTile>().remove::<Islet>().insert(Falling { age: 0.0, speed: 0.0 });
-            }
-            _ => commands.entity(e).despawn(),
+        // The islet is gone: its picture breaks up and falls out of the sky.
+        if let Some(i) = islet.filter(|i| !w.platforms.contains(i.0)) {
+            let _ = i;
+            shatter::shatter(&mut commands, &data, &mut images, &layouts, art.as_deref(), sprite, anchor, tf, 1.0, rng);
         }
+        commands.entity(e).despawn();
     }
     let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
     // The islet a unit made for itself is one picture with its owner's

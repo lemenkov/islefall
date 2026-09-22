@@ -645,7 +645,8 @@ pub fn ring_bearings(marks: &[Option<f32>]) -> Vec<f32> {
 
 /// Marks a bridge tile sprite so the layer can be rebuilt.
 #[derive(Component)]
-pub struct BridgeTile;
+/// A bridge tile, with its cell when it is one cell's picture.
+pub struct BridgeTile(pub Option<Cell>);
 
 /// Draw every bridge cell of the world with the tile matching its connections.
 #[allow(clippy::too_many_arguments)]
@@ -675,7 +676,7 @@ pub fn spawn_bridges(
         let frame = frames[variation(cell, frames.len())];
         let z = Z_BRIDGE + cell.y as f32 * 0.001;
         let e = spawn_frame(commands, shape, frame, cell_to_world(cell, &world.cfg.grid), z);
-        commands.entity(e).insert(BridgeTile);
+        commands.entity(e).insert(BridgeTile(Some(cell)));
     }
     spawn_bridge_connectors(commands, install, lib, palette, images, layouts, world);
 }
@@ -716,7 +717,7 @@ fn spawn_bridge_connectors(
             }
             for pos in spots {
                 let e = spawn_frame(commands, shape, frame, pos, z);
-                commands.entity(e).insert(BridgeTile);
+                commands.entity(e).insert(BridgeTile(None));
             }
         }
     }

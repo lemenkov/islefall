@@ -111,6 +111,19 @@ pub struct FringeRules {
     pub fall_gravity_px: f32,
     #[serde(default = "default_fall_fade")]
     pub fall_fade_share: f32,
+    /// The picture breaks into so many chunks, flung outward at so many
+    /// source pixels per second, lifted by so many, tumbling up to so many
+    /// radians per second, in so many puffs of dust.
+    #[serde(default = "default_shatter_pieces")]
+    pub shatter_pieces: u32,
+    #[serde(default = "default_shatter_burst")]
+    pub shatter_burst_px: f32,
+    #[serde(default = "default_shatter_lift")]
+    pub shatter_lift_px: f32,
+    #[serde(default = "default_shatter_spin")]
+    pub shatter_spin: f32,
+    #[serde(default = "default_shatter_dust")]
+    pub shatter_dust: u32,
     #[serde(default = "default_stalag_kind")]
     pub stalag: String,
     /// Which stalag frame: the last has no player-colour apron.
@@ -271,6 +284,21 @@ fn default_fall_gravity() -> f32 {
 }
 fn default_fall_fade() -> f32 {
     0.5
+}
+fn default_shatter_pieces() -> u32 {
+    9
+}
+fn default_shatter_burst() -> f32 {
+    60.0
+}
+fn default_shatter_lift() -> f32 {
+    50.0
+}
+fn default_shatter_spin() -> f32 {
+    3.0
+}
+fn default_shatter_dust() -> u32 {
+    6
 }
 fn default_stalag_kind() -> String {
     "islandstalag".into()

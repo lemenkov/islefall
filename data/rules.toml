@@ -357,9 +357,19 @@ hang = 4
 # under it gone), its picture falls out of the sky rather than vanishing:
 # for `fall_seconds`, speeding up by `fall_gravity_px` source pixels per
 # second squared, fading over the last `fall_fade_share` of the fall.
-fall_seconds = 1.4
+fall_seconds = 1.6
 fall_gravity_px = 260.0
-fall_fade_share = 0.5
+fall_fade_share = 0.4
+# The catastrophe: the picture breaks into `shatter_pieces` chunks flung
+# outward at `shatter_burst_px` source pixels per second and lifted by up
+# to `shatter_lift_px`, tumbling up to `shatter_spin` radians per second,
+# in `shatter_dust` puffs of dust. A bridge cell that falls does the same
+# at a fraction of it.
+shatter_pieces = 9
+shatter_burst_px = 60.0
+shatter_lift_px = 50.0
+shatter_spin = 3.0
+shatter_dust = 6
 stalag = "islandstalag"
 stalag_frame = 8
 # The islet a unit makes for itself is one picture (`island`) with an

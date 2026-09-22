@@ -180,9 +180,11 @@ island ground or wholly in the sky with a footprint cell orthogonally
 adjacent to an open bridge end; in the sky it creates its own island under
 itself, and that islet goes with it when it is destroyed or salvaged:
 walkers on it are lost, and bridges that hung off it alone crack and fall
-like any unattached stretch. On screen the islet's picture falls out of
-the sky and fades (`fall_seconds`, `fall_gravity_px` and
-`fall_fade_share` in `[fringe]`). Everything else needs island ground under every cell. In both cases
+like any unattached stretch. On screen the islet's picture breaks into
+chunks that burst outward, tumble and fall out of the sky in a cloud of
+dust, and a bridge cell that falls does the same on a smaller scale
+(`fall_*` and `shatter_*` in `[fringe]`). The original has no debris art;
+the chunks are cut from the picture itself. Everything else needs island ground under every cell. In both cases
 no cell may be covered by another structure or a unit, and unless the type
 has `mayDropOnRim`, no cell may be a natural island's edge.
 

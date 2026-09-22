@@ -106,6 +106,18 @@ impl FireArt {
     }
 }
 
+impl FireArt {
+    /// A puff of dust at `pos`, `delay` seconds from now (a puff waits as a clear frame).
+    pub fn dust(&self, commands: &mut Commands, data: &GameData, pos: Vec2, z: f32, delay: f32) {
+        if self.smoke.is_empty() {
+            return;
+        }
+        let strip = &self.smoke[(pos.x.abs() as usize + pos.y.abs() as usize) % self.smoke.len()];
+        let fx = &data.cfg.effects;
+        commands.spawn((strip.sprite(0), Anchor::CENTER, Transform::from_translation(pos.extend(z)), Flicker { frames: strip.frames, fps: strip.frames as f32 / fx.smoke_seconds.max(0.1), clock: -delay, life: None, rise: fx.smoke_rise_px * 0.5 }));
+    }
+}
+
 /// A point of the structure's picture a flame can stand on: an opaque
 /// pixel in the allowed part of the largest sprite drawn for it.
 fn stand_point(images: &Assets<Image>, layouts: &Assets<TextureAtlasLayout>, sprite: &Sprite, anchor: &Anchor, tf: &Transform, area: [f32; 4], next: &mut impl FnMut() -> f32) -> Option<Vec2> {
