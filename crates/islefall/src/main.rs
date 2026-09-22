@@ -1007,6 +1007,8 @@ struct Projectile {
     progress: f32,
     seconds: f32,
     bearings: bool,
+    /// Seconds before it sets out, hidden: a splinter waits for the shell to land.
+    delay: f32,
 }
 
 /// Where missiles landed this frame, for the overlay's flashes.
@@ -1033,6 +1035,10 @@ struct Effect {
     step: usize,
     clock: f32,
 }
+
+/// The sparkle of a stream on its way to the shell with this id.
+#[derive(Component)]
+struct StreamSpark(u32);
 
 /// Start an effect animation at `pos`; none when the type or label is missing.
 fn spawn_effect(commands: &mut Commands, data: &GameData, lib: &mut ShapeLibrary, images: &mut Assets<Image>, layouts: &mut Assets<TextureAtlasLayout>, fx: &islefall_sim::config::EffectSprite, pos: Vec2, z: f32) {
@@ -1086,10 +1092,58 @@ fn structure_effects(
     mut lib: ResMut<ShapeLibrary>,
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    mut sparks: Query<(Entity, &StreamSpark, &mut Transform)>,
     mut rng: Local<Option<Pcg32>>,
 ) {
     let g = data.grid();
     let fx = &data.cfg.effects;
+    // The stream on its way to each shell: a sparkle sliding along the
+    // ground from the source, trailing smaller ones.
+    if let Some(w) = sim.world.as_ref() {
+        let mut have: HashMap<u32, Entity> = HashMap::new();
+        for (e, spark, _) in &sparks {
+            have.insert(spark.0, e);
+        }
+        let mut travelling: HashMap<u32, Vec2> = HashMap::new();
+        for i in 0..w.structures.len() {
+            let Some((way, along)) = w.stream_travel(i) else { continue };
+            let at = along * (way.len() - 1) as f32;
+            let (k, t) = ((at.floor() as usize).min(way.len() - 1), at.fract());
+            let from = cell_to_world(way[k], g);
+            let to = cell_to_world(way[(k + 1).min(way.len() - 1)], g);
+            travelling.insert(w.structures[i].id, from.lerp(to, t));
+        }
+        for (e, spark, mut tf) in &mut sparks {
+            match travelling.get(&spark.0) {
+                Some(pos) => {
+                    tf.translation.x = pos.x;
+                    tf.translation.y = pos.y;
+                }
+                None => commands.entity(e).despawn(),
+            }
+        }
+        if let Some(flare) = &fx.building {
+            let palette = data.install.palette(&data.palette).expect("palette checked at start-up");
+            for (id, pos) in &travelling {
+                if have.contains_key(id) {
+                    if rng.get_or_insert_with(|| Pcg32::seed_from_u64(0x5851_F42D_4C95_7F2D)).random::<f32>() < fx.stream_trail * time.delta_secs() {
+                        spawn_effect(&mut commands, &data, &mut lib, &mut images, &mut layouts, flare, *pos, Z_UNIT + 1.4);
+                    }
+                    continue;
+                }
+                let Some(shape) = lib.get_or_load(&data.install, palette, &flare.kind, &mut images, &mut layouts) else { continue };
+                let sequence: Vec<usize> = (0..shape.labels.len()).filter(|&i| shape.labels[i].eq_ignore_ascii_case(&flare.label)).collect();
+                let Some(&first) = sequence.first() else { continue };
+                commands.spawn((
+                    Sprite::from_atlas_image(shape.image.clone(), TextureAtlas { layout: shape.layout.clone(), index: first }),
+                    shape.frames[first].anchor(),
+                    Transform::from_translation(pos.extend(Z_UNIT + 1.5)),
+                    ShapeSprite { sequence, frames: shape.frames.clone(), step: 0, playing: true, once: false, rest: None },
+                    StreamSpark(*id),
+                ));
+            }
+        }
+    }
     for e in happenings.0.iter().filter(|e| e.what == islefall_sim::EventKind::Destroyed) {
         if let Some(art) = fire_art.as_ref().filter(|_| mode.blast) {
             let rules = data.rules(&e.kind);
@@ -3860,7 +3914,7 @@ fn projectiles(
     mut images: ResMut<Assets<Image>>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut landed: ResMut<Landed>,
-    mut flying: Query<(Entity, &mut Projectile, &mut Transform, &mut Sprite, &mut Anchor, &ShapeSprite)>,
+    mut flying: Query<(Entity, &mut Projectile, &mut Transform, &mut Sprite, &mut Anchor, &ShapeSprite, &mut Visibility)>,
     mode: Res<ArtMode>,
     fire_art: Option<Res<fire::FireArt>>,
     mut seen_tick: Local<Option<u64>>,
@@ -3907,13 +3961,50 @@ fn projectiles(
                 shape.frames[first].anchor(),
                 Transform::from_translation(from.extend(Z_UNIT + 2.0)),
                 ShapeSprite { sequence, frames: shape.frames.clone(), step: 0, playing: !bearings, once: false, rest: None },
-                Projectile { from, to, progress: 0.0, seconds, bearings },
+                Projectile { from, to, progress: 0.0, seconds, bearings, delay: 0.0 },
+            ));
+        }
+        // Shrapnel: the shooter's missile again, small and quick, from the
+        // hit to each target it struck, once the shell has landed.
+        for &(hit, victim) in &w.last_splinters {
+            let shooter = w.last_shots.iter().find_map(|&(i, t)| {
+                let landed = match t {
+                    islefall_sim::world::Target::Structure(j) => w.structures.get(j).map(|s| s.centre()),
+                    islefall_sim::world::Target::Unit(j) => w.units.get(j).map(|u| u.cell()),
+                    islefall_sim::world::Target::Bridge(c) => Some(c),
+                };
+                (landed == Some(hit)).then_some(i)
+            });
+            let Some(s) = shooter.and_then(|i| w.structures.get(i)) else { continue };
+            let missile = rules.types.get(&s.kind).cloned().unwrap_or_else(|| rules.default.clone());
+            let Some(shape) = lib.get_or_load(&data.install, palette, &missile, &mut images, &mut layouts) else { continue };
+            let sequence: Vec<usize> = (0..shape.labels.len())
+                .filter(|&i| !shape.flags[i].iter().any(|f| data.cfg.animation.hidden_flags.iter().any(|h| h.eq_ignore_ascii_case(f))))
+                .collect();
+            let Some(&first) = sequence.first() else { continue };
+            let (from, to) = (cell_to_world(hit, g), cell_to_world(victim, g));
+            let flight = ((from - cell_to_world(s.centre(), g)).length() / rules.speed_px.max(1.0)).max(0.05);
+            let seconds = ((to - from).length() / (rules.speed_px * 1.5).max(1.0)).max(0.05);
+            commands.spawn((
+                Sprite { custom_size: Some(Vec2::new(shape.frames[first].size.x as f32 * 0.5, shape.frames[first].size.y as f32 * 0.5)), ..Sprite::from_atlas_image(shape.image.clone(), TextureAtlas { layout: shape.layout.clone(), index: first }) },
+                shape.frames[first].anchor(),
+                Transform::from_translation(from.extend(Z_UNIT + 2.0)),
+                Visibility::Hidden,
+                ShapeSprite { sequence: vec![first], frames: shape.frames.clone(), step: 0, playing: false, once: false, rest: None },
+                Projectile { from, to, progress: 0.0, seconds, bearings: false, delay: flight },
             ));
         }
     }
     let dt = time.delta_secs();
     let rules_fx = &data.cfg.effects;
-    for (e, mut p, mut tf, mut sprite, mut anchor, shape) in &mut flying {
+    for (e, mut p, mut tf, mut sprite, mut anchor, shape, mut seen) in &mut flying {
+        if p.delay > 0.0 {
+            p.delay -= dt;
+            if p.delay <= 0.0 {
+                *seen = Visibility::Inherited;
+            }
+            continue;
+        }
         p.progress += dt / p.seconds;
         if p.progress >= 1.0 {
             match (&rules_fx.impact, fire_art.as_ref().filter(|_| mode.blast)) {

@@ -248,6 +248,11 @@ start_health_percent = 25
 # A shell that no stream can reach (no ground or bridge connects it to a
 # finished Temple, Workshop or Outpost) is pointed out after this long.
 stall_seconds = 3.0
+# The stream of Storm Power is seen travelling from its source along the
+# ground and bridges to a placed shell, and the build begins when it
+# arrives (the manual: Outposts spare the wait for streams from the Home
+# Island). Cells per second (guess); 0 for at once.
+stream_cells_per_second = 12.0
 
 [combat]
 # Cells around an exploding structure that take damage and bridge shock (guess).
@@ -266,6 +271,12 @@ dice_seed = 5
 # ten against 300 hit points.
 [combat.hit_chance]
 rainballoon = 0.1
+
+# The manual: the Ice Cannon inflicts light damage but its fire splinters
+# into shrapnel on impact, damaging other nearby targets. Its missile's
+# `range` (5) is how far the splinters fly; the share is a guess.
+[combat.shrapnel]
+raincannon = { range = 5, percent = 40 }
 
 [priest]
 # Cells from an own Temple within which a priest regenerates (guess).
@@ -621,6 +632,8 @@ impact = { type = "anim", label = "D" }
 destroyed = { type = "anim", label = "A" }
 building = { type = "flare", label = "A" }
 sparkles_per_cell = 0.6
+# Sparkles a second a stream leaves behind on its way to a shell.
+stream_trail = 6.0
 burning_below = 0.5
 blazing_below = 0.25
 flames_per_cell = 1.5

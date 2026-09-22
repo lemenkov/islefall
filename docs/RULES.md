@@ -164,8 +164,10 @@ Islefall: a type with an `edge_farm` flag (`edgefarm`, one cell, free, drops
 on rims) blocks bridge pieces from attaching to the island cells it
 covers, yours and the enemy's alike; a piece whose only landfall is a
 farmed cell is refused with a message naming it. It is drawn as the
-ploughed version of the island tile it grows on, since its frames mirror
-the island set. Bridge ownership is in the Ownership section.
+farmed version of the island tile it grows on, since its frames mirror
+the island set: on a bottom edge, vines (Sun, Wind, Rain) or icicles
+(Thunder) hanging down the cliff. Those drapes along the walls of the
+original's islands are Edge Farms. Bridge ownership is in the Ownership section.
 
 ## Dropping structures
 
@@ -213,6 +215,12 @@ influencing the space") are covered in their own sections below.
   south-east, south, south-west, west, north-west.
 - Units have `maxHitPoints` and `threat`; shooters prefer the highest
   threat, which makes the High Priest (25) the favourite target.
+
+The Ice Cannon, the manual says, inflicts light damage but its fire
+splinters into shrapnel on impact, damaging other nearby targets:
+`[combat.shrapnel]` gives every other enemy structure and ground unit
+within its missile's `range` of the hit a share of the shot, drawn as
+small missiles flying out from the hit.
 
 ## The High Priest
 
@@ -424,9 +432,17 @@ that damage taken while building stays taken, and stands
 once `construction_seconds` (from cost, `constructionRate` and
 `construction.power_per_rate`, a guess) have passed. A shell shoots
 nothing, produces no Energy, launches nothing, builds nothing and takes
-no crystals. The stream's path is not drawn; a shell that no stream
-can reach is pointed out in the status line after
-`construction.stall_seconds`. `kill_reward` grants the
+no crystals. The manual has a Storm Power Stream streak from the
+Workshop to the build site; Islefall's sets out from the nearest finished
+Temple, Workshop or Outpost, travels the shortest way over ground and
+bridges at `construction.stream_cells_per_second` (a guess; the sparkle
+is drawn), and the build begins when it arrives, so a site far from every
+source waits longer (the manual: Outposts spare that wait). A shell cut
+off on the way starts over when a way returns; one that no stream can
+reach is pointed out in the status line after `construction.stall_seconds`.
+The manual says the unit is created "immediately" once the stream meets
+the Energy; Islefall keeps its build time on top, so that the rising
+Workshop is seen. `kill_reward` grants the
 killer `economy.kill_reward_percent` of the victim's cost; a Golem costs
 nothing and rewards nothing.
 

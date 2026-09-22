@@ -524,8 +524,11 @@ pub struct Effects {
     pub destroyed: Option<EffectSprite>,
     #[serde(default)]
     pub building: Option<EffectSprite>,
-    /// Sparkles per second per footprint cell while building.
+    /// Sparkles per second per footprint cell while building, and per
+    /// second left behind by a stream on its way.
     pub sparkles_per_cell: f32,
+    #[serde(default = "default_stream_trail")]
+    pub stream_trail: f32,
     /// A structure burns once its health falls below this share, harder below the second.
     pub burning_below: f32,
     pub blazing_below: f32,
@@ -979,6 +982,10 @@ pub struct Air {
     pub attackers: BTreeMap<String, Attacker>,
 }
 
+fn default_stream_trail() -> f32 {
+    6.0
+}
+
 fn default_life_seconds() -> f64 {
     60.0
 }
@@ -1118,6 +1125,15 @@ pub struct Construction {
     /// none can reach it.
     #[serde(default = "default_stall_seconds")]
     pub stall_seconds: f64,
+    /// How fast the stream of Storm Power travels from its source to a
+    /// shell, in cells per second; the build begins when it arrives. 0
+    /// for at once.
+    #[serde(default = "default_stream_speed")]
+    pub stream_cells_per_second: f64,
+}
+
+fn default_stream_speed() -> f64 {
+    12.0
 }
 
 fn default_stall_seconds() -> f64 {
@@ -1289,6 +1305,18 @@ pub struct Combat {
     /// give the same misses on every machine.
     #[serde(default)]
     pub dice_seed: u64,
+    /// Shooters whose shot splinters on impact: every other enemy within
+    /// `range` cells of the hit takes `percent` of the shot (the manual's
+    /// Ice Cannon; the range is its missile's).
+    #[serde(default)]
+    pub shrapnel: BTreeMap<String, Shrapnel>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Shrapnel {
+    pub range: i32,
+    pub percent: i32,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

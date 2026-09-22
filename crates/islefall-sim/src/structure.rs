@@ -67,6 +67,13 @@ pub struct Structure {
     pub building: u32,
     /// Ticks the whole build takes, for progress.
     pub build_ticks: u32,
+    /// The way the stream of Storm Power takes from its source to this
+    /// shell, source first, and the ticks it has travelled; the build
+    /// begins when it arrives. Empty until a source can reach the shell.
+    #[serde(default)]
+    pub stream: Vec<Cell>,
+    #[serde(default)]
+    pub stream_tick: u32,
     /// Workshop level, from one.
     pub level: u8,
     /// An Obelisk and the Spell it holds.
@@ -150,6 +157,8 @@ impl Structure {
             respawn: 0,
             building: 0,
             build_ticks: 0,
+            stream: Vec::new(),
+            stream_tick: 0,
             level: 1,
             is_obelisk: false,
             spell: None,

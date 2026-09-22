@@ -260,6 +260,9 @@ pub struct World {
     pub known_tech: Vec<BTreeSet<u8>>,
     /// Shots fired during the last tick, for effects and logging.
     pub last_shots: Vec<(usize, Target)>,
+    /// Shrapnel of the last tick: from the hit to each other target struck.
+    #[serde(default)]
+    pub last_splinters: Vec<(Cell, Cell)>,
     /// Happenings since the last [`World::take_events`].
     pub events: Vec<Event>,
     /// Owners who have fielded a High Priest: the players in the game.
@@ -334,6 +337,7 @@ impl World {
             queues: BTreeMap::new(),
             powers: vec![0; players],
             known_tech: vec![BTreeSet::new(); players],
+            last_splinters: Vec::new(),
             last_shots: Vec::new(),
             events: Vec::new(),
             players: BTreeSet::new(),
@@ -1988,8 +1992,66 @@ impl World {
         ((max_hp as f32 * (start + (1.0 - start) * progress)).round() as i32).clamp(1, max_hp.max(1))
     }
 
+    /// Ticks the stream takes to travel a way of `cells` cells.
+    pub fn stream_ticks(&self, cells: usize) -> u32 {
+        let speed = self.cfg.construction.stream_cells_per_second;
+        if speed <= 0.0 { 0 } else { (cells as f64 / speed * self.cfg.sim.tick_hz as f64).ceil() as u32 }
+    }
+
+    /// The way from the nearest complete source of `owner` to any cell of
+    /// `target`'s footprint over ground, source first; none when no
+    /// source connects.
+    fn stream_way(&self, owner: u8, target: &Structure) -> Vec<Cell> {
+        let goal: BTreeSet<Cell> = target.cells().collect();
+        let mut parent: BTreeMap<Cell, Cell> = BTreeMap::new();
+        let mut frontier: VecDeque<Cell> = VecDeque::new();
+        for s in self.structures.iter().filter(|s| s.owner == owner && s.complete() && (s.is_temple || s.is_outpost || s.slots > 0)) {
+            for c in s.cells().filter(|&c| self.is_ground(c)) {
+                if parent.insert(c, c).is_none() {
+                    frontier.push_back(c);
+                }
+            }
+        }
+        while let Some(c) = frontier.pop_front() {
+            if goal.contains(&c) {
+                let mut way = vec![c];
+                let mut at = c;
+                while parent[&at] != at {
+                    at = parent[&at];
+                    way.push(at);
+                }
+                way.reverse();
+                return way;
+            }
+            for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+                let n = c.offset(dx, dy);
+                if self.is_ground(n) && !parent.contains_key(&n) {
+                    parent.insert(n, c);
+                    frontier.push_back(n);
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    /// Where the stream to shell `index` is on its way: the way and how
+    /// far along it, 0 to 1; none once it has arrived or when no source
+    /// connects.
+    pub fn stream_travel(&self, index: usize) -> Option<(&[Cell], f32)> {
+        let s = self.structures.get(index)?;
+        if s.complete() || s.stream.is_empty() {
+            return None;
+        }
+        let total = self.stream_ticks(s.stream.len());
+        if s.stream_tick >= total {
+            return None;
+        }
+        Some((&s.stream, s.stream_tick as f32 / total.max(1) as f32))
+    }
+
     /// Streams build every placed shell they can reach; a shell the stream
-    /// cannot reach waits. Health grows with the build.
+    /// cannot reach waits, and one it can waits for the stream to arrive
+    /// along the ground from its nearest source. Health grows with the build.
     fn run_construction(&mut self) {
         let owners: BTreeSet<u8> = self.structures.iter().filter(|s| !s.complete()).map(|s| s.owner).collect();
         for owner in owners {
@@ -1997,7 +2059,25 @@ impl World {
             let mut done = Vec::new();
             for i in 0..self.structures.len() {
                 let s = &self.structures[i];
-                if s.owner != owner || s.complete() || !s.cells().any(|c| reach.contains(&c)) {
+                if s.owner != owner || s.complete() {
+                    continue;
+                }
+                if !s.cells().any(|c| reach.contains(&c)) {
+                    // Cut off: the stream must set out again once a way returns.
+                    let s = &mut self.structures[i];
+                    s.stream.clear();
+                    s.stream_tick = 0;
+                    continue;
+                }
+                if s.stream.is_empty() {
+                    let way = self.stream_way(owner, s);
+                    let s = &mut self.structures[i];
+                    s.stream = way;
+                    s.stream_tick = 0;
+                }
+                let travel = self.stream_ticks(self.structures[i].stream.len());
+                if self.structures[i].stream_tick < travel {
+                    self.structures[i].stream_tick += 1;
                     continue;
                 }
                 let start = self.cfg.construction.start_health_percent;
@@ -2008,6 +2088,7 @@ impl World {
                 let after = Self::shell_health(s.max_hp, start, s.progress());
                 s.hp = (s.hp + after - before).min(s.max_hp.max(1));
                 if s.complete() {
+                    s.stream.clear();
                     done.push((s.kind.clone(), s.centre(), s.owner));
                 }
             }
@@ -2074,6 +2155,38 @@ impl World {
                 }
             }
             self.emit(EventKind::UnitLost, &kind, at, owner);
+        }
+    }
+
+    /// A shot's shrapnel: every enemy structure and ground unit within
+    /// `range` of the hit, other than what the shot struck, takes `damage`.
+    fn splinter(&mut self, at: Cell, owner: u8, damage: i32, range: i32, struck: Target, scripts: &Scripts) {
+        if damage <= 0 {
+            return;
+        }
+        let near = |c: Cell| (c.x - at.x).abs() <= range && (c.y - at.y).abs() <= range;
+        let structures: Vec<(usize, Cell)> = self
+            .structures
+            .iter()
+            .enumerate()
+            .filter(|(j, t)| t.owner != owner && t.max_hp > 0 && struck != Target::Structure(*j) && t.distance_to(at) <= range)
+            .map(|(j, t)| (j, t.centre()))
+            .collect();
+        let units: Vec<(usize, Cell)> = self
+            .units
+            .iter()
+            .enumerate()
+            .filter(|(j, u)| u.alive && u.owner != owner && !u.is_air && u.carried_by.is_none() && struck != Target::Unit(*j) && near(u.cell()))
+            .map(|(j, u)| (j, u.cell()))
+            .collect();
+        for (j, c) in units {
+            self.last_splinters.push((at, c));
+            self.damage_unit_by(j, damage, Some(owner), scripts);
+        }
+        // Highest index first: a destroyed structure shifts the ones after it.
+        for (j, c) in structures.into_iter().rev() {
+            self.last_splinters.push((at, c));
+            self.damage_structure_by(j, damage, Some(owner), scripts);
         }
     }
 
@@ -2166,6 +2279,9 @@ impl World {
                     self.damage_unit_by(j, dmg, Some(owner), scripts);
                 }
                 Target::Bridge(c) => self.shoot_bridge(c, w.damage, scripts),
+            }
+            if let (Some(at), Some(sh)) = (hit, self.cfg.combat.shrapnel.get(&kind.to_lowercase()).cloned()) {
+                self.splinter(at, owner, w.damage * sh.percent / 100, sh.range, target, scripts);
             }
         }
         for s in &mut self.structures {
@@ -2424,6 +2540,7 @@ impl World {
         self.run_air_bases();
         self.run_flyers(scripts);
         self.last_shots.clear();
+        self.last_splinters.clear();
         self.run_combat(scripts);
         self.crumble();
         self.tick += 1;
@@ -3496,6 +3613,7 @@ mod tests {
         let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, ..TypeRules::plain() };
         w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
         w.energy_enforced = true;
+        w.cfg.construction.stream_cells_per_second = 0.0;
         let cannon = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 600, cost: 400, build_seconds: 2.0, range: 6, hp_per_sec: 10, damage_per_shot: 50, ..TypeRules::plain() };
         let near = w.drop_structure("suncannon", &cannon, Cell::new(4, 1)).unwrap();
         let far = w.drop_structure("suncannon", &cannon, Cell::new(22, 1)).unwrap();
@@ -3515,6 +3633,48 @@ mod tests {
             w.step(&scripts);
         }
         assert!(w.structures[far].complete(), "bridged, the stream arrives");
+    }
+
+    #[test]
+    fn the_stream_travels_from_the_nearest_source_before_the_build_begins() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 6, 4), 0);
+        w.push_island(IslandMap::rect(Cell::new(20, 0), 6, 4), 0);
+        w.powers[0] = 10_000;
+        let scripts = test_scripts();
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        for x in 6..20 {
+            w.place_bridge(Cell::new(x, 1));
+        }
+        w.energy_enforced = true;
+        w.cfg.construction.stream_cells_per_second = 10.0;
+        let cannon = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 600, cost: 400, build_seconds: 1.0, ..TypeRules::plain() };
+        let far = w.drop_structure("suncannon", &cannon, Cell::new(22, 1)).unwrap();
+        w.step(&scripts);
+        let (way, along) = w.stream_travel(far).expect("the stream is on its way");
+        assert_eq!((way[0], *way.last().unwrap()), (Cell::new(2, 1), Cell::new(22, 1)), "from the temple's nearest cell to the shell");
+        assert!(way.windows(2).all(|p| (p[0].x - p[1].x).abs() + (p[0].y - p[1].y).abs() == 1), "step by step over ground");
+        assert!(along > 0.0 && along < 0.2);
+        let travel = w.stream_ticks(way.len());
+        assert_eq!(travel, w.cfg.ticks(way.len() as f64 / 10.0));
+        for _ in 0..travel {
+            w.step(&scripts);
+        }
+        assert!(w.stream_travel(far).is_none() && !w.structures[far].complete(), "arrived; the build begins");
+        for _ in 0..w.cfg.ticks(1.0) {
+            w.step(&scripts);
+        }
+        assert!(w.structures[far].complete());
+        // A shell cut off on the way forgets its stream and starts over when reconnected.
+        let again = w.drop_structure("suncannon", &cannon, Cell::new(24, 1)).unwrap();
+        for _ in 0..5 {
+            w.step(&scripts);
+        }
+        assert!(w.stream_travel(again).is_some());
+        w.destroy_bridge(Cell::new(10, 1));
+        w.step(&scripts);
+        assert!(w.stream_travel(again).is_none() && w.structures[again].stream.is_empty());
     }
 
     #[test]
@@ -3549,6 +3709,7 @@ mod tests {
         w.push_island(IslandMap::rect(Cell::new(14, 0), 4, 4), 1);
         w.drop_structure_for(1, "windcannon", &cannon, Cell::new(15, 1)).unwrap_or_else(|e| panic!("{e}"));
         w.energy_enforced = true;
+        w.cfg.construction.stream_cells_per_second = 0.0;
         let shop = TypeRules { foot_x: 3, foot_y: 3, max_hit_points: 800, cost: 400, build_seconds: 4.0, is_workshop: true, ..TypeRules::plain() };
         let first = w.drop_structure("sunworkshop", &shop, Cell::new(8, 5)).unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(w.structures[first].hp, 200, "a quarter of its health at first");
@@ -3580,6 +3741,7 @@ mod tests {
         }
         let battery = TypeRules { foot_x: 3, foot_y: 3, creates_island: true, max_hit_points: 300, cost: 300, build_seconds: 3.0, ..TypeRules::plain() };
         let first = w.drop_structure("sunbattery", &battery, Cell::new(16, 3)).unwrap_or_else(|e| panic!("{e}"));
+        w.cfg.construction.stream_cells_per_second = 0.0;
         let ticks = w.cfg.ticks(3.0);
         let mut first_done = None;
         for t in 0..ticks * 3 {
@@ -3601,6 +3763,30 @@ mod tests {
             }
         }
         assert_eq!(second_done, Some(ticks), "and so does the second, off the first's islet");
+    }
+
+    #[test]
+    fn an_ice_cannon_shot_splinters_into_the_targets_around_the_hit() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 6), 0);
+        w.push_island(IslandMap::rect(Cell::new(8, 0), 22, 6), 1);
+        w.powers = vec![10_000; 8];
+        let scripts = test_scripts();
+        let cannon = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 600, range: 32, hp_per_sec: 20, damage_per_shot: 100, delay_between_shots: 5.0, cardinal_only: true, ..TypeRules::plain() };
+        w.drop_structure("raincannon", &cannon, Cell::new(1, 2)).unwrap();
+        let tower = TypeRules { max_hit_points: 1000, cost: 100, ..TypeRules::plain() };
+        let struck = w.drop_structure_for(1, "sunblocker", &tower, Cell::new(12, 2)).unwrap();
+        let beside = w.drop_structure_for(1, "sunblocker", &tower, Cell::new(15, 4)).unwrap();
+        let far = w.drop_structure_for(1, "sunblocker", &tower, Cell::new(24, 2)).unwrap();
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 200, speed: 3.0, ..TypeRules::plain() };
+        let g = w.spawn_unit_for(1, "sunwalker", &golem, Cell::new(10, 4)).unwrap();
+        w.step(&scripts);
+        assert_eq!(w.structures[struck].hp, 900, "the shot itself");
+        assert_eq!(w.structures[beside].hp, 960, "a neighbour takes 40 per cent as shrapnel");
+        assert_eq!(w.structures[far].hp, 1000, "out of the splinters' reach");
+        assert_eq!(w.units[g].hp, 160, "a ground unit near the hit too");
+        assert_eq!(w.last_splinters.len(), 2);
+        assert!(w.last_splinters.iter().all(|&(from, _)| from == Cell::new(12, 2)));
     }
 
     #[test]
