@@ -2320,6 +2320,8 @@ fn play_sounds(
     volume: Res<GlobalVolume>,
     cameras: Query<(&Camera, &GlobalTransform, &Projection), With<WorldCamera>>,
     mut turns: Local<HashMap<String, usize>>,
+    mut said: Local<HashMap<String, f32>>,
+    time: Res<Time>,
     happenings: Res<Happenings>,
 ) {
     if sim.world.is_none() || volume.volume == Volume::Linear(0.0) {
@@ -2343,6 +2345,14 @@ fn play_sounds(
             let n = turns.entry(name.to_lowercase()).or_insert(0);
             name = names[*n % names.len()].clone();
             *n += 1;
+        }
+        if cue.gap_seconds > 0.0 {
+            let now = time.elapsed_secs();
+            let key = name.to_lowercase();
+            if said.get(&key).is_some_and(|&last| now - last < cue.gap_seconds) {
+                continue;
+            }
+            said.insert(key, now);
         }
         let Some((handle, base_db)) = bank.get_or_load(&name, &mut sources) else { continue };
         // Out of view, out of earshot.

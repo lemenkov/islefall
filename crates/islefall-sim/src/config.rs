@@ -902,6 +902,10 @@ pub struct SoundCue {
     /// rather than the same file every time.
     #[serde(default)]
     pub variants: bool,
+    /// The same file is not played again within so many seconds: a voice
+    /// with one line answers now and then, not every order.
+    #[serde(default)]
+    pub gap_seconds: f32,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]

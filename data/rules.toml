@@ -732,7 +732,10 @@ placed = { file = "apStart.wav" }
 built = { property = "buildDoneSound", file = "buildDone.wav" }
 destroyed = { file = "explosion.wav" }
 salvaged = { file = "dissolve.wav" }
-moved = { property = "moveSound", variants = true }
+# A voice answers its orders; a type with one line (the sail skater's
+# "sailing") would repeat it to every click, so a line is not said again
+# within `gap_seconds`.
+moved = { property = "moveSound", variants = true, gap_seconds = 6.0 }
 pickup = { property = "pickupSound", file = "priestPickUp.wav" }
 sacrificed = { file = "priestSacrifice2.WAV" }
 harvested = { file = "geyserMined1.WAV" }

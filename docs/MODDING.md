@@ -66,7 +66,9 @@ an island falling, a unit lost) and the app plays what `[sounds.events]`
 names for each. A cue has a `property`, the type's own sound as the `.type`
 files name it (`fireSound`, `impactSound`, `buildDoneSound`, `moveSound`,
 `pickupSound`), and a `file` used when the type names none; a cue with
-neither is silent. Fire and impact sounds mostly sit on projectile types,
+neither is silent. `variants = true` cycles through a file's numbered
+siblings (the Golem's five move lines), and `gap_seconds` keeps one line
+from being said twice within that time (the sail skater has one line). Fire and impact sounds mostly sit on projectile types,
 which nothing in the data ties to their shooter, so `[sounds.projectiles]`
 pairs them by name. Files are looked up case-insensitively in the
 installation's `sound/` directory; `[sounds.aliases]` points names the type
