@@ -49,6 +49,9 @@ pub struct Structure {
     pub weapon: Option<Weapon>,
     /// Ticks until the weapon may fire again.
     pub cooldown: u32,
+    /// Shots left in the burst under way.
+    #[serde(default)]
+    pub burst_left: u32,
     pub threat: i32,
     pub is_altar: bool,
     /// Energy this structure radiates, for Generators and Temples.
@@ -112,6 +115,17 @@ pub struct Weapon {
     /// Reach and damage per shot against flyers; 0 when they cannot be hit.
     pub air_range: i32,
     pub air_damage: i32,
+    /// Shots in a burst and the ticks between them; 1 and 0 for a
+    /// single shot. The damage above is one shot's; a burst spreads the
+    /// delay's worth over its shots.
+    #[serde(default = "one")]
+    pub burst: u32,
+    #[serde(default)]
+    pub burst_gap: u32,
+}
+
+fn one() -> u32 {
+    1
 }
 
 impl Structure {
@@ -155,6 +169,7 @@ impl Structure {
             launches: None,
             flyer: None,
             respawn: 0,
+            burst_left: 0,
             building: 0,
             build_ticks: 0,
             stream: Vec::new(),

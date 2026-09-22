@@ -278,6 +278,12 @@ rainballoon = 0.1
 [combat.shrapnel]
 raincannon = { range = 5, percent = 40 }
 
+# Shooters that fire in bursts, like the Ice Cannon in the original: so
+# many shots so many seconds apart, then the usual delay; the shots
+# share the damage of one shot of the type's rate (guesses).
+[combat.bursts]
+raincannon = { shots = 6, interval_seconds = 0.12 }
+
 [priest]
 # Cells from an own Temple within which a priest regenerates (guess).
 temple_heal_range = 8

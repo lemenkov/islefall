@@ -1310,6 +1310,17 @@ pub struct Combat {
     /// Ice Cannon; the range is its missile's).
     #[serde(default)]
     pub shrapnel: BTreeMap<String, Shrapnel>,
+    /// Shooters that fire in bursts: so many shots so many seconds apart,
+    /// then the type's delay; each shot carries its share of the damage.
+    #[serde(default)]
+    pub bursts: BTreeMap<String, Burst>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Burst {
+    pub shots: u32,
+    pub interval_seconds: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

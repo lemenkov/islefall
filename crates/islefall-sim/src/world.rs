@@ -1097,14 +1097,18 @@ impl World {
         if !rules.is_fence {
             let ground = a.ground && rules.range > 0 && rules.hp_per_sec > 0;
             if ground || a.air_range > 0 {
+                let burst = self.cfg.combat.bursts.get(&kind.to_lowercase()).cloned();
+                let shots = burst.as_ref().map(|b| b.shots.max(1)).unwrap_or(1) as i32;
                 s.weapon = Some(Weapon {
                     range: rules.range,
-                    damage: self.ranked(owner, rules, rules.damage_per_shot),
+                    damage: (self.ranked(owner, rules, rules.damage_per_shot) / shots).max(1),
                     delay: self.cfg.ticks(rules.delay_between_shots),
                     cardinal_only: rules.cardinal_only,
                     ground,
                     air_range: a.air_range,
-                    air_damage: self.ranked(owner, rules, rules.air_damage_per_shot),
+                    air_damage: (self.ranked(owner, rules, rules.air_damage_per_shot) / shots).max(if a.air_range > 0 { 1 } else { 0 }),
+                    burst: shots as u32,
+                    burst_gap: burst.map(|b| self.cfg.ticks(b.interval_seconds).max(1)).unwrap_or(0),
                 });
             }
         }
@@ -2248,7 +2252,14 @@ impl World {
         // Resolve in reverse index order so removals do not shift pending shooters.
         for (i, target) in shots.into_iter().rev() {
             let Some(w) = self.structures.get(i).and_then(|s| s.weapon) else { continue };
-            self.structures[i].cooldown = w.delay;
+            // A burst: the next shot follows after the gap, the last after
+            // what is left of the delay.
+            let s = &mut self.structures[i];
+            if s.burst_left == 0 {
+                s.burst_left = w.burst.max(1);
+            }
+            s.burst_left -= 1;
+            s.cooldown = if s.burst_left > 0 { w.burst_gap } else { w.delay.saturating_sub((w.burst.max(1) - 1) * w.burst_gap).max(1) };
             self.structures[i].target = Some(match target {
                 Target::Structure(j) => Aim::Structure(self.structures.get(j).map(|t| t.id).unwrap_or(0)),
                 Target::Unit(j) => Aim::Unit(j),
@@ -3771,6 +3782,7 @@ mod tests {
         w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 6), 0);
         w.push_island(IslandMap::rect(Cell::new(8, 0), 22, 6), 1);
         w.powers = vec![10_000; 8];
+        w.cfg.combat.bursts.clear();
         let scripts = test_scripts();
         let cannon = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 600, range: 32, hp_per_sec: 20, damage_per_shot: 100, delay_between_shots: 5.0, cardinal_only: true, ..TypeRules::plain() };
         w.drop_structure("raincannon", &cannon, Cell::new(1, 2)).unwrap();
@@ -3787,6 +3799,33 @@ mod tests {
         assert_eq!(w.units[g].hp, 160, "a ground unit near the hit too");
         assert_eq!(w.last_splinters.len(), 2);
         assert!(w.last_splinters.iter().all(|&(from, _)| from == Cell::new(12, 2)));
+    }
+
+    #[test]
+    fn an_ice_cannon_fires_a_burst_then_waits_out_its_delay() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 6), 0);
+        w.push_island(IslandMap::rect(Cell::new(8, 0), 22, 6), 1);
+        w.powers = vec![10_000; 8];
+        w.cfg.combat.shrapnel.clear();
+        w.cfg.combat.bursts.insert("raincannon".into(), crate::config::Burst { shots: 4, interval_seconds: 0.1 });
+        let scripts = test_scripts();
+        let cannon = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 600, range: 32, hp_per_sec: 20, damage_per_shot: 100, delay_between_shots: 2.0, cardinal_only: true, ..TypeRules::plain() };
+        let c = w.drop_structure("raincannon", &cannon, Cell::new(1, 2)).unwrap();
+        assert_eq!(w.structures[c].weapon.unwrap().damage, 25, "each shot of the burst carries a quarter");
+        let tower = TypeRules { max_hit_points: 1000, cost: 100, ..TypeRules::plain() };
+        let t = w.drop_structure_for(1, "sunblocker", &tower, Cell::new(12, 2)).unwrap();
+        let mut fired_at = Vec::new();
+        for tick in 0..w.cfg.ticks(2.5) {
+            w.step(&scripts);
+            if !w.last_shots.is_empty() {
+                fired_at.push(tick);
+            }
+        }
+        let gap = w.cfg.ticks(0.1);
+        assert_eq!(&fired_at[..4], &[0, gap, 2 * gap, 3 * gap], "four quick shots");
+        assert_eq!(fired_at[4], w.cfg.ticks(2.0), "then the next burst after the delay");
+        assert_eq!(w.structures[t].hp, 1000 - 8 * 25, "two bursts landed");
     }
 
     #[test]
