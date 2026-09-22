@@ -310,9 +310,13 @@ queue_seed = 161
 [sky]
 background = [0.16, 0.19, 0.33]
 extent_tiles = 16
+# Each layer is one seamless tile repeated; tiles of different sizes and
+# a third, faint and slow layer keep the repetition from showing when
+# zoomed out.
 layers = [
-    { seed = 11, tile = 512, scale = 3.0, octaves = 5, gain = 0.5, lacunarity = 2.0, cover = 0.42, softness = 0.30, tint = [0.55, 0.62, 0.85], opacity = 0.9, speed = [6.0, 2.0] },
-    { seed = 23, tile = 512, scale = 2.0, octaves = 4, gain = 0.55, lacunarity = 2.1, cover = 0.55, softness = 0.25, tint = [0.82, 0.86, 1.0], opacity = 0.75, speed = [-3.0, 4.0] },
+    { seed = 37, tile = 640, scale = 2.0, octaves = 3, gain = 0.6, lacunarity = 2.0, cover = 0.40, softness = 0.45, tint = [0.36, 0.42, 0.66], opacity = 0.5, speed = [1.5, 0.5], warp = 1.0 },
+    { seed = 11, tile = 1024, scale = 7.0, octaves = 6, gain = 0.62, lacunarity = 2.0, cover = 0.42, softness = 0.30, tint = [0.55, 0.62, 0.85], opacity = 0.9, speed = [6.0, 2.0], warp = 0.8 },
+    { seed = 23, tile = 768, scale = 4.0, octaves = 5, gain = 0.6, lacunarity = 2.1, cover = 0.55, softness = 0.25, tint = [0.82, 0.86, 1.0], opacity = 0.75, speed = [-3.0, 4.0], warp = 0.8 },
 ]
 
 # A mod's own sprites: `<dir>/<stem>.toml` next to its picture replaces a
@@ -366,6 +370,15 @@ fall_fade_share = 0.4
 # in `shatter_dust` puffs of dust. A bridge cell that falls does the same
 # at a fraction of it.
 shatter_pieces = 9
+# A unit's islet from the ground and rock generators, with a rim and a
+# band in the owner's colour taken from the original's emblem, instead
+# of the emblem and stalag pictures (an experiment, off; `F7` switches
+# in the game). Its rock's depths, how far its outline wanders in from a
+# full ellipse, and the rows of the owner's band at the top of the rock.
+generated_islets = false
+islet_depth = [20, 38]
+islet_wobble = 0.2
+islet_band = 3
 shatter_burst_px = 60.0
 shatter_lift_px = 50.0
 shatter_spin = 3.0
@@ -616,8 +629,8 @@ smoke_seconds = 1.6
 smoke_rise_px = 14.0
 # Flames and smoke drawn by `islefall-art`, standing on the structure's own
 # picture (`false` for the rising specks above; `F4` switches in the game),
-# and a generated explosion in place of `destroyed` (an experiment, off;
-# `F6` switches in the game).
+# and generated explosions in place of `destroyed` and `impact` (an
+# experiment, off; `F6` switches in the game).
 generated_fire = true
 generated_blast = false
 
@@ -650,6 +663,9 @@ blast_medium_cells = 3
 blast_frames = 16
 blast_fps = 18.0
 sparks = 14
+# A missile's landing, when explosions are generated: a small, short one.
+impact_size = 20
+impact_frames = 8
 
 # The panel down the left: the original's `fortgump` art (a stone tile,
 # the tall ruler with its dial, the Storm Power box), the crystal beside

@@ -77,10 +77,26 @@ cargo run -p islefall-art --bin artgen -- flame flame.png
 cargo run -p islefall-art --bin artgen -- blast --size 96 blast.png
 ```
 
+**An islet** (`islet::Islet`): the knob of ground a unit makes for
+itself, a rounded shape wandering with noise, its rim lit above and
+shaded below in the owner's colour (read from the emblem frame the
+original would draw), over the rock generator's underside with a band of
+the same colour where they meet. An experiment, off (`generated_islets`
+in `[fringe]`, `F7`); `artgen islet` writes one.
+
+**The catastrophe** (`shatter` in the game): not a picture but a way of
+breaking one. A picture that has lost its ground is cut into chunks by a
+seeded Voronoi over its own pixels; they burst outward, tumble and fall.
+
+**The sky** (`cloud_tile` in the game): fractal noise sampled on a torus
+so each layer's tile wraps without a seam, warped by more noise so the
+clouds do not line up on the noise lattice; three layers of different
+tile sizes drift at different speeds.
+
 ## Candidates
 
-The faces of left and right cliffs, which the original has no pieces for; bridges; missile
-impacts and the construction cloud. Units and buildings are
+The faces of left and right cliffs, which the original has no pieces for; bridges; the
+construction cloud. Units and buildings are
 drawn characters, not texture, and are not candidates.
 
 Other ways of making pictures were weighed: shaders (alive on screen, but

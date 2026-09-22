@@ -10,6 +10,7 @@ use clap::{Parser, Subcommand};
 use islefall_art::Picture;
 use islefall_art::fire::{Blast, Flame, Smoke, strip};
 use islefall_art::ground::Ground;
+use islefall_art::islet::Islet;
 use islefall_art::rock::Rock;
 
 /// Make Islefall's generated art and write it as PNG
@@ -39,6 +40,16 @@ enum Command {
         #[arg(long, default_value_t = 384)]
         width: u32,
         #[arg(long, default_value_t = 132)]
+        height: u32,
+        #[arg(long, default_value_t = 7)]
+        seed: u32,
+        out: PathBuf,
+    },
+    /// A unit's islet: the top over the rock under it.
+    Islet {
+        #[arg(long, default_value_t = 48)]
+        width: u32,
+        #[arg(long, default_value_t = 33)]
         height: u32,
         #[arg(long, default_value_t = 7)]
         seed: u32,
@@ -86,6 +97,32 @@ fn main() -> ExitCode {
         Command::Underside { width, seed, unlit, out } => {
             let rock = Rock { lit: !unlit, ..Rock::default() };
             write_png(&rock.underside(width.max(1), seed), &out)
+        }
+        Command::Islet { width, height, seed, out } => {
+            let islet = Islet {
+                ground: Ground { ramp: vec![[52, 78, 30], [70, 102, 38], [88, 126, 48], [110, 150, 60]], ..Ground::default() },
+                rock: Rock { windows_per_100px: 0.0, lit: false, depth_min: 20, depth_max: 38, ..Rock::default() },
+                light: [120, 170, 240],
+                dark: [50, 80, 140],
+                width,
+                height,
+                wobble: 0.2,
+                band: 3,
+            };
+            let (top, under) = islet.pictures(seed);
+            let mut both = Picture::new(top.width, under.height);
+            for y in 0..under.height {
+                for x in 0..top.width {
+                    let i = ((y * top.width + x) * 4) as usize;
+                    if under.rgba[i + 3] > 0 {
+                        both.put(x, y, [under.rgba[i], under.rgba[i + 1], under.rgba[i + 2]]);
+                    }
+                    if y < top.height && top.alpha(x, y) > 0 {
+                        both.put(x, y, [top.rgba[i], top.rgba[i + 1], top.rgba[i + 2]]);
+                    }
+                }
+            }
+            write_png(&both, &out)
         }
         Command::Flame { width, height, seed, out } => write_png(&strip(&Flame { width, height, ..Flame::default() }.frames(seed), 0), &out),
         Command::Smoke { size, seed, out } => write_png(&strip(&Smoke { size, ..Smoke::default() }.frames(seed), 0), &out),

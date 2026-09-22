@@ -161,7 +161,8 @@ Generators show where units can be placed.
 | `Ctrl+W` / `Ctrl+Q` | Leaves the game (so do `Alt+F4` and the window's close button). |
 | `F5` / `F9` | Saves the world as a snapshot; loads it back. |
 | `F4` / `F3` | The islands' ground and undersides and the flames on damaged structures are Islefall's generated art by default; `F4` switches all of it off and back, `F3` the undersides alone (see `docs/ART.md`). |
-| `F6` | Switches between the original's explosion and a generated one (an experiment, off by default). |
+| `F6` | Switches between the original's explosions and generated ones (an experiment, off by default). |
+| `F7` | Switches between the original's islet under a unit and a generated one (an experiment, off by default). |
 | `Ctrl+Z` | Takes your latest command back: the world returns to the moment before it and runs forward again without it. Against the computer, in lessons and in the campaign only, never over a network; press again to take back the one before, up to twenty. |
 
 The panel on the left shows the Storm Power, the piece queue, the build
@@ -206,7 +207,12 @@ are still the original's.
   give off puffs of smoke that thin out. `F4` switches them with the
   rest (`generated_fire` in `[effects]`).
 - **Explosions** can be generated as well, as an experiment: `F6` swaps
-  the original's fireball for one of ours (`generated_blast`).
+  the original's fireball and missile impacts for ours (`generated_blast`).
+- **Islets**, the islands units make for themselves, can be generated
+  from the ground and rock generators with a rim in the owner's colour,
+  as an experiment: `F7` (`generated_islets` in `[fringe]`).
+- **The sky** has always been generated: three layers of drifting clouds
+  from warped fractal noise on a torus (`[sky]`).
 
 The generators live in `crates/islefall-art`, which knows nothing of the
 engine, and `artgen` writes their pictures as PNG:

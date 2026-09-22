@@ -307,12 +307,45 @@ fn generated_ground(commands: &mut Commands, images: &mut Assets<Image>, palette
         Theme::Wind => "wind",
         Theme::Rain => "rain",
     };
-    let rules = fr.ground.get(name).or_else(|| fr.ground.get("default")).cloned().unwrap_or_default();
     let (min_x, min_y) = (cells.iter().map(|c| c.x).min().unwrap_or(0), cells.iter().map(|c| c.y).min().unwrap_or(0));
     let (max_x, max_y) = (cells.iter().map(|c| c.x).max().unwrap_or(0), cells.iter().map(|c| c.y).max().unwrap_or(0));
     let set: std::collections::HashSet<(i32, i32)> = cells.iter().map(|c| (c.x, c.y)).collect();
     let (cw, ch) = (g.cell_w as u32, g.cell_h as u32);
-    let ground = islefall_art::ground::Ground {
+    let ground = ground_generator(palette, ramp, name, fr, g);
+    let seed = (min_x as u32).wrapping_mul(0x9E37_79B1) ^ (min_y as u32).wrapping_mul(0x85EB_CA6B) ^ 0x6d2b;
+    let pic = ground.surface((max_x - min_x + 1) as u32 * cw, (max_y - min_y + 1) as u32 * ch, seed, |x, y| set.contains(&(min_x + (x / cw) as i32, min_y + (y / ch) as i32)));
+    let at = Vec3::new((min_x * g.cell_w) as f32, -((min_y * g.cell_h) as f32), Z_TERRAIN);
+    commands.spawn((Sprite::from_image(images.add(picture_image(pic))), bevy::sprite::Anchor::TOP_LEFT, Transform::from_translation(at), TerrainTile { platform: false }));
+}
+
+/// A generated picture as a texture, pixel for pixel.
+pub fn picture_image(pic: islefall_art::Picture) -> Image {
+    let mut image = Image::new(
+        bevy::render::render_resource::Extent3d { width: pic.width, height: pic.height, depth_or_array_layers: 1 },
+        bevy::render::render_resource::TextureDimension::D2,
+        pic.rgba,
+        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD | bevy::asset::RenderAssetUsages::MAIN_WORLD,
+    );
+    image.sampler = bevy::image::ImageSampler::nearest();
+    image
+}
+
+/// The name of a theme in the rules.
+pub fn theme_name(theme: Theme) -> &'static str {
+    match theme {
+        Theme::Sun => "sun",
+        Theme::Thunder => "thunder",
+        Theme::Wind => "wind",
+        Theme::Rain => "rain",
+    }
+}
+
+/// The ground generator of a theme, with the given ramp.
+pub fn ground_generator(palette: &Palette, ramp: Vec<[u8; 3]>, theme: &str, fr: &islefall_sim::config::FringeRules, g: &Grid) -> islefall_art::ground::Ground {
+    let rules = fr.ground.get(theme).or_else(|| fr.ground.get("default")).cloned().unwrap_or_default();
+    let (cw, ch) = (g.cell_w as u32, g.cell_h as u32);
+    islefall_art::ground::Ground {
         ramp,
         drift: rules.drift,
         patch: rules.patch,
@@ -327,19 +360,65 @@ fn generated_ground(commands: &mut Commands, images: &mut Assets<Image>, palette
         specks: rules.specks.iter().map(|s| islefall_art::ground::Speck { colour: snap(palette, s.colour), per_1000px: s.per_1000px }).collect(),
         crack_spacing: rules.crack_spacing,
         crack_colour: snap(palette, rules.crack_colour),
+    }
+}
+
+/// The ramp of a theme's filled tiles, read from the atlas.
+pub fn theme_ramp(install: &Installation, lib: &mut ShapeLibrary, palette: &Palette, images: &mut Assets<Image>, layouts: &mut Assets<TextureAtlasLayout>, theme: Theme) -> Vec<[u8; 3]> {
+    let Some(isle_def) = install.type_def("isle") else { return Vec::new() };
+    let Some(shape) = lib.get_or_load(install, palette, "isle", images, layouts) else { return Vec::new() };
+    tile_ramp(images, layouts, shape, &isle::frames(isle_def, theme, isle::Piece::Filled))
+}
+
+/// The most common strong colour of an atlas frame: a player's colour,
+/// read from the emblem drawn in it.
+pub fn frame_colour(images: &Assets<Image>, layouts: &Assets<TextureAtlasLayout>, shape: &LoadedShape, frame: usize) -> Option<[u8; 3]> {
+    let (img, layout) = (images.get(&shape.image)?, layouts.get(&shape.layout)?);
+    let data = img.data.as_ref()?;
+    let rect = layout.textures.get(frame)?;
+    let stride = img.width() as usize * 4;
+    let mut counts: HashMap<[u8; 3], u32> = HashMap::new();
+    for y in rect.min.y..rect.max.y {
+        for x in rect.min.x..rect.max.x {
+            let i = y as usize * stride + x as usize * 4;
+            let (r, g, b, a) = (data[i], data[i + 1], data[i + 2], data[i + 3]);
+            let (hi, lo) = (r.max(g).max(b), r.min(g).min(b));
+            if a > 0 && hi > 80 && hi - lo > 60 {
+                *counts.entry([r, g, b]).or_default() += 1;
+            }
+        }
+    }
+    counts.into_iter().max_by_key(|(_, n)| *n).map(|(c, _)| c)
+}
+
+/// The two pictures of a generated islet for the owner's colour and the
+/// theme: the top, and the rock under it starting at the top's bottom row.
+#[allow(clippy::too_many_arguments)]
+pub fn generated_islet(palette: &Palette, ramp: Vec<[u8; 3]>, theme: Theme, colour: [u8; 3], seed: u32, fr: &islefall_sim::config::FringeRules, g: &Grid, foot: (i32, i32)) -> (islefall_art::Picture, islefall_art::Picture) {
+    let r = &fr.rock;
+    let shade = |c: [u8; 3], k: f32| snap(palette, [(c[0] as f32 * k).min(255.0) as u8, (c[1] as f32 * k).min(255.0) as u8, (c[2] as f32 * k).min(255.0) as u8]);
+    let islet = islefall_art::islet::Islet {
+        ground: ground_generator(palette, ramp, theme_name(theme), fr, g),
+        rock: islefall_art::rock::Rock {
+            ramp: r.ramp.iter().map(|c| snap(palette, *c)).collect(),
+            depth_min: fr.islet_depth[0],
+            depth_max: fr.islet_depth[1].max(fr.islet_depth[0] + 1),
+            end_depth: r.end_depth.min(fr.islet_depth[0]),
+            taper: r.taper,
+            lobe: r.lobe * 0.6,
+            tooth: r.tooth * 0.7,
+            windows_per_100px: 0.0,
+            lit: false,
+            pane: snap(palette, r.pane),
+        },
+        light: shade(colour, 1.15),
+        dark: shade(colour, 0.6),
+        width: (foot.0 * g.cell_w) as u32,
+        height: (foot.1 * g.cell_h) as u32,
+        wobble: fr.islet_wobble,
+        band: fr.islet_band,
     };
-    let seed = (min_x as u32).wrapping_mul(0x9E37_79B1) ^ (min_y as u32).wrapping_mul(0x85EB_CA6B) ^ 0x6d2b;
-    let pic = ground.surface((max_x - min_x + 1) as u32 * cw, (max_y - min_y + 1) as u32 * ch, seed, |x, y| set.contains(&(min_x + (x / cw) as i32, min_y + (y / ch) as i32)));
-    let mut image = Image::new(
-        bevy::render::render_resource::Extent3d { width: pic.width, height: pic.height, depth_or_array_layers: 1 },
-        bevy::render::render_resource::TextureDimension::D2,
-        pic.rgba,
-        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
-        bevy::asset::RenderAssetUsages::RENDER_WORLD,
-    );
-    image.sampler = bevy::image::ImageSampler::nearest();
-    let at = Vec3::new((min_x * g.cell_w) as f32, -((min_y * g.cell_h) as f32), Z_TERRAIN);
-    commands.spawn((Sprite::from_image(images.add(image)), bevy::sprite::Anchor::TOP_LEFT, Transform::from_translation(at), TerrainTile { platform: false }));
+    islet.pictures(seed)
 }
 
 /// The palette's nearest colour, so generated art sits beside the sprites.

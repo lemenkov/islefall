@@ -40,6 +40,8 @@ pub struct FireArt {
     smoke: Vec<Strip>,
     /// By size, smallest first.
     blasts: Vec<Strip>,
+    /// A missile's landing.
+    impact: Option<Strip>,
 }
 
 /// A sprite stepping through a strip: round and round until its life is
@@ -93,10 +95,21 @@ pub fn make_fire_art(mut commands: Commands, data: Res<GameData>, mut images: Re
         let blast = Blast { fire: fire.clone(), smoke: grey.clone(), size, frames: r.blast_frames, sparks: r.sparks };
         art.blasts.push(make_strip(&blast.frames(211 + i as u32 * 17), &mut images, &mut layouts));
     }
+    if r.impact_size > 0 {
+        let blast = Blast { fire: fire.clone(), smoke: grey.clone(), size: r.impact_size, frames: r.impact_frames.max(2), sparks: r.sparks / 2 };
+        art.impact = Some(make_strip(&blast.frames(307), &mut images, &mut layouts));
+    }
     commands.insert_resource(art);
 }
 
 impl FireArt {
+    /// Where a missile lands.
+    pub fn impact(&self, commands: &mut Commands, data: &GameData, pos: Vec2, z: f32) {
+        let Some(strip) = self.impact.as_ref() else { return };
+        let r = &data.cfg.effects.fire;
+        commands.spawn((strip.sprite(0), Anchor::CENTER, Transform::from_translation(pos.extend(z)), Flicker { frames: strip.frames, fps: r.blast_fps, clock: 0.0, life: None, rise: 0.0 }));
+    }
+
     /// An explosion for a structure whose longer side is `cells`, centred on `pos`.
     pub fn blast(&self, commands: &mut Commands, data: &GameData, cells: i32, pos: Vec2, z: f32) {
         let r = &data.cfg.effects.fire;

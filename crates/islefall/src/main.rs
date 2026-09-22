@@ -160,15 +160,21 @@ fn cloud_tile(layer: &islefall_sim::config::SkyLayer) -> Vec<u8> {
         .set_frequency(1.0)
         .set_lacunarity(layer.lacunarity.max(1.0))
         .set_persistence(layer.gain.clamp(0.05, 1.0));
+    let warp = Fbm::<Perlin>::new(layer.seed.wrapping_add(977)).set_octaves(2).set_frequency(0.7);
     let n = layer.tile as usize;
     let radius = layer.scale / std::f64::consts::TAU;
     let [r, g, b] = layer.tint;
     let mut rgba = Vec::with_capacity(n * n * 4);
+    // Circles through the noise lattice give bumps at even spacing, a
+    // grid; warping the points by more noise breaks it up.
+    let warp2 = Fbm::<Perlin>::new(layer.seed.wrapping_add(1511)).set_octaves(2).set_frequency(0.7);
     for y in 0..n {
         let v = y as f64 / n as f64 * std::f64::consts::TAU;
         for x in 0..n {
             let u = x as f64 / n as f64 * std::f64::consts::TAU;
-            let p = [radius * u.cos(), radius * u.sin(), radius * v.cos(), radius * v.sin()];
+            let q = [radius * u.cos(), radius * u.sin(), radius * v.cos(), radius * v.sin()];
+            let (w1, w2) = (warp.get(q) * layer.warp, warp2.get(q) * layer.warp);
+            let p = [q[0] + w1, q[1] + w2, q[2] - w2, q[3] + w1];
             // Fractal noise lands mostly within -1..1; map to 0..1.
             let value = (fbm.get(p) as f32 * 0.5 + 0.5).clamp(0.0, 1.0);
             let threshold = 1.0 - layer.cover.clamp(0.0, 1.0);
@@ -871,6 +877,8 @@ struct ArtMode {
     fire: bool,
     /// Generated explosions in place of the original's; `F6` switches them.
     blast: bool,
+    /// Generated islets in place of the original's emblem and stalag; `F7`.
+    islets: bool,
 }
 
 fn art_toggle(
@@ -889,6 +897,10 @@ fn art_toggle(
         mode.blast = !mode.blast;
         status.say(format!("explosions: {} (F6 switches)", if mode.blast { "generated" } else { "the original's" }));
     }
+    if keys.just_pressed(KeyCode::F7) {
+        mode.islets = !mode.islets;
+        status.say(format!("islets: {} (F7 switches)", if mode.islets { "generated" } else { "the original's" }));
+    }
     let (rock, ground) = (keys.just_pressed(KeyCode::F3), keys.just_pressed(KeyCode::F4));
     if !rock && !ground {
         return;
@@ -904,6 +916,7 @@ fn art_toggle(
         mode.generated = mode.ground;
         mode.fire = mode.ground;
         mode.blast = mode.ground && data.cfg.effects.generated_blast;
+        mode.islets = mode.ground && data.cfg.fringe.generated_islets;
     }
     for (e, t) in &tiles {
         if !t.platform {
@@ -1266,7 +1279,7 @@ fn main() {
     let data = data_dir();
     let cfg = Config::load(data.join("rules.toml")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("rules.toml").display())));
     let (art_generated, art_ground) = (cfg.fringe.generated, cfg.fringe.generated_ground);
-    let (art_fire, art_blast) = (cfg.effects.generated_fire, cfg.effects.generated_blast);
+    let (art_fire, art_blast, art_islets) = (cfg.effects.generated_fire, cfg.effects.generated_blast, cfg.fringe.generated_islets);
     let scripts = Scripts::load(data.join("scripts/rules.rhai")).unwrap_or_else(|e| fail(format!("{}: {e}", data.join("scripts/rules.rhai").display())));
     let install = Installation::load(&dir).unwrap_or_else(|e| fail(format!("failed to load NetStorm data from {}: {e}", dir.display())));
     let campaign = Campaign::from_env(&install);
@@ -1368,7 +1381,7 @@ fn main() {
         paused: campaign.as_ref().is_some_and(|c| c.waits()),
     })
     .insert_resource(CampaignState(campaign))
-    .insert_resource(ArtMode { generated: art_generated, ground: art_ground, fire: art_fire, blast: art_blast })
+    .insert_resource(ArtMode { generated: art_generated, ground: art_ground, fire: art_fire, blast: art_blast, islets: art_islets })
     .init_resource::<ConstructionCache>()
     .add_systems(Startup, setup)
     .add_systems(Startup, fire::make_fire_art)
@@ -3630,14 +3643,15 @@ fn sync_platforms(
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     existing: Query<(Entity, &TerrainTile, Option<&Islet>, &Sprite, &Anchor, &Transform)>,
     art: Option<Res<fire::FireArt>>,
+    mode: Res<ArtMode>,
     mut rng: Local<Option<Pcg32>>,
-    mut seen: Local<Option<u64>>,
+    mut seen: Local<Option<(u64, bool)>>,
 ) {
     let w = sim.world();
-    if *seen == Some(w.terrain_version) {
+    if *seen == Some((w.terrain_version, mode.islets)) {
         return;
     }
-    *seen = Some(w.terrain_version);
+    *seen = Some((w.terrain_version, mode.islets));
     let rng = rng.get_or_insert_with(|| Pcg32::seed_from_u64(0x3C6E_F372_FE94_F82B));
     for (e, t, islet, sprite, anchor, tf) in &existing {
         if !t.platform {
@@ -3664,6 +3678,24 @@ fn sync_platforms(
         let frame = if s.stock > 0 || s.kind.eq_ignore_ascii_case("emptygeyser") { fr.stalag_frame } else { fr.player_frames.get(s.owner as usize % fr.player_frames.len().max(1)).copied().unwrap_or(fr.stalag_frame) };
         let at = world::cell_to_world(s.cell, g);
         let mut drawn = false;
+        if mode.islets && frame != fr.stalag_frame {
+            // The generated islet: the owner's colour from the emblem
+            // frame the original would draw, the ground of the unit's theme.
+            let colour = lib.get_or_load(&data.install, palette, &fr.platform, &mut images, &mut layouts).and_then(|top| world::frame_colour(&images, &layouts, top, frame)).unwrap_or([220, 200, 80]);
+            let theme = s.theme;
+            let ramp = world::theme_ramp(&data.install, &mut lib, palette, &mut images, &mut layouts, theme);
+            let seed = (s.cell.x as u32).wrapping_mul(0x9E37_79B1) ^ (s.cell.y as u32).wrapping_mul(0x85EB_CA6B) ^ s.id;
+            let (top, under) = world::generated_islet(palette, ramp, theme, colour, seed, fr, g, (s.foot_x, s.foot_y));
+            let (hx, hy) = s.cell.top_left_px(g);
+            let corner = Vec2::new((hx - (s.foot_x - 1) * g.cell_w) as f32, -((hy - (s.foot_y - 1) * g.cell_h) as f32));
+            for (pic, z) in [(top, world::Z_TERRAIN + 0.5), (under, world::Z_TERRAIN - 0.25)] {
+                commands.spawn((Sprite::from_image(images.add(world::picture_image(pic))), Anchor::TOP_LEFT, Transform::from_translation(corner.extend(z)), TerrainTile { platform: true }, Islet(s.cell)));
+            }
+            for c in s.cells() {
+                rest.remove(c);
+            }
+            continue;
+        }
         if let Some(top) = lib.get_or_load(&data.install, palette, &fr.platform, &mut images, &mut layouts) {
             if frame < top.frames.len() {
                 let e = world::spawn_frame(&mut commands, top, frame, at, world::Z_TERRAIN + 0.5);
@@ -3793,6 +3825,8 @@ fn projectiles(
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
     mut landed: ResMut<Landed>,
     mut flying: Query<(Entity, &mut Projectile, &mut Transform, &mut Sprite, &mut Anchor, &ShapeSprite)>,
+    mode: Res<ArtMode>,
+    fire_art: Option<Res<fire::FireArt>>,
     mut seen_tick: Local<Option<u64>>,
 ) {
     let w = sim.world();
@@ -3846,9 +3880,10 @@ fn projectiles(
     for (e, mut p, mut tf, mut sprite, mut anchor, shape) in &mut flying {
         p.progress += dt / p.seconds;
         if p.progress >= 1.0 {
-            match &rules_fx.impact {
-                Some(hit) => spawn_effect(&mut commands, &data, &mut lib, &mut images, &mut layouts, hit, p.to, Z_UNIT + 2.5),
-                None => landed.0.push(p.to),
+            match (&rules_fx.impact, fire_art.as_ref().filter(|_| mode.blast)) {
+                (_, Some(art)) => art.impact(&mut commands, &data, p.to, Z_UNIT + 2.5),
+                (Some(hit), None) => spawn_effect(&mut commands, &data, &mut lib, &mut images, &mut layouts, hit, p.to, Z_UNIT + 2.5),
+                (None, None) => landed.0.push(p.to),
             }
             commands.entity(e).despawn();
             continue;

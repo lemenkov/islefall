@@ -68,8 +68,8 @@ on its picture, wander and leave smoke, more and larger below a quarter.
 The flames and the smoke are Islefall's generated art
 (`effects.generated_fire`, shaped by `[effects.fire]`; `false` or `F4`
 gives rising specks over the footprint instead), and
-`effects.generated_blast` or `F6` swaps the great fireball for a
-generated explosion. A map may open on a battlefield: `health` on a
+`effects.generated_blast` or `F6` swaps the great fireball and the
+missile impacts for generated explosions. A map may open on a battlefield: `health` on a
 structure is its starting health in per cent. An
 Energy source's stars are the original's twinkling `range` frames in the
 source's theme colour (`energy.star_type` and `star_labels`). A geyser's 49 idle frames are

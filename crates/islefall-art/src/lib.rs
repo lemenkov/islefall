@@ -8,6 +8,7 @@
 
 pub mod fire;
 pub mod ground;
+pub mod islet;
 pub mod rock;
 
 /// A picture: `width * height` RGBA pixels, row by row from the top.

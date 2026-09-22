@@ -114,6 +114,20 @@ pub struct FringeRules {
     /// The picture breaks into so many chunks, flung outward at so many
     /// source pixels per second, lifted by so many, tumbling up to so many
     /// radians per second, in so many puffs of dust.
+    /// A unit's islet from the ground and rock generators, with a rim
+    /// and a band in the owner's colour, in place of the original's
+    /// emblem and stalag.
+    #[serde(default)]
+    pub generated_islets: bool,
+    /// The islet's rock, shallowest and deepest, in source pixels; how
+    /// far its outline wanders in from a full ellipse; rows of the
+    /// owner's band at the top of the rock.
+    #[serde(default = "default_islet_depth")]
+    pub islet_depth: [u32; 2],
+    #[serde(default = "default_islet_wobble")]
+    pub islet_wobble: f64,
+    #[serde(default = "default_islet_band")]
+    pub islet_band: u32,
     #[serde(default = "default_shatter_pieces")]
     pub shatter_pieces: u32,
     #[serde(default = "default_shatter_burst")]
@@ -284,6 +298,15 @@ fn default_fall_gravity() -> f32 {
 }
 fn default_fall_fade() -> f32 {
     0.5
+}
+fn default_islet_depth() -> [u32; 2] {
+    [20, 38]
+}
+fn default_islet_wobble() -> f64 {
+    0.2
+}
+fn default_islet_band() -> u32 {
+    3
 }
 fn default_shatter_pieces() -> u32 {
     9
@@ -566,6 +589,9 @@ pub struct FireRules {
     pub blast_frames: u32,
     pub blast_fps: f32,
     pub sparks: u32,
+    /// A missile's landing: a small, short explosion; 0 for none.
+    pub impact_size: u32,
+    pub impact_frames: u32,
 }
 
 impl Default for FireRules {
@@ -592,6 +618,8 @@ impl Default for FireRules {
             blast_frames: 16,
             blast_fps: 18.0,
             sparks: 14,
+            impact_size: 20,
+            impact_frames: 8,
         }
     }
 }
@@ -797,6 +825,14 @@ pub struct SkyLayer {
     pub tint: [f32; 3],
     pub opacity: f32,
     pub speed: [f32; 2],
+    /// How far more noise bends the sample points, in noise periods;
+    /// without it the clouds line up on the noise lattice.
+    #[serde(default = "default_warp")]
+    pub warp: f64,
+}
+
+fn default_warp() -> f64 {
+    0.8
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
