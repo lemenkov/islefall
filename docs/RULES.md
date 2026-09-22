@@ -424,7 +424,9 @@ that damage taken while building stays taken, and stands
 once `construction_seconds` (from cost, `constructionRate` and
 `construction.power_per_rate`, a guess) have passed. A shell shoots
 nothing, produces no Energy, launches nothing, builds nothing and takes
-no crystals. The stream's path is not drawn. `kill_reward` grants the
+no crystals. The stream's path is not drawn; a shell that no stream
+can reach is pointed out in the status line after
+`construction.stall_seconds`. `kill_reward` grants the
 killer `economy.kill_reward_percent` of the victim's cost; a Golem costs
 nothing and rewards nothing.
 

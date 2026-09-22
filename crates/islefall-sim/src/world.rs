@@ -1953,6 +1953,13 @@ impl World {
 
     /// Ground cells a player's streams reach: everything connected by land
     /// or bridge to one of their complete Temples, Workshops or Outposts.
+    /// The shells of `owner` no stream reaches: placed where no ground
+    /// connects to one of their complete Temples, Workshops or Outposts.
+    pub fn unreached_shells(&self, owner: u8) -> Vec<usize> {
+        let reach = self.stream_reach(owner);
+        self.structures.iter().enumerate().filter(|(_, s)| s.owner == owner && !s.complete() && !s.cells().any(|c| reach.contains(&c))).map(|(i, _)| i).collect()
+    }
+
     fn stream_reach(&self, owner: u8) -> BTreeSet<Cell> {
         let mut reached = BTreeSet::new();
         let mut frontier: Vec<Cell> = self
@@ -3511,6 +3518,26 @@ mod tests {
     }
 
     #[test]
+    fn a_shell_cut_off_from_every_source_is_reported_as_unreached() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 6, 4), 0);
+        w.push_island(IslandMap::rect(Cell::new(20, 0), 6, 4), 0);
+        w.powers[0] = 10_000;
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        w.energy_enforced = true;
+        let cannon = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 600, cost: 400, build_seconds: 2.0, ..TypeRules::plain() };
+        let near = w.drop_structure("suncannon", &cannon, Cell::new(4, 1)).unwrap();
+        let far = w.drop_structure("suncannon", &cannon, Cell::new(22, 1)).unwrap();
+        assert_eq!(w.unreached_shells(0), vec![far], "only the far one waits");
+        for x in 6..20 {
+            w.place_bridge(Cell::new(x, 1));
+        }
+        assert!(w.unreached_shells(0).is_empty(), "bridged, both are reached");
+        let _ = near;
+    }
+
+    #[test]
     fn a_structure_rebuilt_under_fire_is_not_felled_by_the_first_shot() {
         let mut w = World::new(test_config());
         w.push_island(IslandMap::rect(Cell::new(0, 0), 12, 8), 0);
@@ -3537,6 +3564,43 @@ mod tests {
         assert!(hit, "the cannon did fire at it");
         let s = &w.structures[again];
         assert!(s.complete() && s.hp < s.max_hp && s.hp >= 800 - 5 * 50, "built, and the damage stayed: {}", s.hp);
+    }
+
+    #[test]
+    fn a_second_generator_off_the_first_islet_builds_as_fast_as_the_first() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 8, 6), 0);
+        w.powers[0] = 10_000;
+        let scripts = test_scripts();
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        w.energy_enforced = true;
+        for x in 8..14 {
+            w.place_bridge(Cell::new(x, 2));
+        }
+        let battery = TypeRules { foot_x: 3, foot_y: 3, creates_island: true, max_hit_points: 300, cost: 300, build_seconds: 3.0, ..TypeRules::plain() };
+        let first = w.drop_structure("sunbattery", &battery, Cell::new(16, 3)).unwrap_or_else(|e| panic!("{e}"));
+        let ticks = w.cfg.ticks(3.0);
+        let mut first_done = None;
+        for t in 0..ticks * 3 {
+            w.step(&scripts);
+            if first_done.is_none() && w.structures[first].complete() {
+                first_done = Some(t + 1);
+            }
+        }
+        assert_eq!(first_done, Some(ticks), "the first takes its build time");
+        for x in 17..21 {
+            w.place_bridge(Cell::new(x, 2));
+        }
+        let second = w.drop_structure("sunbattery", &battery, Cell::new(23, 3)).unwrap_or_else(|e| panic!("{e}"));
+        let mut second_done = None;
+        for t in 0..ticks * 3 {
+            w.step(&scripts);
+            if second_done.is_none() && w.structures[second].complete() {
+                second_done = Some(t + 1);
+            }
+        }
+        assert_eq!(second_done, Some(ticks), "and so does the second, off the first's islet");
     }
 
     #[test]

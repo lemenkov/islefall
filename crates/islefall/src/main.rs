@@ -1387,6 +1387,7 @@ fn main() {
     .add_systems(Startup, fire::make_fire_art)
     .add_systems(Update, fire::run_flickers.run_if(resource_equals(Mode::Island)))
     .add_systems(Update, shatter::fall.after(sync_platforms).after(sync_bridges).run_if(resource_equals(Mode::Island)))
+    .add_systems(Update, stalled_shells.run_if(resource_equals(Mode::Island)))
     .add_systems(Update, window_icon)
     .add_systems(Update, quit_keys)
     .add_systems(Startup, move |mut commands: Commands, game: Res<GameData>| {
@@ -3494,6 +3495,31 @@ fn sync_structures(
     for i in 0..w.structures.len() {
         if !drawn.contains(&w.structures[i].id) {
             world::spawn_structure(&mut commands, &data.install, &mut lib, palette, &mut images, &mut layouts, w, i);
+        }
+    }
+}
+
+/// Say when a shell of the player's has waited a while for a stream
+/// that cannot reach it, once per shell, so a build that never starts
+/// is not a mystery.
+fn stalled_shells(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, mut status: ResMut<Status>, mut waiting: Local<HashMap<u32, u32>>, mut told: Local<std::collections::HashSet<u32>>, mut last_tick: Local<u64>) {
+    let w = sim.world();
+    if w.tick == *last_tick {
+        return;
+    }
+    *last_tick = w.tick;
+    let grace = data.cfg.ticks(data.cfg.construction.stall_seconds);
+    let stalled: Vec<u32> = w.unreached_shells(player.id).into_iter().map(|i| w.structures[i].id).collect();
+    waiting.retain(|id, _| stalled.contains(id));
+    for id in stalled {
+        let t = waiting.entry(id).or_insert(0);
+        *t += 1;
+        if *t == grace && told.insert(id) {
+            if let Some(s) = w.structures.iter().find(|s| s.id == id) {
+                let name = data.install.type_def(&s.kind).and_then(|d| d.get_str("description")).unwrap_or(&s.kind).to_string();
+                let c = s.centre();
+                status.say(format!("{name} at {},{} waits for a stream: nothing links it to a finished Temple, Workshop or Outpost of yours", c.x, c.y));
+            }
         }
     }
 }

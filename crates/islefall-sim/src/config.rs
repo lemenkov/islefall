@@ -1114,6 +1114,14 @@ pub struct Construction {
     /// stream adds the rest as it builds.
     #[serde(default = "default_start_health_percent")]
     pub start_health_percent: i32,
+    /// Seconds a shell may wait for a stream before the game says that
+    /// none can reach it.
+    #[serde(default = "default_stall_seconds")]
+    pub stall_seconds: f64,
+}
+
+fn default_stall_seconds() -> f64 {
+    3.0
 }
 
 fn default_construction_rate() -> f64 {

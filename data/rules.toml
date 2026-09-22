@@ -245,6 +245,9 @@ default_rate = 10.0
 # adds the rest. With one hit point, whatever felled a structure felled
 # its replacement with the next shot.
 start_health_percent = 25
+# A shell that no stream can reach (no ground or bridge connects it to a
+# finished Temple, Workshop or Outpost) is pointed out after this long.
+stall_seconds = 3.0
 
 [combat]
 # Cells around an exploding structure that take damage and bridge shock (guess).
