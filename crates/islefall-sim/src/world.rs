@@ -1098,17 +1098,30 @@ impl World {
             let ground = a.ground && rules.range > 0 && rules.hp_per_sec > 0;
             if ground || a.air_range > 0 {
                 let burst = self.cfg.combat.bursts.get(&kind.to_lowercase()).cloned();
+                let continuous = burst.as_ref().is_some_and(|b| b.shots == 0);
                 let shots = burst.as_ref().map(|b| b.shots.max(1)).unwrap_or(1) as i32;
+                let (damage, air_damage, delay) = if let Some(b) = burst.as_ref().filter(|_| continuous) {
+                    // Without pause: a shot every interval, each the interval's worth of the rate.
+                    let per = |rate: i32| ((rate as f64 * b.interval_seconds).round() as i32).max(1);
+                    let air_rate = rules.air_attack.map(|x| x.air_damage).unwrap_or(0);
+                    (self.ranked(owner, rules, per(rules.hp_per_sec)), if air_rate > 0 { self.ranked(owner, rules, per(air_rate)) } else { 0 }, self.cfg.ticks(b.interval_seconds).max(1))
+                } else {
+                    (
+                        (self.ranked(owner, rules, rules.damage_per_shot) / shots).max(1),
+                        (self.ranked(owner, rules, rules.air_damage_per_shot) / shots).max(if a.air_range > 0 { 1 } else { 0 }),
+                        self.cfg.ticks(rules.delay_between_shots),
+                    )
+                };
                 s.weapon = Some(Weapon {
                     range: rules.range,
-                    damage: (self.ranked(owner, rules, rules.damage_per_shot) / shots).max(1),
-                    delay: self.cfg.ticks(rules.delay_between_shots),
+                    damage,
+                    delay,
                     cardinal_only: rules.cardinal_only,
                     ground,
                     air_range: a.air_range,
-                    air_damage: (self.ranked(owner, rules, rules.air_damage_per_shot) / shots).max(if a.air_range > 0 { 1 } else { 0 }),
-                    burst: shots as u32,
-                    burst_gap: burst.map(|b| self.cfg.ticks(b.interval_seconds).max(1)).unwrap_or(0),
+                    air_damage,
+                    burst: if continuous { 1 } else { shots as u32 },
+                    burst_gap: if continuous { 0 } else { burst.map(|b| self.cfg.ticks(b.interval_seconds).max(1)).unwrap_or(0) },
                 });
             }
         }
@@ -2164,7 +2177,7 @@ impl World {
 
     /// A shot's shrapnel: every enemy structure and ground unit within
     /// `range` of the hit, other than what the shot struck, takes `damage`.
-    fn splinter(&mut self, at: Cell, owner: u8, damage: i32, range: i32, struck: Target, scripts: &Scripts) {
+    fn splinter(&mut self, at: Cell, owner: u8, damage: i32, range: i32, chance: f64, struck: Target, scripts: &Scripts) {
         if damage <= 0 {
             return;
         }
@@ -2184,13 +2197,17 @@ impl World {
             .map(|(j, u)| (j, u.cell()))
             .collect();
         for (j, c) in units {
-            self.last_splinters.push((at, c));
-            self.damage_unit_by(j, damage, Some(owner), scripts);
+            if self.dice.random_range(0.0..1.0) < chance {
+                self.last_splinters.push((at, c));
+                self.damage_unit_by(j, damage, Some(owner), scripts);
+            }
         }
         // Highest index first: a destroyed structure shifts the ones after it.
         for (j, c) in structures.into_iter().rev() {
-            self.last_splinters.push((at, c));
-            self.damage_structure_by(j, damage, Some(owner), scripts);
+            if self.dice.random_range(0.0..1.0) < chance {
+                self.last_splinters.push((at, c));
+                self.damage_structure_by(j, damage, Some(owner), scripts);
+            }
         }
     }
 
@@ -2292,7 +2309,7 @@ impl World {
                 Target::Bridge(c) => self.shoot_bridge(c, w.damage, scripts),
             }
             if let (Some(at), Some(sh)) = (hit, self.cfg.combat.shrapnel.get(&kind.to_lowercase()).cloned()) {
-                self.splinter(at, owner, w.damage * sh.percent / 100, sh.range, target, scripts);
+                self.splinter(at, owner, w.damage * sh.percent / 100, sh.range, sh.chance, target, scripts);
             }
         }
         for s in &mut self.structures {
@@ -3783,6 +3800,7 @@ mod tests {
         w.push_island(IslandMap::rect(Cell::new(8, 0), 22, 6), 1);
         w.powers = vec![10_000; 8];
         w.cfg.combat.bursts.clear();
+        w.cfg.combat.shrapnel.insert("raincannon".into(), crate::config::Shrapnel { range: 5, percent: 40, chance: 1.0 });
         let scripts = test_scripts();
         let cannon = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 600, range: 32, hp_per_sec: 20, damage_per_shot: 100, delay_between_shots: 5.0, cardinal_only: true, ..TypeRules::plain() };
         w.drop_structure("raincannon", &cannon, Cell::new(1, 2)).unwrap();
@@ -3826,6 +3844,49 @@ mod tests {
         assert_eq!(&fired_at[..4], &[0, gap, 2 * gap, 3 * gap], "four quick shots");
         assert_eq!(fired_at[4], w.cfg.ticks(2.0), "then the next burst after the delay");
         assert_eq!(w.structures[t].hp, 1000 - 8 * 25, "two bursts landed");
+    }
+
+    #[test]
+    fn a_continuous_shooter_fires_every_interval_for_its_rate() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 6), 0);
+        w.push_island(IslandMap::rect(Cell::new(8, 0), 22, 6), 1);
+        w.powers = vec![10_000; 8];
+        w.cfg.combat.shrapnel.clear();
+        w.cfg.combat.bursts.insert("raincannon".into(), crate::config::Burst { shots: 0, interval_seconds: 0.2 });
+        let scripts = test_scripts();
+        let cannon = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 600, range: 32, hp_per_sec: 20, damage_per_shot: 100, delay_between_shots: 5.0, cardinal_only: true, ..TypeRules::plain() };
+        let c = w.drop_structure("raincannon", &cannon, Cell::new(1, 2)).unwrap();
+        let weapon = w.structures[c].weapon.unwrap();
+        assert_eq!((weapon.damage, weapon.delay, weapon.burst), (4, w.cfg.ticks(0.2), 1), "a fifth of a second's worth every fifth of a second");
+        let tower = TypeRules { max_hit_points: 1000, cost: 100, ..TypeRules::plain() };
+        let t = w.drop_structure_for(1, "sunblocker", &tower, Cell::new(12, 2)).unwrap();
+        for _ in 0..w.cfg.ticks(2.0) {
+            w.step(&scripts);
+        }
+        assert_eq!(w.structures[t].hp, 1000 - 10 * 4, "twenty a second, without pause");
+    }
+
+    #[test]
+    fn shrapnel_strikes_by_chance() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 4, 6), 0);
+        w.push_island(IslandMap::rect(Cell::new(8, 0), 22, 6), 1);
+        w.powers = vec![10_000; 8];
+        w.cfg.combat.bursts.clear();
+        w.cfg.combat.shrapnel.insert("raincannon".into(), crate::config::Shrapnel { range: 5, percent: 100, chance: 0.5 });
+        let scripts = test_scripts();
+        let cannon = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 600, range: 32, hp_per_sec: 20, damage_per_shot: 10, delay_between_shots: 0.5, cardinal_only: true, ..TypeRules::plain() };
+        w.drop_structure("raincannon", &cannon, Cell::new(1, 2)).unwrap();
+        let tower = TypeRules { max_hit_points: 10_000, cost: 100, ..TypeRules::plain() };
+        let struck = w.drop_structure_for(1, "sunblocker", &tower, Cell::new(12, 2)).unwrap();
+        let beside = w.drop_structure_for(1, "sunblocker", &tower, Cell::new(15, 4)).unwrap();
+        for _ in 0..w.cfg.ticks(20.0) {
+            w.step(&scripts);
+        }
+        let (direct, splinters) = (10_000 - w.structures[struck].hp, 10_000 - w.structures[beside].hp);
+        assert_eq!(direct, 400, "forty shots");
+        assert!(splinters > 100 && splinters < 300, "about half of them splintered onto the neighbour: {splinters}");
     }
 
     #[test]

@@ -219,11 +219,13 @@ influencing the space") are covered in their own sections below.
 The Ice Cannon, the manual says, inflicts light damage but its fire
 splinters into shrapnel on impact, damaging other nearby targets:
 `[combat.shrapnel]` gives every other enemy structure and ground unit
-within its missile's `range` of the hit a share of the shot, drawn as
-small missiles flying out from the hit. It also fires in bursts, as seen
-in the original: `[combat.bursts]` gives a shooter so many shots so many
-seconds apart before its usual delay, each shot carrying its share of
-one shot's damage, so the damage over time stays the type's.
+within its missile's `range` of the hit a `chance` of being struck for a
+share of the shot, drawn as small missiles flying out from the hit. It
+also fires without pause, as seen in the original: `[combat.bursts]`
+gives a shooter a shot every so many seconds, each carrying that
+interval's worth of its `hpPerSec`, so the shots are light and the damage
+over time stays the type's; a shooter given a number of shots fires that
+many in a burst before its usual delay.
 
 ## The High Priest
 

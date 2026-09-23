@@ -1311,7 +1311,9 @@ pub struct Combat {
     #[serde(default)]
     pub shrapnel: BTreeMap<String, Shrapnel>,
     /// Shooters that fire in bursts: so many shots so many seconds apart,
-    /// then the type's delay; each shot carries its share of the damage.
+    /// then the type's delay, each shot carrying its share of the damage;
+    /// with `shots` 0 the fire is continuous at that interval, each shot
+    /// carrying the interval's worth of the type's `hpPerSec`.
     #[serde(default)]
     pub bursts: BTreeMap<String, Burst>,
 }
@@ -1328,6 +1330,13 @@ pub struct Burst {
 pub struct Shrapnel {
     pub range: i32,
     pub percent: i32,
+    /// The chance, 0 to 1, that a splinter strikes each target in range.
+    #[serde(default = "full")]
+    pub chance: f64,
+}
+
+fn full() -> f64 {
+    1.0
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

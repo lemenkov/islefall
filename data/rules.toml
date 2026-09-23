@@ -274,15 +274,18 @@ rainballoon = 0.1
 
 # The manual: the Ice Cannon inflicts light damage but its fire splinters
 # into shrapnel on impact, damaging other nearby targets. Its missile's
-# `range` (5) is how far the splinters fly; the share is a guess.
+# `range` (5) is how far the splinters fly; each other target in range is
+# struck with `chance`, for `percent` of the shot (guesses).
 [combat.shrapnel]
-raincannon = { range = 5, percent = 40 }
+raincannon = { range = 5, percent = 100, chance = 0.35 }
 
-# Shooters that fire in bursts, like the Ice Cannon in the original: so
-# many shots so many seconds apart, then the usual delay; the shots
-# share the damage of one shot of the type's rate (guesses).
+# Shooters that fire in bursts or, with `shots` 0, without pause, as the
+# Ice Cannon does in the original: a shot every `interval_seconds`, each
+# carrying the interval's worth of the type's `hpPerSec` (so a shot is
+# light, the damage over time the type's). A burst of so many shots
+# falls back to the usual delay between bursts.
 [combat.bursts]
-raincannon = { shots = 6, interval_seconds = 0.12 }
+raincannon = { shots = 0, interval_seconds = 0.15 }
 
 [priest]
 # Cells from an own Temple within which a priest regenerates (guess).
