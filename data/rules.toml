@@ -423,7 +423,7 @@ unlit_flag = "unlit"
 
 # The text in the corner of the screen. Placeholders: {power}, {knowledge},
 # {techs}, {altar} (the Altar's level), {rank}, {tool}, {status} (the last thing the game had to say) and
-# {opponents} (players still in). The last two lines show when the game
+# {opponents} (enemies still in; allies are not counted). The last two lines show when the game
 # is decided.
 # The rock generator: colours from the darkest to the lightest (snapped to
 # the game's palette), how far the rock hangs at least, at most and at the
@@ -536,7 +536,7 @@ pane = [255, 222, 96]
 font_size = 14.0
 lines = [
     "Storm Power {power}   Knowledge {knowledge} ({techs} techs)   Altar level {altar}   Rank {rank}",
-    "Tool: {tool}   Opponents standing: {opponents}",
+    "Tool: {tool}   Enemies standing: {opponents}",
     "{status}",
 ]
 victory = "Victory! The enemy High Priests have been sacrificed."

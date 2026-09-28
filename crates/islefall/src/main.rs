@@ -2760,7 +2760,7 @@ fn hud(sim: Res<Sim>, data: Res<GameData>, player: Res<Player>, status: Res<Stat
         Tool::Drop(stem) | Tool::Spawn(stem) => stem.clone(),
     };
     let me = player.id as usize % data.cfg.sim.max_players;
-    let opponents = w.players.iter().filter(|&&o| o != player.id && !w.out.contains(&o)).count();
+    let opponents = w.players.iter().filter(|&&o| w.hostile(o, player.id) && !w.out.contains(&o)).count();
     let fill = |t: &str| {
         t.replace("{power}", &w.powers[me].to_string())
             .replace("{knowledge}", &w.knowledge.to_string())
