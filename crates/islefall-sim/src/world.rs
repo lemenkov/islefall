@@ -135,6 +135,9 @@ pub enum DropError {
     /// The type is not in production at any of the owner's Workshops.
     #[error("not in production at any Workshop")]
     NotInProduction,
+    /// The mission does not allow this type.
+    #[error("not allowed in this mission")]
+    NotAllowed,
     /// The owner has no Temple, needed for Temple-provided types.
     #[error("needs a Temple")]
     NoTemple,
@@ -194,6 +197,12 @@ pub enum EventKind {
     Casting,
     /// A cast landed.
     Cast,
+    /// A stunned priest was picked up by an enemy; `owner` is the priest's.
+    PriestCaptured,
+    /// A captured priest of an ally was carried home and set free; `owner` is the priest's.
+    PriestSaved,
+    /// An owner's Temple fell to half its health; `owner` is that owner.
+    TempleHalf,
     /// A priest's ground fell away and he floats.
     Floating,
 }
@@ -298,6 +307,24 @@ pub struct World {
     /// Production window offers them again.
     #[serde(default)]
     pub refreshing: Vec<(u8, String, u32)>,
+    /// Who is allied with whom (both ways): allies are not shot at, not
+    /// captured, and win together.
+    #[serde(default)]
+    pub allies: BTreeMap<u8, BTreeSet<u8>>,
+    /// A mission's gates: no salvaging, no raising the Altar, a captured
+    /// priest may be an ally's (to be carried home and set free), and
+    /// only these types may be placed (empty: any).
+    #[serde(default)]
+    pub deny_salvage: bool,
+    #[serde(default)]
+    pub deny_ascend: bool,
+    #[serde(default)]
+    pub any_capture: bool,
+    #[serde(default)]
+    pub tech_allowed: BTreeSet<String>,
+    /// Owners whose Temple has been seen at half health, so it is said once.
+    #[serde(default)]
+    pub temple_halved: BTreeSet<u8>,
 }
 
 fn fresh_dice() -> Pcg32 {
@@ -352,7 +379,33 @@ impl World {
             energy_enforced: true,
             rims_enforced: true,
             refreshing: Vec::new(),
+            allies: BTreeMap::new(),
+            deny_salvage: false,
+            deny_ascend: false,
+            any_capture: false,
+            tech_allowed: BTreeSet::new(),
+            temple_halved: BTreeSet::new(),
         }
+    }
+
+    /// Make two owners allies, both ways.
+    pub fn ally(&mut self, a: u8, b: u8) {
+        if a != b {
+            self.allies.entry(a).or_default().insert(b);
+            self.allies.entry(b).or_default().insert(a);
+        }
+    }
+
+    /// Whether `a` and `b` are enemies: different owners who are not allied.
+    pub fn hostile(&self, a: u8, b: u8) -> bool {
+        a != b && !self.allies.get(&a).is_some_and(|s| s.contains(&b))
+    }
+
+    /// Whether every player still standing is on one side; then the
+    /// game is over and `winner` is one of them.
+    pub fn team_won(&self, me: u8) -> Option<bool> {
+        let w = self.winner?;
+        Some(w == me || !self.hostile(w, me))
     }
 
     /// Fixed-point steps per cell.
@@ -622,7 +675,7 @@ impl World {
     /// Whether a shot by `shooter` from `from` to `to` would cross an
     /// enemy's shield barrier.
     pub fn shielded(&self, shooter: u8, from: Cell, to: Cell, lines: &[FenceLine]) -> bool {
-        lines.iter().filter(|l| l.owner != shooter && l.effect == crate::config::FenceEffect::Shield).any(|l| l.crossed_by(from, to))
+        lines.iter().filter(|l| self.hostile(l.owner, shooter) && l.effect == crate::config::FenceEffect::Shield).any(|l| l.crossed_by(from, to))
     }
 
     /// The barricades act: acid dissolves enemy walkers between its posts,
@@ -639,7 +692,8 @@ impl World {
                 continue;
             }
             let (at, owner) = (u.cell(), u.owner);
-            for l in lines.iter().filter(|l| l.owner != owner && l.cells.contains(&at)) {
+            let hostile: Vec<&FenceLine> = lines.iter().filter(|l| self.hostile(l.owner, owner) && l.cells.contains(&at)).collect();
+            for l in hostile {
                 match l.effect {
                     crate::config::FenceEffect::Dissolve => {
                         let hp = self.units[i].hp;
@@ -1054,6 +1108,9 @@ impl World {
         self.can_drop(rules, cell)?;
         if self.energy_enforced {
             self.check_ownership(owner, rules, cell)?;
+            if !self.tech_allowed.is_empty() && !self.tech_allowed.contains(&kind.to_lowercase()) {
+                return Err(DropError::NotAllowed);
+            }
             if let Some(bit) = rules.tech_bit {
                 if !self.known_tech[self.slot(owner)].contains(&bit) {
                     return Err(DropError::UnknownTech(bit));
@@ -1211,9 +1268,12 @@ impl World {
         self.out.insert(victim);
         self.emit(EventKind::Eliminated, "priest", at, victim);
         let standing: Vec<u8> = self.players.difference(&self.out).copied().collect();
-        if self.players.len() >= 2 && standing.len() == 1 && self.winner.is_none() {
+        let one_side = standing.iter().all(|&a| standing.iter().all(|&b| !self.hostile(a, b)));
+        if self.players.len() >= 2 && !standing.is_empty() && one_side && self.winner.is_none() {
             self.winner = Some(standing[0]);
-            self.emit(EventKind::Victory, "", at, standing[0]);
+            for &w in &standing {
+                self.emit(EventKind::Victory, "", at, w);
+            }
         }
     }
 
@@ -1455,6 +1515,9 @@ impl World {
 
     /// Spend a sacrifice on raising the Altar a level. Returns the new level.
     pub fn upgrade_altar(&mut self, owner: u8) -> Result<u8, String> {
+        if self.deny_ascend {
+            return Err("this mission does not allow raising the Altar".into());
+        }
         let level = self.altar_level(owner);
         if level >= self.cfg.knowledge.altar_levels {
             return Err(format!("the Altar is already at level {level}"));
@@ -1674,8 +1737,9 @@ impl World {
             }
             Treason => {
                 for i in units {
+                    let turns = !self.units[i].is_priest && self.hostile(self.units[i].owner, owner);
                     let u = &mut self.units[i];
-                    if !u.is_priest && u.owner != owner {
+                    if turns {
                         u.owner = owner;
                         u.task = Task::Idle;
                         u.path.clear();
@@ -1693,7 +1757,8 @@ impl World {
             return false;
         }
         let takeable = (p.stunned || (p.floating && u.is_air)) && p.invisible == 0;
-        if !p.alive || !p.is_priest || !takeable || p.owner == u.owner || p.carried_by.is_some() {
+        let may = p.owner != u.owner && (self.hostile(p.owner, u.owner) || self.any_capture);
+        if !p.alive || !p.is_priest || !takeable || !may || p.carried_by.is_some() {
             return false;
         }
         let target = p.cell();
@@ -1780,7 +1845,7 @@ impl World {
 
     pub fn salvage_for(&mut self, owner: u8, index: usize, scripts: &Scripts) -> Option<i32> {
         let s = self.structures.get(index)?;
-        if s.owner != owner {
+        if s.owner != owner || self.deny_salvage {
             return None;
         }
         let refund = scripts
@@ -1918,7 +1983,11 @@ impl World {
             return;
         }
         s.hp -= amount;
-        if s.hp <= 0 {
+        let (halved, owner, at, kind) = (s.is_temple && s.hp * 2 <= s.max_hp, s.owner, s.centre(), s.kind.clone());
+        if halved && self.temple_halved.insert(owner) {
+            self.emit(EventKind::TempleHalf, &kind, at, owner);
+        }
+        if self.structures[index].hp <= 0 {
             self.destroy_structure(index);
         }
     }
@@ -2186,14 +2255,14 @@ impl World {
             .structures
             .iter()
             .enumerate()
-            .filter(|(j, t)| t.owner != owner && t.max_hp > 0 && struck != Target::Structure(*j) && t.distance_to(at) <= range)
+            .filter(|(j, t)| self.hostile(t.owner, owner) && t.max_hp > 0 && struck != Target::Structure(*j) && t.distance_to(at) <= range)
             .map(|(j, t)| (j, t.centre()))
             .collect();
         let units: Vec<(usize, Cell)> = self
             .units
             .iter()
             .enumerate()
-            .filter(|(j, u)| u.alive && u.owner != owner && !u.is_air && u.carried_by.is_none() && struck != Target::Unit(*j) && near(u.cell()))
+            .filter(|(j, u)| u.alive && self.hostile(u.owner, owner) && !u.is_air && u.carried_by.is_none() && struck != Target::Unit(*j) && near(u.cell()))
             .map(|(j, u)| (j, u.cell()))
             .collect();
         for (j, c) in units {
@@ -2225,7 +2294,7 @@ impl World {
             let in_range = |c: Cell| s.distance_to(c) <= w.range && (!w.cardinal_only || s.in_line(c)) && !self.shielded(s.owner, s.centre(), c, &lines);
             let mut best: Option<(i64, Target)> = None;
             for (j, t) in self.structures.iter().enumerate() {
-                if !w.ground || t.owner == s.owner || t.max_hp == 0 || !in_range(t.centre()) {
+                if !w.ground || !self.hostile(t.owner, s.owner) || t.max_hp == 0 || !in_range(t.centre()) {
                     continue;
                 }
                 let current = s.target == Some(Aim::Structure(t.id));
@@ -2237,7 +2306,7 @@ impl World {
             // Enemy bridges are targets too, below anything with a threat.
             if w.ground {
                 for (&c, &state) in &self.bridges {
-                    if state == BridgeState::Hard || self.bridge_owners.get(&c).is_none_or(|&o| o == s.owner) || !in_range(c) {
+                    if state == BridgeState::Hard || self.bridge_owners.get(&c).is_none_or(|&o| !self.hostile(o, s.owner)) || !in_range(c) {
                         continue;
                     }
                     let current = s.target == Some(Aim::Bridge(c));
@@ -2248,7 +2317,7 @@ impl World {
                 }
             }
             for (j, u) in self.units.iter().enumerate() {
-                if !u.alive || u.owner == s.owner || u.carried_by.is_some() || u.invisible > 0 {
+                if !u.alive || !self.hostile(u.owner, s.owner) || u.carried_by.is_some() || u.invisible > 0 {
                     continue;
                 }
                 // Flyers are hit only by air weapons within their own reach.
@@ -2372,6 +2441,23 @@ impl World {
                 continue;
             }
             let at = u.cell();
+            // A captured priest of an ally, carried home: set free on the
+            // carrier's own island, healed, and safe from capture again.
+            if let Some(p) = u.carrying.filter(|&p| self.units.get(p).is_some_and(|p| !self.hostile(p.owner, u.owner))) {
+                let home = self.island_at(at).is_some_and(|i| self.island_owners.get(i).copied().flatten() == Some(u.owner));
+                if home {
+                    let (kind, owner) = (self.units[p].kind.clone(), self.units[p].owner);
+                    self.units[i].carrying = None;
+                    self.units[i].task = Task::Idle;
+                    let priest = &mut self.units[p];
+                    priest.carried_by = None;
+                    priest.stunned = false;
+                    priest.hp = priest.max_hp;
+                    priest.task = Task::Idle;
+                    self.emit(EventKind::PriestSaved, &kind, at, owner);
+                    continue;
+                }
+            }
             match u.task {
                 Task::Capture { priest } => {
                     let Some(p) = self.units.get(priest) else {
@@ -2391,8 +2477,9 @@ impl World {
                         self.units[priest].task = Task::Idle;
                         self.units[i].carrying = Some(priest);
                         self.units[i].task = Task::Idle;
-                        let (kind, owner) = (self.units[priest].kind.clone(), self.units[i].owner);
+                        let (kind, owner, whose) = (self.units[priest].kind.clone(), self.units[i].owner, self.units[priest].owner);
                         self.emit(EventKind::Pickup, &kind, pc, owner);
+                        self.emit(EventKind::PriestCaptured, &kind, pc, whose);
                     } else if !self.walk_next_to(i, pc) {
                         self.units[i].task = Task::Idle;
                     }
@@ -2653,7 +2740,7 @@ impl World {
             let hunts = attacker.as_ref().is_some_and(|a| a.hunts_transports);
             let mut best: Option<(i64, Target, Cell)> = None;
             for (j, t) in self.structures.iter().enumerate() {
-                if t.owner == owner || t.max_hp == 0 || t.distance_to(origin) > range {
+                if !self.hostile(t.owner, owner) || t.max_hp == 0 || t.distance_to(origin) > range {
                     continue;
                 }
                 let Ok(Some(key)) = scripts.air_target_priority(t.distance_to(at) as i64, false, false, hunts) else { continue };
@@ -2662,7 +2749,7 @@ impl World {
                 }
             }
             for (j, v) in self.units.iter().enumerate() {
-                if !v.alive || v.owner == owner || v.is_air || v.carried_by.is_some() || v.invisible > 0 || near(v.cell(), origin) > range {
+                if !v.alive || !self.hostile(v.owner, owner) || v.is_air || v.carried_by.is_some() || v.invisible > 0 || near(v.cell(), origin) > range {
                     continue;
                 }
                 let Ok(Some(key)) = scripts.air_target_priority(near(v.cell(), at) as i64, true, v.is_transport, hunts) else { continue };
@@ -3887,6 +3974,116 @@ mod tests {
         let (direct, splinters) = (10_000 - w.structures[struck].hp, 10_000 - w.structures[beside].hp);
         assert_eq!(direct, 400, "forty shots");
         assert!(splinters > 100 && splinters < 300, "about half of them splintered onto the neighbour: {splinters}");
+    }
+
+    #[test]
+    fn allies_are_spared_and_win_together() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 6, 6), 0);
+        w.push_island(IslandMap::rect(Cell::new(10, 0), 6, 6), 1);
+        w.push_island(IslandMap::rect(Cell::new(20, 0), 6, 6), 2);
+        for x in 6..10 {
+            w.place_bridge(Cell::new(x, 3));
+        }
+        w.powers = vec![10_000; 8];
+        w.cfg.combat.bursts.clear();
+        w.cfg.combat.shrapnel.clear();
+        let scripts = test_scripts();
+        let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, ..TypeRules::plain() };
+        let mine = w.spawn_unit_for(0, "priest", &priest, Cell::new(2, 2)).unwrap();
+        let friend = w.spawn_unit_for(1, "priest", &priest, Cell::new(12, 2)).unwrap();
+        let foe = w.spawn_unit_for(2, "priest", &priest, Cell::new(22, 2)).unwrap();
+        w.ally(0, 1);
+        assert!(!w.hostile(0, 1) && !w.hostile(1, 0) && w.hostile(0, 2) && w.hostile(1, 2));
+        // The friend's thrower on his island reaches my priest and the foe's.
+        let thrower = TypeRules { foot_x: 1, foot_y: 1, max_hit_points: 300, range: 40, hp_per_sec: 10, damage_per_shot: 10, delay_between_shots: 1.0, ..TypeRules::plain() };
+        w.drop_structure_for(1, "sunarcher", &thrower, Cell::new(11, 4)).unwrap();
+        for _ in 0..w.cfg.ticks(3.0) {
+            w.step(&scripts);
+        }
+        assert_eq!(w.units[mine].hp, 100, "an ally is not shot at");
+        assert!(w.units[foe].hp < 100, "the enemy is");
+        // An ally's priest cannot be captured unless the mission allows it.
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
+        let g = w.spawn_unit_for(0, "sunwalker", &golem, Cell::new(3, 3)).unwrap();
+        w.units[friend].stunned = true;
+        assert!(!w.order_capture(g, friend));
+        w.any_capture = true;
+        assert!(w.order_capture(g, friend));
+        // The foe's priest sacrificed: one side stands, both of us win.
+        w.units[foe].alive = false;
+        w.judge(2, Cell::new(22, 2));
+        assert_eq!(w.team_won(0), Some(true));
+        assert_eq!(w.team_won(1), Some(true));
+        let _ = friend;
+    }
+
+    #[test]
+    fn a_missions_gates_hold() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 12, 8), 0);
+        w.powers[0] = 10_000;
+        let scripts = test_scripts();
+        let temple = TypeRules { foot_x: 2, foot_y: 2, is_temple: true, may_drop_on_rim: true, ..TypeRules::plain() };
+        let t = w.drop_structure("residence", &temple, Cell::new(2, 2)).unwrap();
+        w.energy_enforced = true;
+        let tower = TypeRules { max_hit_points: 100, cost: 10, ..TypeRules::plain() };
+        w.tech_allowed = ["sunblocker".to_string()].into_iter().collect();
+        assert!(matches!(w.drop_structure("sunarcher", &tower, Cell::new(6, 4)), Err(DropError::NotAllowed)));
+        let b = w.drop_structure("sunblocker", &tower, Cell::new(6, 4)).unwrap();
+        w.deny_salvage = true;
+        assert!(w.salvage(b, &scripts).is_none(), "no salvaging in this mission");
+        w.deny_ascend = true;
+        assert!(w.upgrade_altar(0).is_err());
+        // The Temple at half health is said once.
+        w.take_events();
+        w.damage_structure(t, 1);
+        assert!(w.take_events().iter().all(|e| e.what != EventKind::TempleHalf), "one hit point is not half");
+        let s = &mut w.structures[t];
+        s.max_hp = 1000;
+        s.hp = 600;
+        w.damage_structure(t, 100);
+        assert_eq!(w.take_events().iter().filter(|e| e.what == EventKind::TempleHalf).count(), 1);
+        w.damage_structure(t, 100);
+        assert!(w.take_events().iter().all(|e| e.what != EventKind::TempleHalf), "said once");
+    }
+
+    #[test]
+    fn an_allys_priest_carried_home_is_set_free() {
+        let mut w = World::new(test_config());
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 10, 6), 0);
+        w.push_island(IslandMap::rect(Cell::new(14, 0), 6, 6), 1);
+        for x in 10..14 {
+            w.place_bridge(Cell::new(x, 2));
+        }
+        w.powers = vec![10_000; 8];
+        w.ally(0, 1);
+        w.any_capture = true;
+        let scripts = test_scripts();
+        let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, speed: 1.8, ..TypeRules::plain() };
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
+        let p = w.spawn_unit_for(1, "priest", &priest, Cell::new(16, 2)).unwrap();
+        let g = w.spawn_unit_for(0, "sunwalker", &golem, Cell::new(15, 3)).unwrap();
+        w.units[p].hp = 40;
+        w.units[p].stunned = true;
+        assert!(w.order_capture(g, p));
+        for _ in 0..w.cfg.ticks(3.0) {
+            w.step(&scripts);
+        }
+        assert_eq!(w.units[g].carrying, Some(p), "captured");
+        assert!(w.take_events().iter().any(|e| e.what == EventKind::PriestCaptured && e.owner == 1));
+        assert!(w.command_move(g, Cell::new(4, 2)));
+        let mut saved = false;
+        for _ in 0..w.cfg.ticks(20.0) {
+            w.step(&scripts);
+            saved |= w.take_events().iter().any(|e| e.what == EventKind::PriestSaved && e.owner == 1);
+            if saved {
+                break;
+            }
+        }
+        assert!(saved, "set free on my island");
+        let u = &w.units[p];
+        assert!(u.alive && u.carried_by.is_none() && !u.stunned && u.hp == u.max_hp);
     }
 
     #[test]

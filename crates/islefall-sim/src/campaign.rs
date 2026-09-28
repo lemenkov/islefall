@@ -176,11 +176,44 @@ pub fn fort_to_map(fortfile: &Fort, mission: Option<&Mission>, cfg: &Config, nam
             let shooter = techs.iter().find(|t| t.ends_with("cannon") || t.ends_with("archer")).cloned();
             let generator = techs.iter().find(|t| t.ends_with("battery")).cloned();
             let power = mission.and_then(|m| m.int(&format!("ai{number}startmoney")).or_else(|| m.int("aistartmoney"))).map(|p| p as i32).or(Some(fc.ai_power));
-            map.opponents.push(OpponentDef { owner: our as u8, target: None, shooter, generator, knowledge: Vec::new(), tech: techs, power });
+            let move_seconds = mission.and_then(|m| m.int(&format!("ai{number}timebetweenmoves")).or_else(|| m.int("aitimebetweenmoves"))).map(|s| s as f64);
+            let enemy = mission.and_then(|m| m.int(&format!("ai{number}enemy"))).and_then(|n| ours.get(&(n as u8)).copied());
+            map.opponents.push(OpponentDef { owner: our as u8, target: None, shooter, generator, knowledge: Vec::new(), tech: techs, power, move_seconds, enemy });
+        }
+        map.numbers.insert(our as u8, number);
+        if let Some(name) = mission.and_then(|m| m.get(&format!("ai{number}name")).or_else(|| if our > 0 { m.get("ainame") } else { None })) {
+            map.names.insert(our as u8, name.to_string());
+        }
+    }
+    // Alliances: `aiNAllyList` names the numbers N is allied with, and
+    // `aiAllyList` those every opponent is.
+    if let Some(m) = mission {
+        for (&number, &owner) in &ours {
+            let mut list = m.numbers(&format!("ai{number}allylist"));
+            if owner > 0 {
+                list.extend(m.numbers("aiallylist"));
+            }
+            for n in list {
+                if let Some(&other) = ours.get(&n) {
+                    if other != owner && !map.allies.contains(&[other, owner]) && !map.allies.contains(&[owner, other]) {
+                        map.allies.push([owner, other]);
+                    }
+                }
+            }
+        }
+        map.deny_salvage = m.int("denysalvage") == Some(1);
+        map.deny_ascend = m.int("denyascend") == Some(1);
+        map.any_capture = m.int("allowanycapture") == Some(1);
+        map.tech_allowed = m.tech_allowed();
+        if let Some((x, y)) = m.view_spot() {
+            map.camera = [x, y];
         }
     }
     if map.camera == [0, 0] {
         map.camera = [centre.x, centre.y];
+    }
+    if map.numbers.is_empty() {
+        map.numbers.insert(0, 1);
     }
     report.notes.push(format!("{} islands from the world table, {} fortresses seated {} cells round {:?}", map.islands.len() - n, n, radius, centre));
     (map, report)

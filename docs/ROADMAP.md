@@ -49,14 +49,15 @@ In the order that changes the game most.
    the figures marked "guess" in `RULES.md` (spell damage, heal range,
    explosion radius, upgrade cost, refresh times) can only be set this
    way. Every finding becomes a rules change, not a code change.
-2. **The campaign's scripting.** The flow is in; what the missions'
-   texts ask of the engine is not: lessons whose pages turn when the
-   player has done the step, the timed sections (`[@120]`), goals other
-   than the enemy priests (`Ai2PriestSaved`, `Ai3TempleDead`), allies
-   (`myAllyList`), the opponents' habits (`aiAbility`,
-   `aiTimeBetweenMoves`, `aiCollectors`), `techAllowed`, `denySalvage`
-   and `moreGeysers`. A mission also restarts the game; loading one in
-   place needs the world torn down and built again.
+2. **The campaign's scripting.** The flow, alliances, the timed
+   sections, the goals other than the enemy priests (a priest saved or
+   slain, a Temple halved or destroyed), the opponents' pace and
+   targets, `techAllowed`, `denySalvage` and `denyAscend` are in (see
+   `FORT.md`). Still to do: lessons whose pages turn when the player
+   has done the step, the opponents' habits (`aiAbility`,
+   `aiCollectors`, `aiGeyserAttachments`, `aiMoneyRechargeRate`),
+   `aiNoTemple` and `moreGeysers`. A mission also restarts the game;
+   loading one in place needs the world torn down and built again.
 3. **A start screen.** Map choice, name, server address and the campaign
    are all environment variables today. A menu in the game is the first
    thing a newcomer meets.
@@ -74,8 +75,7 @@ In the order that changes the game most.
    option until it passes. Cliff sides, rims, bridges and
    effects may follow.
 7. **The remaining art.** The island undersides' left and right edge
-   pieces are unused; the Spell icon in the original's overlay style;
-   the original's Storm Power stream animation from Workshop to shell.
+   pieces are unused; the Spell icon in the original's overlay style.
 
 ## Open questions about the original
 

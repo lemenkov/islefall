@@ -159,9 +159,16 @@ impl Mission {
         Page { text: plain_text(&markup), buttons, marks_done }
     }
 
-    /// The page named `name` (`A.`, `a1.`, with or without brackets).
+    /// The page named `name` (`A.`, `a1.`, with or without brackets), or
+    /// the section with that full name (`[ai2templehalf][ai2priestcaptured]`).
     pub fn page(&self, name: &str) -> Option<Page> {
-        let want = format!("[{}]", name.trim().trim_matches(|c| c == '[' || c == ']').to_ascii_lowercase());
+        let lower = name.trim().to_ascii_lowercase();
+        if lower.starts_with('[') && lower.ends_with(']') {
+            if let Some((_, b)) = self.sections.iter().find(|(n, _)| *n == lower) {
+                return Some(Mission::page_of(b));
+            }
+        }
+        let want = format!("[{}]", lower.trim_matches(|c| c == '[' || c == ']'));
         self.sections.iter().find(|(n, _)| *n == want).map(|(_, b)| Mission::page_of(b))
     }
 
@@ -187,6 +194,60 @@ impl Mission {
 
     pub fn get(&self, key: &str) -> Option<&str> {
         self.header.get(&key.to_ascii_lowercase()).map(String::as_str)
+    }
+
+    /// A page by one of its tags: the section whose name carries
+    /// `[tag]` (`[Succeeded][Ai2PriestSaved]` answers to both), with the
+    /// section's full name.
+    pub fn tagged(&self, tag: &str) -> Option<(String, Page)> {
+        let want = format!("[{}]", tag.trim().trim_matches(|c| c == '[' || c == ']').to_ascii_lowercase());
+        self.sections.iter().find(|(n, _)| n.contains(&want)).map(|(n, b)| (n.clone(), Mission::page_of(b)))
+    }
+
+    /// The pages shown so many seconds into play: `[@120]` sections.
+    pub fn timed_pages(&self) -> Vec<(u64, String)> {
+        self.sections
+            .iter()
+            .filter_map(|(n, _)| {
+                let inner = n.trim_matches(|c| c == '[' || c == ']');
+                inner.strip_prefix('@').and_then(|s| s.trim().parse().ok()).map(|secs| (secs, inner.to_string()))
+            })
+            .collect()
+    }
+
+    /// Where the view opens, from `<$ViewSpot,(139x88)>` in `[Init]`.
+    pub fn view_spot(&self) -> Option<(i32, i32)> {
+        let (_, body) = self.sections.iter().find(|(n, _)| n == "[init]")?;
+        let at = body.to_ascii_lowercase().find("<$viewspot,")?;
+        let rest = &body[at + 11..];
+        let inside = rest.trim_start().trim_start_matches('(');
+        let end = inside.find(')')?;
+        let (x, y) = inside[..end].split_once('x')?;
+        Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+    }
+
+    /// The player numbers listed under `key` (`ai2AllyList = "3;4"`, or a
+    /// bare number).
+    pub fn numbers(&self, key: &str) -> Vec<u8> {
+        self.get(key).map(|v| v.split([';', ',']).filter_map(|s| s.trim().parse().ok()).collect()).unwrap_or_default()
+    }
+
+    /// The types a mission allows: `techAllowed = "deny;all;allow;a;b"`
+    /// gives `a` and `b`; none when everything is allowed.
+    pub fn tech_allowed(&self) -> Vec<String> {
+        let Some(v) = self.get("techallowed") else { return Vec::new() };
+        let mut allow = false;
+        let mut out = Vec::new();
+        for word in v.split(';').map(|s| s.trim().to_ascii_lowercase()).filter(|s| !s.is_empty()) {
+            match word.as_str() {
+                "deny" => allow = false,
+                "allow" => allow = true,
+                "all" => {}
+                w if allow => out.push(w.to_string()),
+                _ => {}
+            }
+        }
+        out
     }
 
     pub fn int(&self, key: &str) -> Option<i64> {
@@ -232,6 +293,23 @@ impl Mission {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn tags_timed_pages_view_spot_lists_and_allowed_types_are_read() {
+        let m = Mission::parse(
+            "[Header]\nai2AllyList = \"1;3\"\ntechAllowed = \"deny;all;allow;windVortex;sunArcher\"\n[Init]\n<$ViewSpot,(139x88)>\n[A.]\nHello\n[@120]\nLater\n[Ai2TempleHalf][Ai2PriestCaptured]\nHelp\n[Succeeded][Ai2PriestSaved]\nWon\n[ai2PriestDead][Failed]\nLost\n[END]\n",
+        );
+        assert_eq!(m.numbers("ai2allylist"), vec![1, 3]);
+        assert_eq!(m.tech_allowed(), vec!["windvortex", "sunarcher"]);
+        assert_eq!(m.view_spot(), Some((139, 88)));
+        assert_eq!(m.timed_pages(), vec![(120, "@120".to_string())]);
+        assert_eq!(m.tagged("ai2templehalf").map(|(n, _)| n).as_deref(), Some("[ai2templehalf][ai2priestcaptured]"));
+        assert_eq!(m.tagged("Ai2PriestCaptured").map(|(n, _)| n).as_deref(), Some("[ai2templehalf][ai2priestcaptured]"));
+        assert!(m.tagged("ai2priestsaved").is_some_and(|(n, _)| n.contains("[succeeded]")));
+        assert!(m.tagged("ai2priestdead").is_some_and(|(n, _)| n.contains("[failed]")));
+        assert_eq!(m.page("[ai2templehalf][ai2priestcaptured]").map(|p| p.text.trim().to_string()).as_deref(), Some("Help"));
+        assert_eq!(m.page("@120").map(|p| p.text.trim().to_string()).as_deref(), Some("Later"));
+    }
+
     use super::*;
 
     #[test]

@@ -204,6 +204,12 @@ impl World {
             h.u64(*r as u64);
         }
         h.u64(self.pending_knowledge.len() as u64);
+        for (a, bs) in &self.allies {
+            h.u64(*a as u64);
+            for b in bs {
+                h.u64(*b as u64);
+            }
+        }
         // The dice: two worlds whose rolls diverged would hit differently.
         h.u64(self.dice.clone().random::<u64>());
         for k in &self.known_tech {

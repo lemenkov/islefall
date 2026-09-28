@@ -94,3 +94,25 @@ what decided it (`[Succeeded][BadTeamDead]`). The chapters are menus,
 difficulty (none easy, `1` normal, `2` hard). `fortdump campaign` prints
 the chapters, the missions and the scenario each plays on;
 `crates/islefall-data/src/mission.rs` and `campaign.rs` read them.
+
+What the header asks of the engine, as far as Islefall honours it: the
+player is number 1 and `aiN...` keys are the other seats. `aiNAllyList`
+(and `aiAllyList` for every computer player) names the numbers a seat is
+allied with, both ways: allies are not shot at, not captured, keep
+their bridges, and win together once no enemy stands (`[BadTeamDead]`).
+`aiNEnemy` is the seat an opponent goes for; without it, the nearest
+altar of anyone it is not allied with. `aiNTimeBetweenMoves` is the
+seconds between its moves, `aiNStartMoney` its Storm Power, `aiNTech`
+its Knowledge, `aiNName` the name on its island. `denySalvage`,
+`denyAscend` and `allowAnyCapture` gate salvaging, raising the Altar,
+and capturing an ally's priest (who, carried to your island, is set
+free); `techAllowed = "deny;all;allow;a;b"` limits what may be placed.
+`[Init]` may carry `<$ViewSpot,(x`x`y)>`, where the view opens.
+
+The text's triggers: a section `[@120]` is shown 120 seconds into play;
+`[AiNTempleDead]`, `[AiNTempleHalf]`, `[AiNPriestCaptured]`,
+`[AiNPriestSaved]` and `[AiNPriestDead]` are shown when that happens to
+seat N, and one carrying `[Succeeded]` or `[Failed]` as well decides
+the mission instead. Not read yet: `aiNAbility`, `aiNCollectors`,
+`aiNGeyserAttachments`, `aiMoneyRechargeRate`, `aiNoTemple`,
+`moreGeysers`, `myProd` and the seats' colours.

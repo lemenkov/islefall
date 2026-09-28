@@ -587,6 +587,12 @@ struct Campaign {
     /// Play has begun: the briefing was closed once. Pages opened after
     /// that are read while the world goes on.
     begun: bool,
+    /// The tick play began at, for the pages shown so many seconds in.
+    begun_tick: Option<u64>,
+    /// Trigger tags and timed pages already shown, each once.
+    fired: std::collections::BTreeSet<String>,
+    /// The page a trigger chose for the verdict, over the plain one.
+    verdict_page: Option<String>,
 }
 
 impl Campaign {
@@ -654,7 +660,7 @@ impl Campaign {
         let first = mission.pages().into_iter().next();
         // Said before the game's log is up, so said plainly.
         eprintln!("islefall: mission {stem} ({}) on {fort}; {} of {} missions done", mission.get("title").unwrap_or(""), done.len(), chapters.iter().map(|c| c.missions.len()).sum::<usize>());
-        Some(Campaign { stem, fort, mission, chapters, done, view: first.map(CampaignView::Page).unwrap_or(CampaignView::Closed), judged: false, begun: false })
+        Some(Campaign { stem, fort, mission, chapters, done, view: first.map(CampaignView::Page).unwrap_or(CampaignView::Closed), judged: false, begun: false, begun_tick: None, fired: Default::default(), verdict_page: None })
     }
 
     /// The mission after this one in the chapters' order.
@@ -714,10 +720,60 @@ fn campaign_panel(
     data: Res<GameData>,
     panels: Query<Entity, With<CampaignPanel>>,
     clicks: Query<(&Interaction, &CampaignButton), Changed<Interaction>>,
+    happenings: Res<Happenings>,
     mut shown: Local<Option<CampaignView>>,
     mut last_page: Local<Option<String>>,
 ) {
     let Some(c) = state.0.as_mut() else { return };
+    // What the mission's text watches for: an ally's or enemy's Temple
+    // halved or destroyed, a priest captured, saved or slain, and the
+    // seconds since play began. Each fires once: a page, or the verdict.
+    if let Some(w) = sim.world.as_ref() {
+        if c.begun && c.begun_tick.is_none() {
+            c.begun_tick = Some(w.tick);
+        }
+        let mut tags: Vec<String> = Vec::new();
+        for e in &happenings.0 {
+            let Some(&n) = data.map.numbers.get(&e.owner) else { continue };
+            use islefall_sim::EventKind as K;
+            let what = match e.what {
+                K::Destroyed if data.rules(&e.kind).is_temple => "templedead",
+                K::TempleHalf => "templehalf",
+                K::UnitLost if data.rules(&e.kind).is_priest => "priestdead",
+                K::PriestCaptured => "priestcaptured",
+                K::PriestSaved => "priestsaved",
+                _ => continue,
+            };
+            tags.push(format!("ai{n}{what}"));
+        }
+        if let Some(t0) = c.begun_tick {
+            let hz = data.cfg.sim.tick_hz as u64;
+            for (secs, name) in c.mission.timed_pages() {
+                if w.tick >= t0 + secs * hz {
+                    tags.push(name);
+                }
+            }
+        }
+        for tag in tags {
+            if !c.fired.insert(tag.clone()) {
+                continue;
+            }
+            let Some((section, _)) = c.mission.tagged(&tag) else { continue };
+            if section.contains("[succeeded]") || section.contains("[failed]") {
+                if !c.judged {
+                    let won = section.contains("[succeeded]");
+                    c.judged = true;
+                    c.verdict_page = Some(section);
+                    if won {
+                        c.mark_done();
+                    }
+                    c.view = CampaignView::Result(won);
+                }
+            } else {
+                c.view = CampaignView::Page(section);
+            }
+        }
+    }
     for (i, b) in &clicks {
         if *i != Interaction::Pressed {
             continue;
@@ -742,10 +798,12 @@ fn campaign_panel(
     // The verdict, once.
     if !c.judged {
         if let Some(w) = sim.world.as_ref() {
-            let won = w.winner == Some(player.id);
-            let lost = w.out.contains(&player.id) || w.winner.is_some_and(|o| o != player.id);
+            let won = w.team_won(player.id) == Some(true);
+            let lost = w.out.contains(&player.id) || w.team_won(player.id) == Some(false);
             if won || lost {
                 c.judged = true;
+                // The verdict that names the side ("[Succeeded][BadTeamDead]"), if any.
+                c.verdict_page = c.mission.tagged("badteamdead").filter(|(n, _)| n.contains(if won { "[succeeded]" } else { "[failed]" })).map(|(n, _)| n);
                 if won {
                     c.mark_done();
                 }
@@ -806,7 +864,7 @@ fn campaign_panel(
             (title, text, buttons)
         }
         CampaignView::Result(won) => {
-            let page = c.mission.result(*won).unwrap_or_default();
+            let page = c.verdict_page.as_ref().and_then(|p| c.mission.page(p)).or_else(|| c.mission.result(*won)).unwrap_or_default();
             let text = if page.text.is_empty() { if *won { "The mission is won.".to_string() } else { "The mission is lost.".to_string() } } else { page.text };
             let mut buttons = Vec::new();
             if *won {
@@ -2199,10 +2257,30 @@ fn setup_map(
             w.grant_tech(0, bit);
         }
     }
-    let altar = w.structures.iter().find(|s| s.is_altar && s.owner == 0).map(|s| s.centre()).unwrap_or(data.map.camera_cell());
+    for &[a, b] in &data.map.allies {
+        w.ally(a, b);
+    }
+    w.deny_salvage = data.map.deny_salvage;
+    w.deny_ascend = data.map.deny_ascend;
+    w.any_capture = data.map.any_capture;
+    w.tech_allowed = data.map.tech_allowed.iter().map(|t| t.to_ascii_lowercase()).collect();
+    let altar_of = |w: &World, owner: u8| w.structures.iter().find(|s| s.is_altar && s.owner == owner).map(|s| s.centre());
+    let altar = altar_of(&w, 0).unwrap_or(data.map.camera_cell());
     for op in &data.map.opponents {
-        let target = op.target.map(map::cell).unwrap_or(altar);
+        // Where it heads: the enemy the mission names, else the nearest
+        // altar of anyone it is not allied with, else the player's.
+        let own = altar_of(&w, op.owner);
+        let nearest = w
+            .structures
+            .iter()
+            .filter(|s| s.is_altar && w.hostile(s.owner, op.owner))
+            .min_by_key(|s| own.map(|o| (s.centre().x - o.x).abs() + (s.centre().y - o.y).abs()).unwrap_or(0))
+            .map(|s| s.centre());
+        let target = op.target.map(map::cell).or_else(|| op.enemy.and_then(|e| altar_of(&w, e))).or(nearest).unwrap_or(altar);
         let mut ai = Ai::new(op.owner, target, &data.cfg);
+        if let Some(secs) = op.move_seconds {
+            ai.every = data.cfg.ticks(secs).max(1);
+        }
         if let Some(sh) = &op.shooter {
             ai.shooter = sh.clone();
         }
@@ -3285,6 +3363,7 @@ fn overlays(
                 .iter()
                 .find(|p| p.id == owner)
                 .map(|p| p.name.clone())
+                .or_else(|| data.map.names.get(&owner).cloned().filter(|_| owner != player.id))
                 .unwrap_or_else(|| if owner == player.id { mine.clone() } else { format!("the {} tribe", theme_name(w.island_theme_at(altar.centre()))) });
             let label = format!("{name}   Level {}   Rank {}", w.altar_level(owner), w.rank(owner));
             let pos = cell_to_world(altar.centre(), g) + Vec2::new(0.0, hud.island_label_lift);

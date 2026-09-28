@@ -241,6 +241,12 @@ The sacrifice itself is instant on arrival, so there is no "mid-sacrifice"
 to interrupt: a carrier whose Altar falls first keeps the priest and
 waits for orders.
 
+A mission may make players allies (`docs/FORT.md`): allies are never
+targets, their shields let each other's shots through, their acid and
+arcs spare each other, and they win together when no enemy stands.
+A captured priest of an ally, carried to the carrier's own island, is
+set free there, healed.
+
 Islefall: a priest at or below half health is stunned and takes no orders.
 The manual has him throw a protective shield round himself that keeps him
 from being destroyed: with `priest.stun_shield` a stunned priest takes no

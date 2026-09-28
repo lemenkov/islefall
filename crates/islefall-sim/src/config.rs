@@ -937,6 +937,12 @@ pub struct SoundEvents {
     pub learned: SoundCue,
     pub casting: SoundCue,
     pub cast: SoundCue,
+    #[serde(default)]
+    pub priest_captured: SoundCue,
+    #[serde(default)]
+    pub priest_saved: SoundCue,
+    #[serde(default)]
+    pub temple_half: SoundCue,
 }
 
 impl SoundEvents {
@@ -965,6 +971,9 @@ impl SoundEvents {
             EventKind::Learned => &self.learned,
             EventKind::Casting => &self.casting,
             EventKind::Cast => &self.cast,
+            EventKind::PriestCaptured => &self.priest_captured,
+            EventKind::PriestSaved => &self.priest_saved,
+            EventKind::TempleHalf => &self.temple_half,
         }
     }
 }

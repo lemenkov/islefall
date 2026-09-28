@@ -4,6 +4,7 @@
 //! Map files: the islands, bridges, structures, units and opponents a
 //! scene starts with, loaded from TOML.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,25 @@ pub struct MapDef {
     pub units: Vec<UnitDef>,
     #[serde(default)]
     pub opponents: Vec<OpponentDef>,
+    /// Pairs of owners allied with each other.
+    #[serde(default)]
+    pub allies: Vec<[u8; 2]>,
+    /// A name for an owner's island label (a mission's `aiNName`).
+    #[serde(default)]
+    pub names: BTreeMap<u8, String>,
+    /// A mission's player numbers (`ai2` is 2) by owner, for its triggers.
+    #[serde(default)]
+    pub numbers: BTreeMap<u8, u8>,
+    /// A mission's gates (see `World`): no salvaging, no raising the
+    /// Altar, an ally's priest may be captured, only these types placed.
+    #[serde(default)]
+    pub deny_salvage: bool,
+    #[serde(default)]
+    pub deny_ascend: bool,
+    #[serde(default)]
+    pub any_capture: bool,
+    #[serde(default)]
+    pub tech_allowed: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -105,6 +125,12 @@ pub struct OpponentDef {
     /// Storm Power it starts with instead of the map's.
     #[serde(default)]
     pub power: Option<i32>,
+    /// Seconds between its moves instead of the rules'.
+    #[serde(default)]
+    pub move_seconds: Option<f64>,
+    /// The owner it goes for; without one, the nearest enemy.
+    #[serde(default)]
+    pub enemy: Option<u8>,
 }
 
 #[derive(Debug, Error)]
