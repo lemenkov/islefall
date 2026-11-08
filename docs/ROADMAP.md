@@ -22,7 +22,8 @@ production, the Unit Rate and the stream that builds shells; shooters,
 cannons, turrets, air attack bases and their attackers, barricades, the
 Cloud Floater's dodge; priests, stunning, capture, sacrifice, Knowledge
 by choice, Altar levels and Rank; Obelisks and all the Spells, Summons
-included; computer opponents that bridge, drop and harvest.
+included; computer opponents that capture and sacrifice priests,
+bridge, drop and harvest.
 
 **Game.** A start screen chooses the NetStorm and data folders and the
 campaign, local map or online game, checking them before play. Bevy renders

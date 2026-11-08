@@ -95,10 +95,11 @@ island lies to the east, Rain and Thunder islands far to the south, each
 with its Workshop, Temple, shooters, Generator, tower, barricade, air base,
 walker and High Priest.
 
-The three computer players bridge towards your altar and drop shooters on
-the way. The islands are close enough for the cannons to reach their
-neighbours, so the fight is on from the start, though your home island
-lies just outside every reach. Sacrifice the enemy High Priest to win.
+The three computer players bridge towards your altar, drop shooters on the
+way, and carry off any priest they stun. The islands are close enough for
+the cannons to reach their neighbours, so the fight is on from the start,
+though your home island lies just outside every reach. Sacrifice the
+enemy High Priest to win.
 
 ## The campaign
 

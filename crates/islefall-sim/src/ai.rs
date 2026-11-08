@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Peter Lemenkov <lemenkov@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-//! A simple opponent: grows bridges from its own ground towards a target
-//! and drops shooters at its bridge ends. Deterministic: it only looks at
-//! the world and its own piece queue.
+//! A simple opponent: grows bridges from its own ground towards a target,
+//! drops shooters at its bridge ends, and takes a stunned enemy priest to
+//! its Altar. Deterministic: it only looks at the world and its own piece
+//! queue.
 
 use crate::config::Config;
 use crate::grid::Cell;
@@ -45,6 +46,10 @@ pub enum AiMove {
     Shooter { kind: String, at: Cell },
     /// A generator dropped so that a later shooter has Energy.
     Generator { kind: String, at: Cell },
+    /// A Transport was sent to take a stunned or floating priest.
+    Capture { unit: usize, priest: usize },
+    /// A Transport carrying a priest was sent to an Altar.
+    Sacrifice { unit: usize, altar: usize },
     /// A drop was tried and refused; why, for the log.
     Refused { kind: String, why: String },
     /// A sacrifice was spent: a type name, or "upgrade" for the Altar.
@@ -82,6 +87,14 @@ impl Ai {
         }
         self.ticks = 0;
         self.moves += 1;
+        // A priest already in hand is worth more than any new work; then a
+        // priest who can be picked up is worth more than harvesting.
+        if let Some(m) = self.carry_priest_to_altar(world) {
+            return Some(m);
+        }
+        if let Some(m) = self.capture_a_priest(world) {
+            return Some(m);
+        }
         self.send_idle_transports_harvesting(world);
         self.keep_in_production(world, kit, scripts);
         let m = if self.moves % self.shooter_every == 0 { self.drop_battle_unit(world, kit) } else { AiMove::Nothing };
@@ -89,6 +102,74 @@ impl Ai {
             return Some(m);
         }
         Some(self.extend_bridge(world))
+    }
+
+    /// Send a Transport carrying a priest to the nearest finished Altar of
+    /// its owner. Altars are tried nearest first, then next move if the
+    /// path is blocked.
+    fn carry_priest_to_altar(&self, world: &mut World) -> Option<AiMove> {
+        let carriers: Vec<usize> = world
+            .units
+            .iter()
+            .enumerate()
+            .filter(|(_, u)| u.alive && u.owner == self.owner && u.is_transport && u.carrying.is_some() && !matches!(u.task, Task::Sacrifice { .. }))
+            .map(|(i, _)| i)
+            .collect();
+        if carriers.is_empty() {
+            return None;
+        }
+        let altars: Vec<usize> = world.structures.iter().enumerate().filter(|(_, s)| s.is_altar && s.owner == self.owner && s.complete()).map(|(i, _)| i).collect();
+        for u in carriers {
+            let at = world.units[u].cell();
+            let mut altars = altars.clone();
+            altars.sort_by_key(|&a| (Self::distance(at, world.structures[a].centre()), a));
+            for altar in altars {
+                if world.order_sacrifice(u, altar) {
+                    return Some(AiMove::Sacrifice { unit: u, altar });
+                }
+            }
+        }
+        None
+    }
+
+    /// Find an idle Transport and a stunned enemy priest (or a floating
+    /// priest, if the Transport flies) and send the closest pair together.
+    fn capture_a_priest(&self, world: &mut World) -> Option<AiMove> {
+        let priests: Vec<usize> = world
+            .units
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.alive && p.is_priest && p.carried_by.is_none() && p.invisible == 0 && world.hostile(p.owner, self.owner) && (p.stunned || p.floating))
+            .map(|(i, _)| i)
+            .collect();
+        if priests.is_empty() {
+            return None;
+        }
+        let transports: Vec<usize> = world
+            .units
+            .iter()
+            .enumerate()
+            .filter(|(_, u)| u.alive && u.owner == self.owner && u.is_transport && u.carrying.is_none() && u.carried_by.is_none() && !u.stunned && u.task == Task::Idle && !u.is_moving())
+            .map(|(i, _)| i)
+            .collect();
+        let mut pairs = Vec::new();
+        for &unit in &transports {
+            let at = world.units[unit].cell();
+            for &priest in &priests {
+                let p = &world.units[priest];
+                if !p.stunned && !(p.floating && world.units[unit].is_air) {
+                    continue;
+                }
+                pairs.push((Self::distance(at, p.cell()), unit, priest));
+            }
+        }
+        pairs.sort_by_key(|&(distance, unit, priest)| (distance, unit, priest));
+        for (_, unit, priest) in pairs {
+            if world.order_capture(unit, priest) {
+                return Some(AiMove::Capture { unit, priest });
+            }
+        }
+        None
     }
 
     /// Keep the shooter and the generator in production wherever a
@@ -111,7 +192,7 @@ impl Ai {
             .units
             .iter()
             .enumerate()
-            .filter(|(_, u)| u.alive && u.owner == self.owner && u.is_transport && u.task == Task::Idle && !u.is_moving())
+            .filter(|(_, u)| u.alive && u.owner == self.owner && u.is_transport && u.carrying.is_none() && u.task == Task::Idle && !u.is_moving())
             .map(|(i, _)| i)
             .collect();
         for u in idle {
@@ -292,6 +373,82 @@ mod tests {
         assert!(closest < 14, "bridge got within {closest} of the target");
         assert!(w.bridge_owners.values().all(|&o| o == 1));
         assert!(w.structures.iter().any(|s| s.owner == 1 && s.kind == "sunarcher"));
+    }
+
+    #[test]
+    fn opponent_captures_a_stunned_priest_and_sacrifices_him() {
+        let mut cfg = test_config();
+        cfg.ai.move_seconds = 1.0 / cfg.sim.tick_hz as f64;
+        let mut ai = Ai::new(1, Cell::new(8, 3), &cfg);
+        let mut w = World::new(cfg);
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 14, 8), 1);
+        w.powers[1] = 1000;
+        w.energy_enforced = false;
+        let altar = TypeRules { foot_x: 3, foot_y: 3, is_altar: true, may_drop_on_rim: true, max_hit_points: 1000, cost: 500, ..TypeRules::plain() };
+        let a = w.drop_structure_for(1, "dais", &altar, Cell::new(8, 3)).unwrap();
+        let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, threat: 25, speed: 1.8, ..TypeRules::plain() };
+        let p = w.spawn_unit_for(0, "priest", &priest, Cell::new(11, 5)).unwrap();
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
+        let g = w.spawn_unit_for(1, "sunwalker", &golem, Cell::new(1, 5)).unwrap();
+        let scripts = test_scripts();
+        assert!(!w.units[p].stunned);
+        w.damage_unit(p, 50);
+        w.step(&scripts);
+        assert!(w.units[p].stunned, "half health stuns the priest");
+        let kit = AiKit { shooter: ("sunarcher".into(), TypeRules::plain()), generator: ("sunbattery".into(), TypeRules::plain()) };
+        let (mut captured, mut sacrificed) = (false, false);
+        for _ in 0..2000 {
+            w.step(&scripts);
+            match ai.tick(&mut w, &kit, &scripts) {
+                Some(AiMove::Capture { priest, .. }) if priest == p => captured = true,
+                Some(AiMove::Sacrifice { altar, .. }) if altar == a => sacrificed = true,
+                _ => {}
+            }
+            if !w.units[p].alive {
+                break;
+            }
+        }
+        assert!(captured, "the opponent went for the stunned priest");
+        assert!(sacrificed, "and carried him to its finished Altar");
+        assert!(!w.units[p].alive, "the priest was sacrificed");
+        assert_eq!(w.units[g].carrying, None);
+    }
+
+    #[test]
+    fn a_flying_transport_takes_a_floating_priest() {
+        use crate::unit::Pos;
+        let cfg = test_config();
+        let ai = Ai::new(1, Cell::new(4, 4), &cfg);
+        let mut w = World::new(cfg);
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 14, 8), 1);
+        let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, speed: 1.8, ..TypeRules::plain() };
+        let p = w.spawn_unit_for(0, "priest", &priest, Cell::new(11, 5)).unwrap();
+        w.units[p].floating = true;
+        w.units[p].pos = Pos::cell_centre(Cell::new(20, 5), w.subcell());
+        let balloon = TypeRules { is_unit: true, is_air: true, is_transport: true, max_hit_points: 150, speed: 4.0, ..TypeRules::plain() };
+        let b = w.spawn_unit_for(1, "sunballoon", &balloon, Cell::new(1, 5)).unwrap();
+        assert_eq!(ai.capture_a_priest(&mut w), Some(AiMove::Capture { unit: b, priest: p }));
+        assert_eq!(w.units[b].task, Task::Capture { priest: p });
+    }
+
+    #[test]
+    fn opponent_leaves_a_healthy_priest_alone() {
+        let mut cfg = test_config();
+        cfg.ai.move_seconds = 1.0 / cfg.sim.tick_hz as f64;
+        let mut ai = Ai::new(1, Cell::new(4, 4), &cfg);
+        let mut w = World::new(cfg);
+        w.push_island(IslandMap::rect(Cell::new(0, 0), 14, 8), 1);
+        let priest = TypeRules { is_unit: true, is_priest: true, max_hit_points: 100, speed: 1.8, ..TypeRules::plain() };
+        let p = w.spawn_unit_for(0, "priest", &priest, Cell::new(11, 5)).unwrap();
+        let golem = TypeRules { is_unit: true, is_transport: true, max_hit_points: 50, speed: 3.0, ..TypeRules::plain() };
+        w.spawn_unit_for(1, "sunwalker", &golem, Cell::new(1, 5)).unwrap();
+        let scripts = test_scripts();
+        let kit = AiKit { shooter: ("sunarcher".into(), TypeRules::plain()), generator: ("sunbattery".into(), TypeRules::plain()) };
+        for _ in 0..300 {
+            w.step(&scripts);
+            assert!(!matches!(ai.tick(&mut w, &kit, &scripts), Some(AiMove::Capture { .. })));
+        }
+        assert!(w.units[p].alive && w.units[p].carrying == None);
     }
 
     #[test]

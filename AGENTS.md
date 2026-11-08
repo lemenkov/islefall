@@ -168,9 +168,10 @@ Use `docs/ROADMAP.md` as the source of truth; this is only a quick orientation.
 - The start screen is a separate Bevy app in `start.rs`; it validates the
   choices and re-executes the program with explicit environment variables.
   Keep the direct-launch variables and `ISLEFALL_START=0` working for scripts.
-- The computer opponent is still simple: it bridges, drops shooters and
-  generators, and harvests. It does not capture or sacrifice priests, use
-  spells or air units, upgrade, or play defensively.
+- The computer opponent captures and sacrifices stunned priests when a
+  Transport and Altar are at hand, but is still simple: it bridges, drops
+  shooters and generators, and harvests. It does not use spells or air
+  units, upgrade, or play defensively.
 - Campaign scripting still lacks step-triggered lesson pages and several
   header keys (`aiAbility`, `aiCollectors`, `aiGeyserAttachments`,
   `aiMoneyRechargeRate`, `aiNoTemple`, `moreGeysers`, `myProd`, seat

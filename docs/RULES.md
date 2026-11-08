@@ -500,14 +500,18 @@ is not known; the diagonal with a ragged front is Islefall's.
 A computer player follows the same rules as you: its drops cost Storm
 Power and need Knowledge, Energy at the site and a Workshop with the type
 in production; its structures are built by streams. Every `ai.move_seconds`
-it sends idle Transports harvesting, keeps its shooter and generator in
-production at any Workshop it owns, and either drops a shooter at the open
-end nearest its target (every `shooter_every`th move), drops a generator
-at the nearest site with Energy when every shooter site lacked it, or lays
-the bridge piece from its own queue that brings it closest to its target.
-An opponent without a Workshop only bridges and harvests. A map may give
-an opponent its own `shooter` and `generator`, so a Wind opponent drops
-Crossbows and Wind Generators.
+it first carries a captured priest to its nearest finished Altar, then
+sends the nearest idle Transport after a stunned enemy priest (or a
+floating one, if the Transport flies), then sends idle Transports
+harvesting, keeps its shooter and generator in production at any Workshop
+it owns, and either drops a shooter at the open end nearest its target
+(every `shooter_every`th move), drops a generator at the nearest site with
+Energy when every shooter site lacked it, or lays the bridge piece from its
+own queue that brings it closest to its target. An opponent without a
+Workshop does no production; without a Transport it cannot take a priest,
+and can only bridge and harvest. A map may give an opponent its own
+`shooter` and `generator`, so a Wind opponent drops Crossbows and Wind
+Generators.
 
 ## Ownership
 

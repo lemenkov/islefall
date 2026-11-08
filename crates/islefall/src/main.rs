@@ -2445,6 +2445,8 @@ fn sim_step(mut sim: ResMut<Sim>, viewer: Res<Viewer>, data: Res<GameData>, mut 
             Some(AiMove::Piece { name, at }) => info!("opponent {} lays a {name} piece at {at:?}", ai.owner),
             Some(AiMove::Shooter { kind, at }) => info!("opponent {} drops a {kind} at {at:?}", ai.owner),
             Some(AiMove::Generator { kind, at }) => info!("opponent {} drops a {kind} for Energy at {at:?}", ai.owner),
+            Some(AiMove::Capture { unit, priest }) => info!("opponent {} sends unit {unit} for priest {priest}", ai.owner),
+            Some(AiMove::Sacrifice { unit, altar }) => info!("opponent {} sends unit {unit} carrying a priest to altar {altar}", ai.owner),
             Some(AiMove::Refused { kind, why }) => info!("opponent {} could not drop a {kind}: {why}", ai.owner),
             Some(AiMove::Knowledge { choice }) => info!("opponent {} spends a sacrifice on {choice}", ai.owner),
             _ => {}
