@@ -12,11 +12,11 @@ and OpenTTD use their original games' assets. See `NOTICE`. Some of the
 picture is Islefall's own: the islands' ground and undersides are
 generated (see Generated art).
 
-Status: early development. The demo map is playable against three
-computer players, the original's campaign scenarios load, and players
-can meet over a network with a lobby, and the campaign can be played
-mission after mission. There is no start screen yet; `docs/ROADMAP.md`
-says what works and what comes next.
+Status: early development. A start screen chooses the game, the demo map
+is playable against three computer players, the original's campaign
+scenarios load, players can meet over a network with a lobby, and the
+campaign can be played mission after mission. `docs/ROADMAP.md` says what
+works and what comes next.
 
 ## Building
 
@@ -36,31 +36,44 @@ cargo run --features dynamic_linking
 
 ## Running
 
-Point `NETSTORM_DIR` at the directory that contains the game's `d/` folder
-and `netstorm.tarc`:
-
 ```sh
-NETSTORM_DIR=~/games/NetStorm cargo run --release
+cargo run --release
 ```
 
-This opens the `demo` map. Everything else is chosen through environment
-variables:
+opens the start screen. Choose the NetStorm folder (the directory holding
+`d/` and `netstorm.tarc`) and the data folder, then a campaign, a local map
+or an online server; set the difficulty, map, player name and server
+address there. The screen checks the folders before it starts the game.
+`NETSTORM_DIR`, `ISLEFALL_DATA`, `ISLEFALL_MAP`, `ISLEFALL_NAME` and
+`ISLEFALL_JOIN` prefill it.
+
+A direct launch skips the screen: setting `ISLEFALL_MAP`,
+`ISLEFALL_CAMPAIGN`, `ISLEFALL_MISSION` or `ISLEFALL_JOIN`, or choosing
+`ISLEFALL_MODE=viewer`, starts the game at once. Direct launches need
+`NETSTORM_DIR`, as do scripts:
+
+```sh
+NETSTORM_DIR=~/games/NetStorm ISLEFALL_MAP=demo cargo run --release
+```
+
+The rest of the environment still adjusts a run:
 
 | Variable | Effect |
 |----------|--------|
-| `NETSTORM_DIR` | The NetStorm installation (required). |
-| `ISLEFALL_DATA` | Rules, scripts and maps directory (default `data/`); see `docs/MODDING.md`. |
-| `ISLEFALL_MAP` | A map from `maps/` (`demo`, `range`); a name that is no file loads that campaign scenario from the archive (`capturethepriest`, `bridgethegap`, ...; see `docs/FORT.md`); `random` or `random:<seed>` makes a battlefield up. |
-| `ISLEFALL_CAMPAIGN` | `1`: go on with the campaign at the first mission not done yet (see The campaign); `0` or empty leaves it off. It overrides `ISLEFALL_MAP`. |
-| `ISLEFALL_MISSION` | Play that mission (`tutorial1`, `thewarbegins`, ...); `fortdump campaign` lists them. |
+| `NETSTORM_DIR` | The NetStorm installation; prefilled in the start screen, required for a direct launch. |
+| `ISLEFALL_DATA` | Rules, scripts and maps directory (default `data/`); prefilled in the start screen; see `docs/MODDING.md`. |
+| `ISLEFALL_START` | `0` skips the start screen; `1` opens it even when a direct launch variable is set. |
+| `ISLEFALL_MAP` | A map from `maps/` (`demo`, `range`); a name that is no file loads that campaign scenario from the archive (`capturethepriest`, `bridgethegap`, ...; see `docs/FORT.md`); `random` or `random:<seed>` makes a battlefield up. A direct launch. |
+| `ISLEFALL_CAMPAIGN` | `1`: go on with the campaign at the first mission not done yet (see The campaign); `0` or empty leaves it off. It overrides `ISLEFALL_MAP`. A direct launch. |
+| `ISLEFALL_MISSION` | Play that mission (`tutorial1`, `thewarbegins`, ...); `fortdump campaign` lists them. A direct launch. |
 | `ISLEFALL_DIFFICULTY` | `easy`, `normal` (the default) or `hard`, for the campaign's later chapters. |
 | `ISLEFALL_POWER` | Start with this much Storm Power, whatever the map or mission grants. |
 | `ISLEFALL_PLAYERS` | How many players a random map is made for. |
 | `ISLEFALL_MAP_EXPORT` | Writes whatever map was loaded as a map file of our own (`file.toml`). |
-| `ISLEFALL_MODE` | `viewer` browses the sprites instead of playing (see below). |
+| `ISLEFALL_MODE` | `viewer` browses the sprites instead of playing (see below). A direct launch. |
 | `ISLEFALL_CAMERA` | Start looking at cell `x,y`. |
 | `ISLEFALL_ZOOM` | Starting zoom (1 is source pixels, smaller is further away). |
-| `ISLEFALL_SCREENSHOT` | Save a screenshot to this file after start-up, after `ISLEFALL_SCREENSHOT_AT` seconds. |
+| `ISLEFALL_SCREENSHOT` | Save a screenshot to this file after start-up, after `ISLEFALL_SCREENSHOT_AT` seconds; it works on the start screen too. |
 | `ISLEFALL_PALETTE` | Palette file stem from `d/` (default `gifcloud`, the game's fixed 8-bit palette). |
 | `ISLEFALL_VOLUME` | `0` silences a run. |
 | `ISLEFALL_RECORD` / `ISLEFALL_REPLAY` | Record every command to a file, or play such a file back. |
@@ -288,7 +301,7 @@ real files.
 |------|------|
 | `crates/islefall-data` | Loaders for the original data files: sprite cache, palettes, the `netstorm.tarc` archive, its `.type` unit definitions and `.fort` scenarios. No engine dependency. |
 | `crates/islefall-sim` | The deterministic simulation: grid, islands, units, rules, commands, replays and map generation. No engine dependency. |
-| `crates/islefall` | The game binary, built on Bevy; doubles as a sprite viewer. |
+| `crates/islefall` | The game binary, built on Bevy: start screen, game and sprite viewer. |
 | `crates/islefall-net`, `crates/islefall-server` | The wire protocol and the relay server. |
 | `crates/islefall-art` | Generated art: pictures made from a seed (an island's ground and its rocky underside), and `artgen` to write them as PNG. No engine dependency. |
 | `data/` | The game's own rules, scripts and maps; nothing from NetStorm. |

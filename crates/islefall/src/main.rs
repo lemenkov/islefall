@@ -7,7 +7,9 @@
 //! for parameters, `scripts/rules.rhai` for decision hooks, `maps/*.toml`
 //! for scenes. Nothing about the game is hardcoded here.
 //!
-//! Two modes, chosen with `ISLEFALL_MODE`:
+//! Without a direct launch, a start screen asks for the NetStorm and data
+//! folders and how to play; `ISLEFALL_START=0` skips it. The game itself has
+//! two modes, chosen with `ISLEFALL_MODE`:
 //! - `island` (default): the map from `ISLEFALL_MAP` (default `demo`),
 //!   driven by the simulation. Left-click selects a unit, sends the selected
 //!   unit somewhere, on a Storm Geyser sets it harvesting, on a stunned enemy
@@ -35,12 +37,16 @@
 //! - `ISLEFALL_CAMERA=x,y`: start the camera centred on that cell.
 //! - `ISLEFALL_ZOOM=z`: start at that zoom instead of the rules' (1 is
 //!   source pixels, smaller is further away).
+//! - `ISLEFALL_START`: `0` skips the start screen, `1` opens it even when
+//!   `ISLEFALL_MAP`, `ISLEFALL_CAMPAIGN`, `ISLEFALL_MISSION` or
+//!   `ISLEFALL_JOIN` would launch directly.
 //!
 //! Keys in both modes: `Space` pauses, `P` saves a screenshot.
 
 mod fire;
 mod shatter;
 mod sprites;
+mod start;
 mod world;
 
 use std::collections::HashMap;
@@ -1384,6 +1390,10 @@ fn fail(msg: impl std::fmt::Display) -> ! {
 }
 
 fn main() {
+    if start::requested() {
+        start::run();
+        return;
+    }
     let dir = match std::env::var_os("NETSTORM_DIR") {
         Some(d) => PathBuf::from(d),
         None => fail("NETSTORM_DIR is not set; point it at a NetStorm installation (the directory holding d/ and netstorm.tarc)"),

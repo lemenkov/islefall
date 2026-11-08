@@ -4,7 +4,7 @@ Where Islefall stands and where it goes next. The rules a feature follows
 are in `RULES.md`; how to change them is in `MODDING.md`; the network
 design is in `NETWORK.md`. Dates are when the work landed.
 
-## What works (September 2026)
+## What works (November 2026)
 
 **Data.** Every original file the game needs is read at run time from a
 NetStorm installation: the sprite cache and palettes, the `netstorm.tarc`
@@ -24,10 +24,12 @@ Cloud Floater's dodge; priests, stunning, capture, sacrifice, Knowledge
 by choice, Altar levels and Rank; Obelisks and all the Spells, Summons
 included; computer opponents that bridge, drop and harvest.
 
-**Game.** Bevy renders the original's art with its undersides, turrets,
-projectiles, effects, sounds and sky; the sidebar follows the original's
-Production window; the controls follow the original's pick-up and drop.
-Snapshots save and load; replays record every command.
+**Game.** A start screen chooses the NetStorm and data folders and the
+campaign, local map or online game, checking them before play. Bevy renders
+the original's art with its undersides, turrets, projectiles, effects,
+sounds and sky; the sidebar follows the original's Production window; the
+controls follow the original's pick-up and drop. Snapshots save and load;
+replays record every command.
 
 **Network.** Lockstep over a relay server with hash checks, a lobby, and
 rejoining a running game under the same name.
@@ -38,7 +40,7 @@ grants, opens on its briefing, turns its pages, judges the end by the
 High Priests and offers the next mission, remembering what is done.
 
 **Project.** Apache-2.0 code, CC-BY-4.0 content, REUSE-compliant, an
-emblem, and over a hundred tests across the crates.
+emblem, and over a hundred and fifty tests across the crates.
 
 ## Next
 
@@ -58,23 +60,20 @@ In the order that changes the game most.
    `aiCollectors`, `aiGeyserAttachments`, `aiMoneyRechargeRate`),
    `aiNoTemple` and `moreGeysers`. A mission also restarts the game;
    loading one in place needs the world torn down and built again.
-3. **A start screen.** Map choice, name, server address and the campaign
-   are all environment variables today. A menu in the game is the first
-   thing a newcomer meets.
-4. **Late joining.** A player may only come back under a name that
+3. **Late joining.** A player may only come back under a name that
    left. Joining a running game as a new player needs a free slot, a
    home island and Storm Power for them.
-5. **Packaging.** A desktop file with the emblem (Wayland shows no
+4. **Packaging.** A desktop file with the emblem (Wayland shows no
    window icon without one), a release build workflow, and continuous
    integration running the tests, `reuse lint`, formatting and clippy.
-6. **Art of our own.** `crates/islefall-art` generates an island's
+5. **Art of our own.** `crates/islefall-art` generates an island's
    underside and its ground from a seed. Both passed beside the
    original and are the default (`fringe.generated` and
    `generated_ground`; `F4` and `F3` switch back to the original's art
    in the game; see `ART.md`). Step by step: each new piece stays an
    option until it passes. Cliff sides, rims, bridges and
    effects may follow.
-7. **The remaining art.** The island undersides' left and right edge
+6. **The remaining art.** The island undersides' left and right edge
    pieces are unused; the Spell icon in the original's overlay style.
 
 ## Open questions about the original

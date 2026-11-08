@@ -49,7 +49,7 @@ ignored and must stay that way.
 |------|---------|
 | `crates/islefall-data` | Loaders and decoders for NetStorm's SHP, COL, GIF, TARC, `.type`, `.fort` and mission files. No engine dependency. |
 | `crates/islefall-sim` | Deterministic simulation: maps, islands, bridges, units, structures, economy, combat, priests, spells, AI, commands, replays, snapshots, campaign conversion. |
-| `crates/islefall` | Bevy client, sidebar/HUD, input, rendering, audio, campaign/briefing UI, lobby, viewer mode. |
+| `crates/islefall` | Bevy client: start screen, sidebar/HUD, input, rendering, audio, campaign/briefing UI, lobby, viewer mode. |
 | `crates/islefall-net` | Versioned wire protocol and framing. |
 | `crates/islefall-server` | TCP lockstep relay server; currently runs no simulation. |
 | `crates/islefall-art` | Seed-generated art (ground, rock, fire, explosions, islets) and the `artgen` binary. |
@@ -88,11 +88,14 @@ when touching loaders or campaign conversion:
 NETSTORM_DIR=~/games/NetStorm cargo test --workspace --no-fail-fast
 ```
 
-The game and tools need the installation:
+The game and tools need the installation. With no direct launch variable the
+binary opens the start screen; `ISLEFALL_MAP` (or `ISLEFALL_CAMPAIGN`,
+`ISLEFALL_MISSION`, `ISLEFALL_JOIN` or viewer mode) skips it:
 
 ```sh
-NETSTORM_DIR=~/games/NetStorm cargo run --release
+NETSTORM_DIR=~/games/NetStorm ISLEFALL_MAP=demo cargo run --release
 NETSTORM_DIR=~/games/NetStorm ISLEFALL_CAMPAIGN=1 cargo run --release
+ISLEFALL_START=0 NETSTORM_DIR=~/games/NetStorm cargo run --release
 cargo run --release -p islefall-server
 
 cargo run -p islefall-data --bin shpdump -- stats "$NETSTORM_DIR/d/_shapes.shp"
@@ -105,7 +108,7 @@ cargo run -p islefall-art --bin artgen -- ground --width 384 --height 132 --seed
 screenshot variables instead of leaving a window running:
 
 ```sh
-NETSTORM_DIR=~/games/NetStorm ISLEFALL_SCREENSHOT=/tmp/shot.png \
+NETSTORM_DIR=~/games/NetStorm ISLEFALL_MAP=demo ISLEFALL_SCREENSHOT=/tmp/shot.png \
   ISLEFALL_SCREENSHOT_AT=2 cargo run --release
 ```
 
@@ -162,8 +165,9 @@ NetStorm into the repository. The original installation stays external.
 
 Use `docs/ROADMAP.md` as the source of truth; this is only a quick orientation.
 
-- There is no start screen; map, campaign, name, server and data path are
-  environment variables.
+- The start screen is a separate Bevy app in `start.rs`; it validates the
+  choices and re-executes the program with explicit environment variables.
+  Keep the direct-launch variables and `ISLEFALL_START=0` working for scripts.
 - The computer opponent is still simple: it bridges, drops shooters and
   generators, and harvests. It does not capture or sacrifice priests, use
   spells or air units, upgrade, or play defensively.
